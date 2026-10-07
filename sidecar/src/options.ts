@@ -26,3 +26,17 @@ export function switchboardOptions(cfg: SidecarConfig, configFile: string, packa
       : { keypairPath: join(secrets, "app.keypair.json"), baseUrl: renownUrl },
   };
 }
+
+/**
+ * The packages as the Switchboard is given them. Windows: the directory without its drive letter, with forward
+ * slashes (`/Users/…`). Upstream takes a package for a path only when it is absolute (switchboard's isFsPath)
+ * or starts with "/" or "." (reactor-api's HTTP routes, resolvePackageName): `C:\…` fails the second check —
+ * the engine crashed with "is not a package name and not a path" — and a relative `../…` fails the package
+ * manager's loaders. A rooted path is absolute on the current drive, the drive of the engine's working folder;
+ * an engine on another drive keeps its drive letter.
+ */
+export function packageSpecs(dirs: readonly string[], cwd: string, platform: NodeJS.Platform = process.platform): string[] {
+  if (platform !== "win32") return [...dirs];
+  const drive = (p: string) => /^([a-zA-Z]):/.exec(p)?.[1]?.toUpperCase();
+  return dirs.map((dir) => (drive(dir) !== undefined && drive(dir) === drive(cwd) ? dir.slice(2).replaceAll("\\", "/") : dir));
+}

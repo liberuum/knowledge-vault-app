@@ -74,7 +74,13 @@ child.on("exit", (code) => {
   console.log(`[smoke] exit ${code} after ${((Date.now() - started) / 1000).toFixed(1)} s${process.platform === "linux" ? `; peak memory ${(peak / 1024).toFixed(0)} MB` : ""}`);
   const store = process.platform === "darwin" ? join(home, "Library", "Application Support", "io.github.liberuum.knowledge-vault-app", "vault") : join(env.XDG_DATA_HOME, "io.github.liberuum.knowledge-vault-app", "vault");
   console.log(`[smoke] engine store created: ${existsSync(join(store, "reactor"))}`);
-  if (code !== 0) console.log(out.split("\n").slice(-30).join("\n"));
+  if (code !== 0) {
+    const lines = out.split("\n");
+    // the app's own output (WebKit, GTK, GLib, the shell) apart from the engine's, which would push it out of view
+    const app = lines.filter((l) => l.trim() && !l.startsWith("[sidecar]") && !l.startsWith("[converter]") && !l.startsWith("[smoke]"));
+    console.log(`[smoke] the app's own output (${app.length} lines, last 60):\n${app.slice(-60).join("\n")}`);
+    console.log(`[smoke] the engine's last lines:\n${lines.filter((l) => l.startsWith("[sidecar]")).slice(-15).join("\n")}`);
+  }
   rmSync(home, { recursive: true, force: true });
   process.exit(code === 0 && verdict?.includes("ok") ? 0 : 1);
 });

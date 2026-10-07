@@ -10,7 +10,7 @@ import { bindLoopbackOnly } from "./loopback.js";
 import { checkRemoteVault, parseRemoteVaultInput, readRemoteVaults, RemoteInputError, writeRemoteVaults } from "./remote.js";
 import { prepareDataDir } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
-import { switchboardOptions } from "./options.js";
+import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
   // a listen() for its port that names no host is bound to loopback (see loopback.ts).
   bindLoopbackOnly(cfg.port);
   const { startSwitchboard } = await import("@powerhousedao/switchboard/server");
-  const options = switchboardOptions(cfg, configFile, PACKAGE_DIRS, renownUrl);
+  const options = switchboardOptions(cfg, configFile, packageSpecs(PACKAGE_DIRS, process.cwd()), renownUrl);
   const switchboard = await startSwitchboard(options);
   // The SDK writes the keypair world-readable; it is a secret.
   if (existsSync(options.identity.keypairPath)) chmodSync(options.identity.keypairPath, 0o600);
