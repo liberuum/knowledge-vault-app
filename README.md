@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-landing.png" alt="The Knowledge Vault landing view: three vaults shown as tiles, each with a small map of its notes and links" width="900" />
+  <img src="assets/screenshot-landing.png" alt="Knowledge Vault on macOS: the landing view with three vaults shown as tiles, each with a small map of its notes and links" width="900" />
 </p>
 
 ## What it is

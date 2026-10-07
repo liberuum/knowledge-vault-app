@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitToBox, generativeConstellation, layoutConstellation } from "./constellation.js";
+import { fitToBox, generativeConstellation, layoutConstellation } from "./constellation-layout.js";
 
 const ids = ["a", "b", "c", "d", "e", "f"];
 const edges: [string, string][] = [["a", "b"], ["b", "c"], ["c", "d"], ["a", "e"], ["e", "f"]];

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { VaultGraphSample } from "../api/graph.js";
-import { fitToBox, generativeConstellation, layoutConstellation, type Pt } from "./constellation.js";
+import { fitToBox, generativeConstellation, layoutConstellation, type Pt } from "./constellation-layout.js";
 import { positionsFor, type XY } from "./saved-layout.js";
 
 type Props = {

@@ -1,5 +1,5 @@
 import type { FullGraph, GraphNodeLite } from "../api/graph.js";
-import { fitToBox } from "./constellation.js";
+import { fitToBox } from "./constellation-layout.js";
 import type { XY } from "./saved-layout.js";
 
 /** The whole graph as the vault app laid it out, fitted to a tile — the real shape, no simulation. */
