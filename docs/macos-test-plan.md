@@ -54,6 +54,11 @@ bun run build:app      # src-tauri/target/release/bundle/dmg/*.dmg and bundle/ma
 bun run smoke:app      # starts the built app on a throwaway data folder: engine ready, page served, clean stop
 ```
 
+While `build:app` makes the `.dmg`, it mounts a temporary volume (`dmg.XXXXXX`) and opens a Finder window on it to
+lay out the icons. Leave that window alone: dragging the app out of it copies an incomplete app (Finder error -43, or
+an engine that fails with *Cannot find package*) and makes the build fail with *Resource busy*. `CI=true bun run
+build:app` skips the Finder step, as the release workflow does.
+
 Open the `.dmg` and drag **Knowledge Vault** to Applications. The app is ad-hoc signed, not notarised: the first time
 you open it, macOS blocks it — go to **System Settings › Privacy & Security** and choose **Open Anyway**.
 
