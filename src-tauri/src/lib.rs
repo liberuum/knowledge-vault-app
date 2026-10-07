@@ -1,6 +1,7 @@
 mod backoff;
 mod config;
 mod download;
+mod engine_archive;
 mod host_server;
 mod log_tail;
 mod navigation;
@@ -307,8 +308,11 @@ pub fn run() {
                     return Err("could not find the repository from the launch directory".into());
                 }
             };
-            let sidecar =
-                SidecarLaunch::for_build(packaged, &app.path().resource_dir()?, &repo_dir);
+            let resource_dir = app.path().resource_dir()?;
+            let archive = packaged
+                .then(|| engine_archive::archived_engine(&resource_dir))
+                .flatten();
+            let sidecar = SidecarLaunch::for_build(packaged, &resource_dir, &repo_dir);
             let paths = AppPaths { data_dir, sidecar };
             let ports = Ports {
                 host: host_port,
@@ -322,13 +326,49 @@ pub fn run() {
                     ],
                 ),
             };
-            spawn_sidecar(
-                &handle,
-                &paths,
-                ports,
-                new_control_token(),
-                env!("CARGO_PKG_VERSION"),
-            )?;
+            if let Some(archive) = archive {
+                // Windows ships the engine as one archive (the installer's 260-character path limit): it is
+                // unpacked once per version, off the main thread, while the page shows the engine starting.
+                let base = app.path().app_local_data_dir()?.join("engine");
+                sidecar::set_preparing(&handle, true);
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    match engine_archive::unpack(&archive, &base, env!("CARGO_PKG_VERSION")) {
+                        Ok(root) => {
+                            let paths = AppPaths {
+                                data_dir: paths.data_dir,
+                                sidecar: SidecarLaunch::at(root),
+                            };
+                            sidecar::set_preparing(&h, false);
+                            if let Err(e) = spawn_sidecar(
+                                &h,
+                                &paths,
+                                ports,
+                                new_control_token(),
+                                env!("CARGO_PKG_VERSION"),
+                            ) {
+                                sidecar::report_fatal(&h, "engine-start", e.to_string());
+                            }
+                        }
+                        Err(e) => sidecar::report_fatal(
+                            &h,
+                            "engine-unpack",
+                            format!(
+                                "The engine could not be unpacked into {}: {e}",
+                                base.display()
+                            ),
+                        ),
+                    }
+                });
+            } else {
+                spawn_sidecar(
+                    &handle,
+                    &paths,
+                    ports,
+                    new_control_token(),
+                    env!("CARGO_PKG_VERSION"),
+                )?;
+            }
             if std::env::var("KV_SMOKE").as_deref() == Ok("1") {
                 let h = handle.clone();
                 std::thread::spawn(move || smoke::watch(h, host_port));

@@ -7,7 +7,7 @@ by CI (see the end).
 
 ## 1. Build the macOS installers on GitHub (what a tagged release does)
 
-A release runs when a version tag is pushed, and builds Linux, macOS (Apple silicon and Intel) and Windows. To check
+A release runs when a version tag is pushed, and builds Linux, macOS (Apple silicon) and Windows. To check
 the macOS builds **without publishing anything**, run the same workflow by hand:
 
 1. On GitHub, open **Actions › Release › Run workflow**, keep **Publish** unticked, and choose **Run workflow**.
@@ -15,7 +15,7 @@ the macOS builds **without publishing anything**, run the same workflow by hand:
    jobs also run the smoke test (`node scripts/smoke-app.mjs`): the built app must start its engine, serve its page
    and stop cleanly.
 3. The installers are attached to a **draft** release (Releases page, visible only to maintainers): download the
-   `.dmg` for your Mac (`aarch64` for Apple silicon, `x64` for Intel) and install it as in step 3 below.
+   `.dmg` (`aarch64`, Apple silicon) and install it as in step 3 below.
 
 A manual run with Publish unticked never makes the release public; delete the draft afterwards. A real release is
 `git tag v0.1.0 && git push origin v0.1.0` once everything here passes.

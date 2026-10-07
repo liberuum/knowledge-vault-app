@@ -86,7 +86,7 @@ A release is made on purpose: bump the version in `package.json`, `src-tauri/Car
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The release workflow builds Linux, macOS (Apple silicon and Intel) and Windows installers into a draft release,
+The release workflow builds Linux, macOS (Apple silicon) and Windows installers into a draft release,
 checks them, and publishes the release only when every build succeeded. To test the builds without releasing, run it
 by hand (**Actions › Release › Run workflow**, Publish unticked): the installers land in a draft release that stays
 private. Pushes to

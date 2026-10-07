@@ -6,6 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { packEngine } from "./lib/pack-engine.mjs";
 import { prune } from "./lib/prune.mjs";
 
 const arg = (name) => {
@@ -69,4 +70,12 @@ console.log(`[stage] .stage/sidecar for ${triple}: ${(bytes / 1e6).toFixed(0)} M
 if (links.length) {
   console.error(`[stage] ${links.length} symlink(s) would ship (they break outside this machine): ${links.slice(0, 5).join(", ")}`);
   process.exit(1);
+}
+// 4. Windows: one archive instead of the deep tree (the installer builder's 260-character path limit);
+//    tauri.windows.conf.json ships .stage/engine.tar and the app unpacks it on first launch.
+rmSync(join(stage, "engine.tar"), { force: true });
+if (triple.includes("windows")) {
+  const t1 = Date.now();
+  const file = packEngine(stage);
+  console.log(`[stage] .stage/engine.tar: ${(lstatSync(file).size / 1e6).toFixed(0)} MB in ${((Date.now() - t1) / 1000).toFixed(1)} s`);
 }

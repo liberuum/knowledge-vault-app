@@ -11,7 +11,10 @@ use tauri::{AppHandle, Manager};
 
 use crate::sidecar::SidecarState;
 
-const DEADLINE: Duration = Duration::from_secs(90);
+/// 90 s, or KV_SMOKE_SECS: a first launch on Windows also unpacks the engine (engine_archive.rs).
+fn deadline(secs: Option<&str>) -> Duration {
+    Duration::from_secs(secs.and_then(|s| s.parse().ok()).unwrap_or(90))
+}
 
 /// Set when the host page called `host_loaded` over IPC.
 #[derive(Default)]
@@ -37,6 +40,7 @@ pub fn host_answers(port: u16) -> bool {
 
 pub fn watch(app: AppHandle, host_port: u16) {
     let started = Instant::now();
+    let limit = deadline(std::env::var("KV_SMOKE_SECS").ok().as_deref());
     loop {
         let ready = app
             .state::<Mutex<SidecarState>>()
@@ -54,11 +58,11 @@ pub fn watch(app: AppHandle, host_port: u16) {
             crate::quit(&app);
             return;
         }
-        if started.elapsed() > DEADLINE {
+        if started.elapsed() > limit {
             eprintln!(
                 "[smoke] failed: engine ready = {ready}, page reached the shell = {loaded}, host answering = {} after {} s",
                 host_answers(host_port),
-                DEADLINE.as_secs()
+                limit.as_secs()
             );
             crate::sidecar::stop_sidecar_blocking(&app);
             app.exit(1);
@@ -70,6 +74,19 @@ pub fn watch(app: AppHandle, host_port: u16) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_deadline_is_90_seconds_unless_kv_smoke_secs_says_otherwise() {
+        assert_eq!(super::deadline(None), std::time::Duration::from_secs(90));
+        assert_eq!(
+            super::deadline(Some("300")),
+            std::time::Duration::from_secs(300)
+        );
+        assert_eq!(
+            super::deadline(Some("soon")),
+            std::time::Duration::from_secs(90)
+        );
+    }
+
     use super::host_answers;
     use std::io::{Read, Write};
     use std::net::TcpListener;

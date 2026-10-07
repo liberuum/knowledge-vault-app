@@ -51,6 +51,8 @@ pub struct SidecarState {
     /// Set while a delayed respawn is pending.
     pub delay_ms: Option<u64>,
     pub fatal: Option<FatalInfo>,
+    /// Windows' first launch of a version: the engine is being unpacked (engine_archive.rs); shown as starting.
+    pub preparing: bool,
     pub crashes: CrashWindow,
     pub tail: LogTail,
     pub log: Option<RotatingLog>,
@@ -71,6 +73,7 @@ impl Default for SidecarState {
             attempt: 0,
             delay_ms: None,
             fatal: None,
+            preparing: false,
             crashes: CrashWindow::new(120_000),
             tail: LogTail::new(50),
             log: None,
@@ -198,7 +201,30 @@ fn snapshot(app: &AppHandle) -> SidecarStatus {
         st.stopping,
     );
     status.log_tail = st.tail.lines();
+    if st.preparing && status.state == "exited" {
+        status.state = "starting";
+    }
     status
+}
+
+/// Windows: the engine is being unpacked before its first start (shown as starting), or no longer is.
+pub fn set_preparing(app: &AppHandle, preparing: bool) {
+    app.state::<Mutex<SidecarState>>().lock().unwrap().preparing = preparing;
+    emit_status(app);
+}
+
+/// The engine could not be started at all (e.g. its archive would not unpack): the page shows the reason.
+pub fn report_fatal(app: &AppHandle, reason: &str, message: String) {
+    {
+        let st = app.state::<Mutex<SidecarState>>();
+        let mut st = st.lock().unwrap();
+        st.preparing = false;
+        st.fatal = Some(FatalInfo {
+            reason: reason.to_string(),
+            message,
+        });
+    }
+    emit_status(app);
 }
 
 fn emit_status(app: &AppHandle) {

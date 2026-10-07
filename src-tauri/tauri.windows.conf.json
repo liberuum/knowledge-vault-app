@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../.stage/sidecar/": null,
+      "../.stage/engine.tar": "engine.tar"
+    }
+  }
+}

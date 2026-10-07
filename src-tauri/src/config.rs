@@ -82,6 +82,15 @@ pub struct SidecarLaunch {
 }
 
 impl SidecarLaunch {
+    /// The installed engine unpacked from its archive (Windows), run with the bundled Node.
+    pub fn at(root: PathBuf) -> Self {
+        SidecarLaunch {
+            main: root.join("dist").join("main.js"),
+            cwd: root,
+            bundled_node: true,
+        }
+    }
+
     pub fn for_build(packaged: bool, resource_dir: &Path, repo_dir: &Path) -> Self {
         let root = if packaged {
             resource_dir.join("sidecar")

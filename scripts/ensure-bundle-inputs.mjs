@@ -4,6 +4,7 @@
 // empty, marked placeholder stands in for the engine — `bun run build:app` always stages it for real.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { create } from "tar";
 import { join, resolve } from "node:path";
 
 const triple = /host: (\S+)/.exec(execFileSync("rustc", ["-vV"], { encoding: "utf8" }))[1];
@@ -15,4 +16,9 @@ if (!existsSync(stage)) {
   mkdirSync(stage, { recursive: true });
   writeFileSync(join(stage, "PLACEHOLDER.txt"), "Not a staged engine. Run `node scripts/stage-sidecar.mjs` (bun run build:app does).\n");
   console.log("[bundle-inputs] .stage/sidecar is a placeholder (development build)");
+}
+// Windows ships the engine as .stage/engine.tar (tauri.windows.conf.json): a placeholder archive of the placeholder.
+if (triple.includes("windows") && !existsSync(resolve(".stage", "engine.tar"))) {
+  create({ file: resolve(".stage", "engine.tar"), cwd: resolve(".stage"), sync: true, portable: true }, ["sidecar"]);
+  console.log("[bundle-inputs] .stage/engine.tar is a placeholder (development build)");
 }
