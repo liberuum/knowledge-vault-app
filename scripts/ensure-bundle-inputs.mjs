@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const triple = /host: (\S+)/.exec(execFileSync("rustc", ["-vV"], { encoding: "utf8" }))[1];
-if (!existsSync(resolve("src-tauri", "binaries", `kv-node-${triple}`))) {
+if (!existsSync(resolve("src-tauri", "binaries", `kv-node-${triple}${triple.includes("windows") ? ".exe" : ""}`))) {
   execFileSync(process.execPath, ["scripts/fetch-node.mjs", "--target", triple], { stdio: "inherit" });
 }
 const stage = resolve(".stage", "sidecar");

@@ -102,7 +102,10 @@ jobs:
             node scripts/release-notes.mjs
             echo "NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
-      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+      - id: bundle
+        # macOS: hdiutil fails now and then on GitHub's runners (Resource busy); one retry below
+        continue-on-error: ${{ runner.os == 'macOS' }}
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -112,6 +115,19 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true # public only after every target passed (publish job)
           prerelease: true # until the builds are signed
+      - name: Retry the macOS bundle once (verbose, so a second failure says why)
+        if: runner.os == 'macOS' && steps.bundle.outcome == 'failure'
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bun run tauri
+          tagName: ${{ needs.preflight.outputs.tag }}
+          releaseName: Knowledge Vault ${{ needs.preflight.outputs.tag }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true # public only after every target passed (publish job)
+          prerelease: true # until the builds are signed
+          args: --verbose
       - name: The .deb installs nothing into /usr/bin but the app's own binaries
         if: runner.os == 'Linux'
         run: node scripts/check-deb.mjs src-tauri/target/release/bundle/deb/*.deb

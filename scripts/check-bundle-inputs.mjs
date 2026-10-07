@@ -7,7 +7,8 @@ import { resolve } from "node:path";
 const triple = process.env.TAURI_ENV_TARGET_TRIPLE || /host: (\S+)/.exec(execFileSync("rustc", ["-vV"], { encoding: "utf8" }))[1];
 const problems = [];
 if (existsSync(resolve(".stage/sidecar/PLACEHOLDER.txt")) || !existsSync(resolve(".stage/sidecar/dist/main.js"))) problems.push(".stage/sidecar is not a staged engine — run `node scripts/stage-sidecar.mjs`");
-if (!existsSync(resolve(`src-tauri/binaries/kv-node-${triple}`))) problems.push(`src-tauri/binaries/kv-node-${triple} is missing — run \`node scripts/fetch-node.mjs --target ${triple}\``);
+const node = `src-tauri/binaries/kv-node-${triple}${triple.includes("windows") ? ".exe" : ""}`;
+if (!existsSync(resolve(node))) problems.push(`${node} is missing — run \`node scripts/fetch-node.mjs --target ${triple}\``);
 if (problems.length) {
   console.error(`[bundle] refusing to build an installer:\n  ${problems.join("\n  ")}`);
   process.exit(1);

@@ -8,7 +8,7 @@ const ALLOWED = new Set(["knowledge-vault-app", "kv-node"]);
 /** dpkg-deb where it exists (Debian, Ubuntu, CI); elsewhere the .deb's data archive read with ar + tar. */
 function listing(deb) {
   try {
-    return execFileSync("dpkg-deb", ["-c", deb], { encoding: "utf8" });
+    return execFileSync("dpkg-deb", ["-c", deb], { encoding: "utf8", maxBuffer: 1 << 28 });
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     const members = execFileSync("ar", ["t", deb], { encoding: "utf8" }).split("\n");
