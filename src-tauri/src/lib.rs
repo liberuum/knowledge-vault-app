@@ -7,6 +7,7 @@ mod navigation;
 mod sidecar;
 mod smoke;
 mod tray;
+pub mod webkit_env;
 
 use config::{
     AppPaths, DEFAULT_PORTS, Ports, SidecarLaunch, UiConfig, new_control_token,
