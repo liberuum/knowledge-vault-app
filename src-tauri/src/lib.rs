@@ -110,7 +110,7 @@ pub fn run() {
     // home, never the app's own folder (src-tauri/ in development, /usr/bin for the .deb). Not
     // inside an AppImage: its WebKit finds its helper processes relative to the working directory
     // (`././/lib/webkit2gtk-4.1/…`) and aborts at start without it; there the file dialog comes
-    // from the desktop's portal (below), a process of its own that opens in the user's home anyway.
+    // from the desktop's portal (webkit_env.rs), a process of its own that opens in the user's home anyway.
     if moves_to_home(
         std::env::var_os("APPIMAGE").as_deref(),
         std::env::var_os("APPDIR").as_deref(),
@@ -118,13 +118,7 @@ pub fn run() {
     {
         let _ = std::env::set_current_dir(home);
     }
-    // Linux: the desktop's own file dialog (xdg-desktop-portal) rather than GTK's built-in one;
-    // GTK falls back to its own when no portal runs. Set before GTK starts, while single-threaded.
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("GTK_USE_PORTAL").is_none() {
-        // SAFETY: no other thread exists yet.
-        unsafe { std::env::set_var("GTK_USE_PORTAL", "1") };
-    }
+    // Linux: GTK_USE_PORTAL (the desktop's own file dialog) is set in main(), see webkit_env.rs.
     let builder = tauri::Builder::default()
         // First: a second launch hands over to this one and exits (spec §9 — one engine per store).
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
