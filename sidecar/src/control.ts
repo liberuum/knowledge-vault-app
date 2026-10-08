@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { GATEWAY_PATH } from "./gateway/gateway.js";
+import { openAiError } from "./gateway/errors.js";
 import { allowedHost } from "./loopback.js";
 import { callbackPage, createOAuthStore } from "./oauth.js";
 import type { AccessToken, IdentityStatus } from "./identity.js";
@@ -28,6 +30,10 @@ export type StatusPayload = {
 };
 export type ControlDeps = {
   token: string;
+  /** The model gateway (gateway/gateway.ts): the chat and the pipelines' only way to the AI model. */
+  gateway: { handle(req: IncomingMessage, res: ServerResponse, body: Buffer, cors: Record<string, string>): Promise<void> };
+  /** A second bearer the gateway accepts: the pipelines' connections hold it (the control token changes every launch). */
+  gatewayKey: string;
   hostOrigin: string;
   status: () => StatusPayload;
   listVaults: () => Promise<VaultSummary[]>;
@@ -206,7 +212,7 @@ export function createControlServer(deps: ControlDeps) {
         res.setHeader("access-control-allow-origin", allowed);
         res.setHeader("vary", "Origin");
         res.setHeader("access-control-allow-methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-        res.setHeader("access-control-allow-headers", "authorization,content-type");
+        res.setHeader("access-control-allow-headers", "authorization,content-type,x-kv-priority");
       }
       res.end();
       return;
@@ -218,6 +224,15 @@ export function createControlServer(deps: ControlDeps) {
       const code = new URL(req.url ?? "/", "http://control").searchParams.get("code");
       const ok = !!code && oauth.receive(decodeURIComponent(callback[1]!), code);
       res.writeHead(ok ? 200 : 404, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(callbackPage(ok));
+      return;
+    }
+    if (new URL(req.url ?? "/", "http://control").pathname.startsWith(`${GATEWAY_PATH}/`)) {
+      if (!tokenMatches(req.headers.authorization, deps.token) && !tokenMatches(req.headers.authorization, deps.gatewayKey)) {
+        return send(res, 401, openAiError(401, "Unauthorized"), allowed);
+      }
+      const chunks: Buffer[] = [];
+      if (req.method === "POST") for await (const c of req) chunks.push(c as Buffer);
+      await deps.gateway.handle(req, res, Buffer.concat(chunks), allowed ? { "access-control-allow-origin": allowed, vary: "Origin" } : {});
       return;
     }
     if (!tokenMatches(req.headers.authorization, deps.token)) return send(res, 401, { error: "Unauthorized" }, allowed);

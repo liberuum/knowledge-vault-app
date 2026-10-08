@@ -12,6 +12,7 @@ import { prepareDataDir } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
 import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
+import { createGateway } from "./gateway/gateway.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
 import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion } from "./settings.js";
@@ -276,7 +277,11 @@ async function main(): Promise<void> {
 
   // The port the control server actually binds (it falls back upward when the configured one is busy).
   let boundControlPort = cfg.controlPort;
+  const gatewayKey = ensureSecret(join(cfg.dataDir, "secrets", "gateway.key"));
+  const gateway = createGateway({ readSettings: () => readSettings(cfg.dataDir), readModelKey: () => readModelKey(cfg.dataDir) });
   const control = createControlServer({
+    gateway,
+    gatewayKey,
     fillConnection: fillConnectionHere,
     token: cfg.controlToken,
     hostOrigin: cfg.hostOrigin,

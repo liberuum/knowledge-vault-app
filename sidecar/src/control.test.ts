@@ -27,7 +27,8 @@ let scheduled: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
 let settingsPatches: unknown[] = [];
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+let gatewayCalls: Array<{ url: string; body: string }> = [];
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; gatewayCalls = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -38,6 +39,8 @@ async function start() {
 async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]> {
   return ({
     token: "secret",
+    gatewayKey: "gw-key",
+    gateway: { handle: async (req, res, body, cors) => { gatewayCalls.push({ url: req.url ?? "", body: body.toString() }); res.writeHead(200, { "content-type": "application/json", ...cors }).end('{"ok":true}'); } },
     hostOrigin: "http://127.0.0.1:4200",
     status: () => ({ ok: true, port: 4201, controlPort: 0, appVersion: "0.1.0", protected: false, dataDir: "/data/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" }),
     listVaults: async () => vaults,
@@ -484,5 +487,24 @@ describe("settings changes reach the pipelines", () => {
     expect((await fetch(`${base}/oauth/result/${started.nonce}`, { headers: h })).status).toBe(404);
     expect((await fetch(`${base}/oauth/callback/unknown?code=x`)).status).toBe(404);
     expect((await fetch(`${base}/oauth/start`, { method: "POST" })).status).toBe(401);
+  });
+});
+
+describe("model gateway route", () => {
+  it("takes the control token or the gateway key, and nothing else", async () => {
+    const base = await start();
+    const post = (auth: string) => fetch(`${base}/llm/v1/chat/completions`, { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: '{"messages":[]}' });
+    expect((await post("Bearer secret")).status).toBe(200);
+    expect((await post("Bearer gw-key")).status).toBe(200);
+    expect((await post("Bearer nope")).status).toBe(401);
+    expect(gatewayCalls).toEqual([
+      { url: "/llm/v1/chat/completions", body: '{"messages":[]}' },
+      { url: "/llm/v1/chat/completions", body: '{"messages":[]}' },
+    ]);
+  });
+  it("lets the app's page send the priority header", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/llm/v1/chat/completions`, { method: "OPTIONS", headers: { origin: "http://127.0.0.1:4200" } });
+    expect(res.headers.get("access-control-allow-headers")).toContain("x-kv-priority");
   });
 });
