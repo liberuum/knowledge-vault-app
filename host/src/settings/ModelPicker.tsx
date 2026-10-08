@@ -29,6 +29,8 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // Typing filters the list; opening it by click or focus shows everything, with the current model highlighted.
+  const [typed, setTyped] = useState(false);
   const listId = useId();
   const root = useRef<HTMLDivElement>(null);
 
@@ -61,7 +63,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
 
   const groups = useMemo<Group[]>(() => {
     if (!catalog?.ok) return [];
-    const matching = filterModels(catalog.models, value);
+    const matching = filterModels(catalog.models, typed ? value : "");
     const recommended = recommendedModels(matching);
     const free = freeModels(matching);
     const seen = new Set([...recommended, ...free].map((m) => m.id));
@@ -71,14 +73,23 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
     if (free.length) out.push({ label: "Free", models: free });
     if (rest.length) out.push({ label: recommended.length || free.length ? "All models" : "Models", models: rest.slice(0, 200) });
     return out;
-  }, [catalog, value]);
+  }, [catalog, value, typed]);
   const flat = useMemo(() => groups.flatMap((g) => g.models), [groups]);
 
-  useEffect(() => setActive(0), [value, open]);
+  useEffect(() => {
+    const current = typed ? -1 : flat.findIndex((m) => m.id === value);
+    setActive(current >= 0 ? current : 0);
+  }, [value, open, typed, flat]);
 
   const choose = (m: CatalogModel) => {
     onChange(m.id);
+    setTyped(false);
     setOpen(false);
+  };
+  const show = () => {
+    if (!catalog?.ok) return;
+    setTyped(false);
+    setOpen(true);
   };
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!catalog?.ok) return;
@@ -117,9 +128,11 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
+          setTyped(true);
           if (catalog?.ok) setOpen(true);
         }}
-        onFocus={() => catalog?.ok && setOpen(true)}
+        onFocus={show}
+        onClick={show}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         disabled={disabled}
@@ -132,7 +145,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
       />
       {open && catalog?.ok && (
         <div className="kv-picker-list" role="listbox" id={listId} aria-label="Models">
-          {flat.length === 0 && <p className="kv-picker-empty">No model matches “{value}”. You can still save what you typed.</p>}
+          {flat.length === 0 && typed && <p className="kv-picker-empty">No model matches “{value}”. You can still save what you typed.</p>}
           {groups.map((g) => (
             <div key={g.label} role="group" aria-label={g.label}>
               <p className="kv-picker-group">{g.label}</p>
@@ -152,6 +165,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => choose(m)}
                     onMouseEnter={() => setActive(i)}
+                    ref={i === active ? (el) => el?.scrollIntoView?.({ block: "nearest" }) : undefined}
                   >
                     <span className="kv-picker-id">{m.id}</span>
                     <span className="kv-picker-meta">

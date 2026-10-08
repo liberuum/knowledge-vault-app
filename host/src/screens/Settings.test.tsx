@@ -146,8 +146,15 @@ describe("Settings", () => {
     expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("openai/gpt-6-luna");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByText(/OpenAI: GPT-6 Luna · 400k context · \$1.25 \/ \$10 per M tokens/)).toBeTruthy();
+    // clicking the field again shows the whole list, not just the chosen model, with it highlighted — so another can be picked without clearing
+    fireEvent.click(screen.getByLabelText("Model (required for processing)"));
+    const reopened = within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option");
+    expect(reopened).toHaveLength(4);
+    expect(reopened.find((o) => o.textContent?.includes("openai/gpt-6-luna"))?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: /google\/gemini-3-flash/ }));
+    expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("google/gemini-3-flash");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" } }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { endpoint: "https://openrouter.ai/api/v1", model: "google/gemini-3-flash" } }));
     expect(await screen.findByText("Saved")).toBeTruthy();
     // a model the list does not know can still be typed and saved
     fireEvent.change(screen.getByLabelText("Model (required for processing)"), { target: { value: "my/custom-model" } });
