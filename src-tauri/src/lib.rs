@@ -204,6 +204,11 @@ pub fn run() {
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1)
                 .disable_drag_drop_handler()
+                // A hidden or minimised window keeps running its page: a document batch converts
+                // in the background while the user is in another window, or after closing to the
+                // tray. macOS 14+ honours this (WebKit suspends a hidden view by default); Linux and
+                // Windows ignore it, and the page holds a Web Lock while it has work instead.
+                .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
                 .on_download(|webview, event| {
                     use tauri::webview::DownloadEvent;
                     let app = webview.app_handle();
