@@ -25,6 +25,24 @@ export const PINNED_INTEGRITY: Record<string, string> = {
   "docling.rs-win32-x64-msvc@1.58.0": "sha512-rmQxc+hYfaI8HblD53DOATOlPqvllLv7B2fD8pG4C4zrKOTRO98UhUvN5iFy80WU53UR7NERqZyTYLshi5AdBw==",
 };
 
+/**
+ * Platform packages docling.rs does not publish on npm, built from the same release by this project's
+ * `converter-binding` workflow and attached to a GitHub release (a pre-release: never the app's "latest").
+ * An entry with no integrity yet has not been published: the platform stays unsupported (platform.ts).
+ */
+export type SelfBuiltPackage = { url: string; integrity: string };
+export const SELF_BUILT: Record<string, SelfBuiltPackage> = {
+  "docling.rs-darwin-arm64@1.58.0": {
+    url: "https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v1.58.0/docling.rs-darwin-arm64-1.58.0.tgz",
+    integrity: "",
+  },
+};
+
+/** Whether this project publishes the platform package for `triple` at `version`. */
+export function selfBuiltReady(triple: string, version: string = BINDING_VERSION): boolean {
+  return Boolean(SELF_BUILT[`docling.rs-${triple}@${version}`]?.integrity);
+}
+
 export type InstallPhase = "metadata" | "downloading" | "verifying" | "extracting" | "done";
 export type InstallProgress = { phase: InstallPhase; file?: string; bytes?: number; total?: number | null };
 export type BindingManifest = { version: string; platform: string; installedAt: string; bytes: number };
@@ -47,6 +65,8 @@ export type InstallBindingOptions = {
   metadataTimeoutMs?: number;
   /** Integrity strings the registry must agree with; `{}` disables the check (tests). */
   pins?: Record<string, string>;
+  /** Packages fetched from this project's releases instead of the registry (tests override). */
+  selfBuilt?: Record<string, SelfBuiltPackage>;
 };
 
 export async function installBinding(opts: InstallBindingOptions): Promise<BindingManifest> {
@@ -62,7 +82,11 @@ export async function installBinding(opts: InstallBindingOptions): Promise<Bindi
   let bytes = 0;
   for (const name of ["docling.rs", `docling.rs-${opts.triple}`]) {
     progress({ phase: "metadata", file: name });
-    const meta = await registryMetadata(fetchImpl, registry, name, version, opts.metadataTimeoutMs ?? 30_000, opts.pins ?? PINNED_INTEGRITY);
+    const selfBuilt = (opts.selfBuilt ?? SELF_BUILT)[`${name}@${version}`];
+    if (selfBuilt && !selfBuilt.integrity) throw new IntegrityError(`${name}@${version} is not published yet — refusing to download an unpinned package.`);
+    const meta = selfBuilt
+      ? { tarball: selfBuilt.url, integrity: selfBuilt.integrity }
+      : await registryMetadata(fetchImpl, registry, name, version, opts.metadataTimeoutMs ?? 30_000, opts.pins ?? PINNED_INTEGRITY);
     const tgz = join(downloads, `${name}-${version}.tgz`);
     await download(fetchImpl, meta.tarball, tgz, (b, total) => progress({ phase: "downloading", file: name, bytes: b, total }), opts.maxAttempts ?? 5, opts.idleMs ?? 30_000);
     progress({ phase: "verifying", file: name });
