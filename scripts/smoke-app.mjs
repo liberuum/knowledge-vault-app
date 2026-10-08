@@ -3,7 +3,7 @@
 // Reports the installer sizes, the time to ready and the peak memory of the whole process tree.
 //   node scripts/smoke-app.mjs [path-to-AppImage]
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -26,9 +26,16 @@ const deb = newest(join(bundle, "deb"), ".deb");
 if (installer) console.log(`[smoke] ${installer.split("/").pop()}: ${mb(installer)} MB${deb ? `; ${deb.split("/").pop()}: ${mb(deb)} MB` : ""}`);
 
 const home = mkdtempSync(join(tmpdir(), "kv-smoke-"));
+// The AppImage unpacks itself into $TMPDIR in extract-and-run mode (a full copy, about 1 GB): inside the
+// throwaway home it goes with it. Any unpacked copy that still lands in the system temp dir during this
+// run is removed at the end too — only ones that were not there before.
+const appTmp = join(home, "tmp");
+mkdirSync(appTmp, { recursive: true });
+const extractedBefore = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith("appimage_extracted_")));
 const env = {
   PATH: "/usr/bin:/bin",
   HOME: home,
+  TMPDIR: appTmp,
   XDG_DATA_HOME: join(home, ".local/share"),
   XDG_CONFIG_HOME: join(home, ".config"),
   XDG_CACHE_HOME: join(home, ".cache"),
@@ -84,5 +91,9 @@ child.on("exit", (code) => {
     console.log(`[smoke] the engine's last lines:\n${lines.filter((l) => l.startsWith("[sidecar]")).slice(-15).join("\n")}`);
   }
   rmSync(home, { recursive: true, force: true });
+  for (const f of readdirSync(tmpdir()).filter((f) => f.startsWith("appimage_extracted_") && !extractedBefore.has(f))) {
+    rmSync(join(tmpdir(), f), { recursive: true, force: true });
+    console.log(`[smoke] removed the unpacked copy ${f}`);
+  }
   process.exit(code === 0 && verdict?.includes("ok") ? 0 : 1);
 });
