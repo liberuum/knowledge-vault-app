@@ -41,12 +41,14 @@ export type ConversionMode = "local" | "remote" | "off";
 export type ConversionSettings = { mode: ConversionMode; remoteUrl: string; removed?: Array<"binding" | "models"> };
 export const CONVERSION_MODES: readonly ConversionMode[] = ["local", "remote", "off"];
 /** Plan 5: the shell's window behaviour — closing the window keeps the engine serving tools from the tray. */
-export type UiSettings = { closeToTray: boolean };
+/** Phase D: the setup guide was finished or skipped; absent until then, so a new install opens it. */
+export type OnboardingState = "skipped" | "done";
+export type UiSettings = { closeToTray: boolean; onboarding?: OnboardingState };
 export type AppSettings = { version: 1; models: ModelSettings; conversion: ConversionSettings; ui: UiSettings };
 export type SettingsPatch = {
   models?: { endpoint?: string; model?: string; apiKey?: string | null; provider?: keyof typeof PROVIDER_ENDPOINTS };
   conversion?: { mode?: ConversionMode; remoteUrl?: string };
-  ui?: { closeToTray?: boolean };
+  ui?: { closeToTray?: boolean; onboarding?: OnboardingState };
 };
 
 /** A rejected value (the control API answers 400). */
@@ -123,7 +125,7 @@ export function readSettings(dataDir: string): AppSettings {
       remoteUrl: typeof conversion.remoteUrl === "string" ? conversion.remoteUrl : "",
       removed: Array.isArray(conversion.removed) ? (conversion.removed as unknown[]).filter((c): c is "binding" | "models" => c === "binding" || c === "models") : [],
     },
-    ui: { closeToTray: ui.closeToTray !== false },
+    ui: { closeToTray: ui.closeToTray !== false, ...(ui.onboarding === "skipped" || ui.onboarding === "done" ? { onboarding: ui.onboarding } : {}) },
   };
 }
 
@@ -169,6 +171,7 @@ export function writeSettings(dataDir: string, patch: SettingsPatch): AppSetting
   // The ui section is shared with the shell (it reads closeToTray at every window close); other keys in it survive.
   const ui = { ...(raw.ui && typeof raw.ui === "object" ? (raw.ui as Record<string, unknown>) : {}) };
   if (patch.ui && typeof patch.ui.closeToTray === "boolean") ui.closeToTray = patch.ui.closeToTray;
+  if (patch.ui && (patch.ui.onboarding === "skipped" || patch.ui.onboarding === "done")) ui.onboarding = patch.ui.onboarding;
   mkdirSync(dataDir, { recursive: true });
   writeFileAtomic(configPath(dataDir), JSON.stringify({ ...raw, version: 1, models, conversion, ...(Object.keys(ui).length ? { ui } : {}) }, null, 2) + "\n");
   return readSettings(dataDir);

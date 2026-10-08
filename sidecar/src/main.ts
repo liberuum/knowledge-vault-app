@@ -1,4 +1,7 @@
 import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { initVaultStructure } from "./vault-structure.js";
+import { addVaultSource } from "./vault-sources.js";
+import { checkModel } from "./model-check.js";
 import { register } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -300,7 +303,16 @@ async function main(): Promise<void> {
       vaultPackageVersion: VAULT_PACKAGE_VERSION,
     }),
     listVaults: () => listVaultDrives(origin, engineFetch),
-    createVault: (name) => createVaultDrive(origin, name, engineFetch),
+    createVault: async (name) => {
+      const vault = await createVaultDrive(origin, name, engineFetch);
+      // Its folders and processing queue now, not on first open: a source can be added straight away.
+      await initVaultStructure(origin, vault.id, engineFetch).catch((e: unknown) =>
+        console.warn(`[sidecar] vault ${vault.id}: its folders wait for the app to open it (${e instanceof Error ? e.message : String(e)})`),
+      );
+      return vault;
+    },
+    addSource: (vaultId, source) => addVaultSource(origin, vaultId, source, engineFetch),
+    checkModel: () => checkModel({ gatewayUrl: `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, gatewayKey }),
     renameVault: (id, name) => renameVaultDrive(origin, id, name, engineFetch),
     deleteVault: (id) => deleteVaultDrive(origin, id, engineFetch),
     workflowsDrive,

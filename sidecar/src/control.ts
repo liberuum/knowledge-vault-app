@@ -1,4 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
+import { SAMPLE_SOURCE } from "./sample-source.js";
+import { titleFromText, type AddedSource, type NewSource } from "./vault-sources.js";
+import type { ModelCheck } from "./model-check.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { GATEWAY_PATH } from "./gateway/gateway.js";
 import { openAiError } from "./gateway/errors.js";
@@ -38,6 +41,8 @@ export type ControlDeps = {
   status: () => StatusPayload;
   listVaults: () => Promise<VaultSummary[]>;
   createVault: (name: string) => Promise<VaultSummary>;
+  /** Phase D: file a source in a vault and queue it (the onboarding's sample or pasted text). */
+  addSource?: (vaultId: string, source: NewSource) => Promise<AddedSource>;
   renameVault: (id: string, name: string) => Promise<DriveRef>;
   deleteVault: (id: string) => Promise<void>;
   workflowsDrive: () => Promise<DriveRef>;
@@ -47,6 +52,8 @@ export type ControlDeps = {
   fillConnection: (connectionId: string, options: { token: boolean }) => Promise<FillResult>;
   /** Settings › Models › Validate: the saved endpoint and key against the provider. */
   validateModels: () => Promise<{ ok: boolean; detail: string }>;
+  /** Phase D: one tiny JSON request through the gateway, timed — the onboarding's "Ready". */
+  checkModel?: () => Promise<ModelCheck>;
   /** One pass of the queue watchdog for a vault, on demand (queue-watchdog.ts). */
   repairQueue: (vaultId: string) => Promise<{ requeued: string[]; dropped: string[]; skipped?: string }>;
   /** The provider's model list with the saved key, for the picker; `endpoint` follows the form when it differs from the saved one. */
@@ -145,9 +152,12 @@ function settingsPatch(body: Record<string, unknown>): SettingsPatch {
   const ui = body.ui;
   if (ui !== undefined) {
     if (!ui || typeof ui !== "object" || Array.isArray(ui)) throw new BadRequestError("`ui` must be an object.");
-    const closeToTray = (ui as Record<string, unknown>).closeToTray;
+    const u = ui as Record<string, unknown>;
+    const closeToTray = u.closeToTray;
     if (closeToTray !== undefined && typeof closeToTray !== "boolean") throw new BadRequestError("`ui.closeToTray` must be a boolean.");
-    patch.ui = closeToTray === undefined ? {} : { closeToTray };
+    const onboarding = u.onboarding;
+    if (onboarding !== undefined && onboarding !== "skipped" && onboarding !== "done") throw new BadRequestError("`ui.onboarding` must be \"skipped\" or \"done\".");
+    patch.ui = { ...(closeToTray === undefined ? {} : { closeToTray }), ...(onboarding === undefined ? {} : { onboarding }) };
   }
   const conversion = body.conversion;
   if (conversion !== undefined) {
@@ -270,6 +280,16 @@ export function createControlServer(deps: ControlDeps) {
         }
         return send(res, 201, { vault, pipeline }, allowed);
       }
+      const sourcesOf = url.pathname.match(/^\/vaults\/([^/]+)\/sources$/);
+      if (sourcesOf && req.method === "POST" && deps.addSource) {
+        const body = await readJson(req);
+        const vaultId = decodePart(sourcesOf[1]!);
+        if (body.sample === true) return send(res, 201, { source: await deps.addSource(vaultId, SAMPLE_SOURCE) }, allowed);
+        const content = typeof body.content === "string" ? body.content.trim() : "";
+        if (!content) return send(res, 400, { error: "Add some text first." }, allowed);
+        const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : titleFromText(content);
+        return send(res, 201, { source: await deps.addSource(vaultId, { title, content, sourceType: "MANUAL_ENTRY" }) }, allowed);
+      }
       const fillOf = url.pathname.match(/^\/connections\/([^/]+)\/fill$/);
       if (fillOf && req.method === "POST") {
         const body = await readJson(req);
@@ -311,6 +331,7 @@ export function createControlServer(deps: ControlDeps) {
         return send(res, 200, await deps.validateModels(), allowed);
       }
       // A model server on this computer or the local network, tried before it is saved: no key is sent.
+      if (req.method === "POST" && url.pathname === "/settings/models/check" && deps.checkModel) return send(res, 200, await deps.checkModel(), allowed);
       if (req.method === "GET" && url.pathname === "/settings/models/probe") {
         const endpoint = url.searchParams.get("endpoint")?.trim() ?? "";
         if (!endpoint) return send(res, 400, { error: "Give the server's address, e.g. http://127.0.0.1:8080/v1." }, allowed);
