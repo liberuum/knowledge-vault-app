@@ -11,6 +11,8 @@ import { readRecents, rememberOpened, sortByRecency, type Recents } from "../lan
 import { RenameVaultDialog } from "../landing/RenameVaultDialog.js";
 import { loadSavedLayout, type XY } from "../landing/saved-layout.js";
 import { StatusStrip, type EngineState } from "../landing/StatusStrip.js";
+import { StartupProgress } from "../landing/StartupProgress.js";
+import type { Progress } from "../landing/startup-stages.js";
 import { SkeletonTile, VaultTile } from "../landing/VaultTile.js";
 import { VaultMenu } from "../landing/VaultMenu.js";
 import { Dialog } from "../shell/Dialog.js";
@@ -58,6 +60,8 @@ type AnyVault = ({ kind: "local" } & VaultSummary) | RemoteVault;
 
 type Props = {
   engine: EngineState;
+  /** What the engine has done so far while starting (boot.tsx feeds it from the shell's log events). */
+  progress?: Progress;
   /** "Try again" after the engine kept stopping or refused to start (the shell's retry_engine). */
   onRetry?: () => void;
   /** Present once the engine is ready; the landing lists and creates vaults only then. */
@@ -82,7 +86,7 @@ type Props = {
  * recently opened one largest; on first run, the inline create form; the
  * engine's state in a strip at the bottom. Never a workspace.
  */
-export function Landing({ engine, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry }: Props) {
+export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const [vaults, setVaults] = useState<VaultSummary[] | null>(null);
   const [remotes, setRemotes] = useState<RemoteVault[] | null>(null);
@@ -271,7 +275,11 @@ export function Landing({ engine, info, identity, onOpen, onOpenRemote, onIdenti
             </div>
           )}
         </div>
-        {!ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>}
+        {engine.state === "starting" ? (
+          <StartupProgress progress={progress ?? { reached: -1, latest: null }} preparing={engine.preparing === true} />
+        ) : (
+          !ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>
+        )}
         {error && !showForm && !firstRun && <p role="alert" className="kv-error">{error}</p>}
         {firstRun && (
           <>

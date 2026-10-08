@@ -7,7 +7,8 @@ import { localHostExtras } from "./local-engine.js";
 import { fetchStatus } from "./vaults.js";
 import type { TokenProvider } from "./api/identity.js";
 import { Landing } from "./screens/Landing.js";
-import { watchSidecar, type SidecarInfo, type SidecarStatus, type StatusWatcher } from "./sidecar.js";
+import { watchSidecar, watchSidecarLog, type LogWatcher, type SidecarInfo, type SidecarStatus, type StatusWatcher } from "./sidecar.js";
+import { advance, currentStageLabel, type Progress } from "./landing/startup-stages.js";
 import { invokeIfTauri, isTauri } from "./shell/tauri.js";
 
 import { goHomeIfAsked } from "./shell/go-home.js";
@@ -68,10 +69,13 @@ function EngineScreen({ title, detail, kind }: { title: string; detail: string; 
 /** First thing on screen: the engine's state, then the vault app once the engine is ready. */
 export function Boot({
   watch = watchSidecar,
+  watchLog = watchSidecarLog,
   load = loadApp,
   onEngineRestarted = () => window.location.reload(),
 }: {
   watch?: StatusWatcher;
+  /** The engine's output lines while it starts (the landing's start-up stages). */
+  watchLog?: LogWatcher;
   load?: AppLoader;
   /** The engine came back after a restart (the protection switch): the whole app is re-booted for the engine it now is — one path, shell and browser alike (spec §4.4). */
   onEngineRestarted?: () => void;
@@ -87,6 +91,14 @@ export function Boot({
   const [app, setApp] = useState<LoadedApp | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   useEffect(() => watch(setStatus), [watch]);
+  // The start-up stages: every engine line advances them; a (re)start begins them afresh.
+  const [progress, setProgress] = useState<Progress>({ reached: -1, latest: null });
+  const starting = status.state === "starting" || status.state === "restarting";
+  useEffect(() => {
+    if (!starting) return;
+    setProgress({ reached: -1, latest: null });
+    return watchLog((line) => setProgress((p) => advance(p, line)));
+  }, [starting, watchLog]);
   // A reload only on a real transition back to "ready" after the engine had been ready once
   // (never on a re-render while ready — the default callback is a fresh function each render).
   const previous = useRef<SidecarStatus["state"] | null>(null);
@@ -121,5 +133,6 @@ export function Boot({
     const App = app.App;
     return <App info={status.info} client={app.client} bearer={app.bearer} />;
   }
-  return <Landing engine={{ state: "starting" }} />;
+  const preparing = status.state === "starting" && status.preparing === true;
+  return <Landing engine={{ state: "starting", preparing, stage: `${currentStageLabel(progress, preparing)}…` }} progress={progress} />;
 }

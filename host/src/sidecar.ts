@@ -9,7 +9,8 @@ export type FatalInfo = { reason: string; message: string };
  * refusal, exited, or being stopped by the shell.
  */
 export type SidecarStatus =
-  | { state: "starting" }
+  /** `preparing`: Windows' first launch of a version, the engine archive is being unpacked. */
+  | { state: "starting"; preparing?: boolean }
   | { state: "ready"; info: SidecarInfo }
   | { state: "restarting"; attempt: number; delayMs: number | null }
   | { state: "gave_up"; code: number | null; logTail: string[]; fatal: FatalInfo | null }
@@ -27,6 +28,7 @@ export type ShellStatus = {
   delayMs?: number | null;
   fatal?: FatalInfo | null;
   logTail?: string[];
+  preparing?: boolean;
 };
 
 export function sidecarOrigins(port: number, controlPort: number) {
@@ -42,8 +44,32 @@ export function statusFromShell(raw: ShellStatus): SidecarStatus {
   if (raw.state === "gave_up") return { state: "gave_up", code: raw.code ?? null, logTail: raw.logTail ?? [], fatal: raw.fatal ?? null };
   if (raw.state === "exited") return raw.fatal ? { state: "exited", code: raw.code ?? null, fatal: raw.fatal } : { state: "exited", code: raw.code ?? null };
   if (raw.state === "stopping") return { state: "stopping" };
-  return { state: "starting" };
+  return raw.preparing ? { state: "starting", preparing: true } : { state: "starting" };
 }
+
+export type LogWatcher = (onLine: (line: string) => void) => () => void;
+
+/**
+ * Under Tauri: every engine output line the shell forwards while the engine starts
+ * (`sidecar:log`), for the landing's start-up stages. In a browser the engine is already up.
+ */
+export const watchSidecarLog: LogWatcher = (onLine) => {
+  if (!inTauri()) return () => {};
+  let stopped = false;
+  let unlisten: (() => void) | undefined;
+  void (async () => {
+    const { listen } = await import("@tauri-apps/api/event");
+    const off = await listen<string>("sidecar:log", (event) => {
+      if (!stopped) onLine(event.payload);
+    });
+    if (stopped) off();
+    else unlisten = off;
+  })();
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+};
 
 export type StatusWatcher = (onStatus: (status: SidecarStatus) => void) => () => void;
 

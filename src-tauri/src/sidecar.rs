@@ -153,6 +153,8 @@ pub struct SidecarStatus {
     pub delay_ms: Option<u64>,
     pub fatal: Option<FatalInfo>,
     pub log_tail: Vec<String>,
+    /// Windows' first launch of a version: the engine archive is being unpacked (shown by the page as its first stage).
+    pub preparing: bool,
 }
 
 pub fn status_of(
@@ -185,6 +187,7 @@ pub fn status_of(
         delay_ms,
         fatal,
         log_tail: Vec::new(),
+        preparing: false,
     }
 }
 
@@ -201,6 +204,7 @@ fn snapshot(app: &AppHandle) -> SidecarStatus {
         st.stopping,
     );
     status.log_tail = st.tail.lines();
+    status.preparing = st.preparing;
     if st.preparing && status.state == "exited" {
         status.state = "starting";
     }
@@ -225,6 +229,12 @@ pub fn report_fatal(app: &AppHandle, reason: &str, message: String) {
         });
     }
     emit_status(app);
+}
+
+/// One engine output line, for the landing's start-up stages. Only sent while the engine is
+/// not ready: the page derives "what is starting" from it and ignores it afterwards.
+fn emit_log(app: &AppHandle, line: &str) {
+    let _ = app.emit("sidecar:log", line.trim_end());
 }
 
 fn emit_status(app: &AppHandle) {
@@ -406,6 +416,9 @@ pub fn spawn_sidecar(
                     let state = handle.state::<Mutex<SidecarState>>();
                     let mut st = state.lock().unwrap();
                     st.record_line(&line);
+                    if st.ready.is_none() {
+                        emit_log(&handle, &line);
+                    }
                     if let Some((port, control_port)) = parse_ready_line(&line) {
                         st.ready = Some(ReadyInfo {
                             port,
@@ -431,11 +444,15 @@ pub fn spawn_sidecar(
                 }
                 CommandEvent::Stderr(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    handle
-                        .state::<Mutex<SidecarState>>()
-                        .lock()
-                        .unwrap()
-                        .record_line(&line);
+                    let starting = {
+                        let state = handle.state::<Mutex<SidecarState>>();
+                        let mut st = state.lock().unwrap();
+                        st.record_line(&line);
+                        st.ready.is_none()
+                    };
+                    if starting {
+                        emit_log(&handle, &line);
+                    }
                     eprint!("[sidecar] {line}")
                 }
                 CommandEvent::Terminated(payload) => {

@@ -87,4 +87,32 @@ describe("Boot — the engine restarts", () => {
     await waitFor(() => expect(onEngineRestarted).toHaveBeenCalledTimes(1));
     expect(load).toHaveBeenCalledTimes(1);
   });
+
+  it("while the engine starts, shows its stages from the lines the shell forwards, and the strip names the stage under way", async () => {
+    const w = fakeWatcher();
+    let onLine: ((line: string) => void) | undefined;
+    const watchLog = (on: (line: string) => void) => {
+      onLine = on;
+      return () => {
+        onLine = undefined;
+      };
+    };
+    render(<Boot watch={w.watch} watchLog={watchLog} load={vi.fn(async () => ({ App: () => <p>the app</p>, client: {} as never, bearer: async () => "" }))} />);
+    w.emit({ state: "starting" });
+    expect(screen.getByRole("region", { name: "Starting the vault engine" })).toBeTruthy();
+    expect(screen.getByText("Starting the engine").closest("li")!.getAttribute("data-state")).toBe("current");
+    act(() => onLine?.("[sidecar] [10:08:38.77] [switchboard] Using PGlite (PG17) for reactor storage at /x/vault/reactor"));
+    expect(screen.getByText("Opening your vaults").closest("li")!.getAttribute("data-state")).toBe("done");
+    expect(screen.getByText("Waking the graph index").closest("li")!.getAttribute("data-state")).toBe("current");
+    expect(screen.getByText("Waking the graph index…")).toBeTruthy(); // the strip's detail
+    expect(screen.getByText("[switchboard] Using PGlite (PG17) for reactor storage at /x/vault/reactor")).toBeTruthy();
+  });
+
+  it("shows unpacking first when the shell says the engine is being unpacked", () => {
+    const w = fakeWatcher();
+    render(<Boot watch={w.watch} watchLog={() => () => {}} load={vi.fn(async () => ({ App: () => <p>the app</p>, client: {} as never, bearer: async () => "" }))} />);
+    w.emit({ state: "starting", preparing: true });
+    expect(screen.getByText("Unpacking the engine").closest("li")!.getAttribute("data-state")).toBe("current");
+    expect(screen.getByText("Unpacking the engine…")).toBeTruthy();
+  });
 });

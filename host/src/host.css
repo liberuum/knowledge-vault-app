@@ -284,3 +284,22 @@ body, #root { margin: 0; min-height: 100vh; }
 /* The pipeline chip's label, when it opens the vault's workflow in Workflow Studio. */
 .kv-pipeline-link { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .kv-appbar .kv-pipeline-chip .kv-pipeline-link { padding: 0; border: 0; background: none; font-size: 12px; line-height: inherit; }
+
+/* ---- start-up stages (the landing while the engine starts) ---- */
+.kv-startup { margin: 24px 0 0; padding: 20px 22px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); max-width: 520px; }
+.kv-startup-head { display: flex; align-items: center; gap: 12px; }
+.kv-startup-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--bai-text); }
+.kv-spinner { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bai-border); border-top-color: var(--bai-accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .kv-spinner { animation: kv-spin 0.9s linear infinite; }
+  @keyframes kv-spin { to { transform: rotate(360deg); } }
+  .kv-startup-stage[data-state="current"] .kv-startup-mark { animation: kv-pulse 1.2s ease-in-out infinite; }
+}
+.kv-startup-stages { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; }
+.kv-startup-stage { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--bai-text-tertiary); }
+.kv-startup-stage[data-state="done"] { color: var(--bai-text-secondary); }
+.kv-startup-stage[data-state="current"] { color: var(--bai-text); font-weight: 500; }
+.kv-startup-mark { display: inline-block; width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.kv-startup-stage[data-state="done"] .kv-startup-mark { color: var(--bai-status-canonical); }
+.kv-startup-stage[data-state="current"] .kv-startup-mark { color: var(--bai-accent); }
+.kv-startup-latest { margin: 14px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--bai-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

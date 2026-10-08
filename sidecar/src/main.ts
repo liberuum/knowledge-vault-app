@@ -128,6 +128,7 @@ async function main(): Promise<void> {
   // (5) an interrupted backup is not a backup.
   for (const name of cleanPartialBackups(cfg.dataDir)) console.warn(`[sidecar] removed an incomplete backup: ${name}`);
   // (6) the stack guard: never open a store written by a newer stack; back up before opening one written by an older stack.
+  console.log("[sidecar] checking the store"); // a landing start-up stage (host/src/landing/startup-stages.ts)
   const recordedStack = readStackVersion(cfg.dataDir);
   if (STACK_VERSION === "unknown") {
     console.warn("[sidecar] the Switchboard's version is unknown — the store guard is skipped");

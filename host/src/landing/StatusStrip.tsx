@@ -2,7 +2,7 @@ import { redact } from "../redact.js";
 import type { FatalInfo } from "../sidecar.js";
 
 export type EngineState =
-  | { state: "starting" }
+  | { state: "starting"; preparing?: boolean; /** The start-up stage under way (startup-stages.ts), for the strip's detail. */ stage?: string }
   | { state: "ready" }
   | { state: "restarting"; attempt: number; delayMs: number | null }
   | { state: "gave_up"; code: number | null; logTail: string[]; fatal: FatalInfo | null }
@@ -13,8 +13,12 @@ export type EngineState =
 /** The strip's two lines for each state (spec §9): what happened, then what to do. */
 function copy(engine: EngineState): { label: string; detail: string } {
   switch (engine.state) {
-    case "starting":
-      return { label: "Starting the engine…", detail: "Opening your store." };
+    case "starting": {
+      const label = "Starting the engine…";
+      // The stage under way, unless it would only repeat the label (the very first moments).
+      const stage = engine.stage && engine.stage !== label ? engine.stage : undefined;
+      return { label, detail: stage ?? (engine.preparing ? "Unpacking the engine (first start of this version)." : "Opening your store.") };
+    }
     case "ready":
       return { label: "Ready", detail: "" };
     case "restarting":
