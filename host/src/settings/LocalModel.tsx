@@ -2,6 +2,9 @@ import { useState } from "react";
 import type { LocalProbe } from "../vaults.js";
 
 export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8080/v1";
+/** The last address tried, so a failed connect does not send the user back to the default. */
+export const LAST_URL_KEY = "kv-local-model-url";
+type UrlStore = Pick<Storage, "getItem" | "setItem">;
 
 type Props = {
   /** Whether the saved model is on this computer, and which. */
@@ -10,21 +13,37 @@ type Props = {
   /** Save this endpoint and model as the vault's model (no key). */
   use: (endpoint: string, model: string) => Promise<void>;
   disabled?: boolean;
+  /** Where the last address tried is kept (tests inject one). */
+  storage?: UrlStore;
 };
 
 /**
  * Settings › Models: run the pipeline on a model on this computer — llama.cpp, Ollama, LM Studio, any
  * OpenAI-compatible server. Connect to its address, see what it serves, use it; no key needed.
  */
-export function LocalModel({ current, probe, use, disabled }: Props) {
+export function LocalModel({ current, probe, use, disabled, storage }: Props) {
+  const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
+  const lastTried = (): string | null => {
+    try {
+      return store?.getItem(LAST_URL_KEY) || null;
+    } catch {
+      return null;
+    }
+  };
   const [open, setOpen] = useState(false);
-  const [url, setUrl] = useState(current.local ? current.endpoint : DEFAULT_LOCAL_ENDPOINT);
+  // The saved local endpoint when one is in use; otherwise what the user last typed; the default only the first time.
+  const [url, setUrl] = useState(() => (current.local ? current.endpoint : (lastTried() ?? DEFAULT_LOCAL_ENDPOINT)));
   const [result, setResult] = useState<LocalProbe | null>(null);
   const [checking, setChecking] = useState(false);
   const [chosen, setChosen] = useState("");
   const [saving, setSaving] = useState(false);
 
   const connect = async (address: string) => {
+    try {
+      if (address.trim()) store?.setItem(LAST_URL_KEY, address.trim());
+    } catch {
+      // storage full or blocked: the address simply is not remembered
+    }
     setChecking(true);
     setResult(null);
     try {
