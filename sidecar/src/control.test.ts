@@ -58,6 +58,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       remove: (id) => { remotes = remotes.filter((v) => v.id !== id); },
     },
     validateModels: async () => ({ ok: true, detail: "3 models available" }),
+    repairQueue: async (vaultId: string) => (vaultId === "v1" ? { requeued: ["Foreword"], dropped: ["Old"] } : { requeued: [], dropped: [], skipped: "no pipeline" }),
     modelCatalog: async (endpoint?: string) => ({ ok: true, models: [{ id: "a", name: "A", free: false }], endpoint: endpoint ?? "saved" }),
     fillConnection: async (id, opts) => {
       if (id !== "c1") throw new ConnectionError("Only a Knowledge Vault connection can be filled from this app.");
@@ -340,6 +341,18 @@ describe("model validation over the control API", () => {
     expect(await saved.json()).toMatchObject({ ok: true, endpoint: "saved", models: [{ id: "a" }] });
     const typed = await fetch(`${base}/settings/models/catalog?endpoint=${encodeURIComponent("http://127.0.0.1:11434/v1")}`, { headers: h });
     expect(await typed.json()).toMatchObject({ endpoint: "http://127.0.0.1:11434/v1" });
+  });
+});
+
+describe("the queue watchdog on demand", () => {
+  const h = { authorization: "Bearer secret", "content-type": "application/json" };
+  it("runs one repair pass for a vault and reports what it queued again or dropped", async () => {
+    const base = await start();
+    const r = await fetch(`${base}/vaults/v1/pipeline/repair`, { method: "POST", headers: h });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ requeued: ["Foreword"], dropped: ["Old"] });
+    const none = await fetch(`${base}/vaults/v9/pipeline/repair`, { method: "POST", headers: h });
+    expect(await none.json()).toEqual({ requeued: [], dropped: [], skipped: "no pipeline" });
   });
 });
 

@@ -21,10 +21,11 @@ import { cleanPartialBackups, listBackups, recoverInterruptedRestore } from "./b
 import { stopOrphanedHelper } from "./orphans.js";
 import { exportVault } from "./export.js";
 import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
-import { createPipelineManager, mintEngineToken } from "./pipelines.js";
+import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelines.js";
 import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
+import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
 import { privateHostAllow } from "./egress.js";
 import type { PipelineTemplate } from "./templates.js";
 import { createRequire } from "node:module";
@@ -274,6 +275,11 @@ async function main(): Promise<void> {
     deleteVault: (id) => deleteVaultDrive(origin, id, engineFetch),
     workflowsDrive,
     pipelines,
+    repairQueue: (vaultId) => {
+      const record = readPipelines(cfg.dataDir)[vaultId];
+      if (!record || record.disabled) return Promise.resolve({ requeued: [], dropped: [], skipped: "no pipeline" });
+      return repairQueue({ origin, fetchImpl: engineFetch }, vaultId, record.workflowId);
+    },
     readSettings: () => readSettings(cfg.dataDir),
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
     validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
@@ -346,6 +352,15 @@ async function main(): Promise<void> {
   const controlPort = await control.listen(cfg.controlPort);
   boundControlPort = controlPort;
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
+
+  // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).
+  startQueueWatchdog({
+    deps: { origin, fetchImpl: engineFetch },
+    pipelines: () =>
+      Object.entries(readPipelines(cfg.dataDir))
+        .filter(([, r]) => !r.disabled)
+        .map(([vaultId, r]) => ({ vaultId, workflowId: r.workflowId })),
+  });
 
   // The shell and the dev loop set KV_STDIN_STOP=1 and keep our stdin open:
   // closing it (or writing `stop`) asks for a graceful stop, and SIGINT runs
