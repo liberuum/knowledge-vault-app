@@ -1,0 +1,107 @@
+# docling.rs publishes its Node binding on npm for Linux and Windows only. This builds the macOS (Apple
+# silicon) one from the same docling.rs release, checks it, and attaches it to a pre-release of this repo
+# (docling-binding-v<version>), from which the app's converter installer downloads it with a pinned
+# checksum (SELF_BUILT in sidecar/src/converter/install.ts).
+#
+# A published asset is never replaced: builds are not byte-identical, and the app pins the exact bytes.
+# After a first publish, copy the integrity from the job summary into SELF_BUILT.
+name: Converter binding (macOS)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: docling.rs version (the one BINDING_VERSION pins)
+        default: "1.58.0"
+      publish:
+        description: Attach the binding to the docling-binding-v<version> pre-release if it has none yet
+        type: boolean
+        default: true
+  push:
+    paths:
+      - .github/workflows/converter-binding.yml
+      - scripts/docling-binding.mjs
+      - scripts/lib/docling-binding.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: converter-binding
+  cancel-in-progress: false
+
+jobs:
+  darwin-arm64:
+    # macos-14: Apple silicon with Xcode 15. The linker in Xcode 27's command-line tools (ld-27037) writes
+    # a string table macOS 27 refuses to load; the verify step fails such a build instead of publishing it.
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version || '1.58.0' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: docling-project/docling.rs
+          ref: v${{ env.VERSION }}
+          path: docling-src
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: docling-src
+          key: docling-${{ env.VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          ld -v 2>&1 | head -1
+          rustc -V
+      - name: Build the Node binding
+        working-directory: docling-src
+        run: cargo build --release --locked -p docling-node
+      - name: The JS package from npm, checked against the app's pin
+        run: |
+          mkdir -p js && cd js
+          npm pack "docling.rs@$VERSION" --silent > /dev/null
+          tar -xzf "docling.rs-$VERSION.tgz"
+          got="sha512-$(openssl dgst -sha512 -binary "docling.rs-$VERSION.tgz" | base64)"
+          pinned=$(grep -o "\"docling.rs@$VERSION\": \"sha512-[^\"]*\"" ../sidecar/src/converter/install.ts | sed -E 's/.*: "(.*)"/\1/')
+          echo "npm: $got"; echo "app: $pinned"
+          if [ -z "$pinned" ]; then echo "the app pins no docling.rs@$VERSION (PINNED_INTEGRITY in sidecar/src/converter/install.ts)"; exit 1; fi
+          if [ "$got" != "$pinned" ]; then echo "npm's docling.rs@$VERSION is not the one the app pins"; exit 1; fi
+      - name: Verify — loads on macOS, converts a sample
+        run: node scripts/docling-binding.mjs verify docling-src/target/release/libdocling_node.dylib js/package
+      - name: Pack
+        id: pack
+        run: node scripts/docling-binding.mjs pack docling-src/target/release/libdocling_node.dylib "$VERSION" out
+      - name: Publish to the docling-binding pre-release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+          INTEGRITY: ${{ steps.pack.outputs.integrity }}
+        run: |
+          tag="docling-binding-v$VERSION"
+          asset=$(basename "$TGZ")
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$asset"; then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir published
+            published="sha512-$(openssl dgst -sha512 -binary "published/$asset" | base64)"
+            echo "$tag already has $asset — kept (published integrity $published)"
+            { echo "### $tag: already published, kept"; echo; echo "Published integrity: \`$published\`"; echo; echo "This run's build (not published): \`$INTEGRITY\`"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          notes="The docling.rs $VERSION Node binding for macOS on Apple silicon, built by the converter-binding workflow from docling-project/docling.rs v$VERSION (MIT). docling.rs publishes no macOS binding on npm; Knowledge Vault's converter installs this one. Integrity: $INTEGRITY"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" "$TGZ" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "$TGZ" --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" --title "docling.rs $VERSION binding for macOS (Apple silicon)" --notes "$notes"
+          fi
+          { echo "### $tag: published $asset"; echo; echo "Integrity: \`$INTEGRITY\`"; echo; echo "Pin it in SELF_BUILT (sidecar/src/converter/install.ts)."; } >> "$GITHUB_STEP_SUMMARY"

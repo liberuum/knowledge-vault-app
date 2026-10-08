@@ -81,10 +81,23 @@ Get the latest version from the **[Releases page](https://github.com/liberuum/kn
 | System | Download | Notes |
 |---|---|---|
 | **Linux** | `.AppImage` or `.deb` | AppImage: make it executable and open it — nothing is installed. Debian/Ubuntu: `sudo apt install ./Knowledge.Vault_<version>_amd64.deb`. Needs a 2022-or-newer distribution (Ubuntu 22.04, Debian 12, Fedora, Arch…). |
-| **macOS** | `.dmg` (Apple silicon) | macOS 13.5 or later on an Apple silicon Mac (M1 or newer); Intel Macs are not supported yet. Drag the app to Applications. The app is not notarised yet: the first time, open it, then go to **System Settings › Privacy & Security** and choose **Open Anyway**. |
+| **macOS** | `.dmg` (Apple silicon) | macOS 13.5 or later on an Apple silicon Mac (M1 or newer); Intel Macs are not supported yet. Drag the app to Applications. The app is not notarised yet, so macOS blocks the first launch — see [Opening it on macOS](#opening-it-on-macos). |
 | **Windows** | `.exe` installer | Windows 10 or 11 (64-bit). The installer is not signed yet: if SmartScreen warns you, choose **More info › Run anyway**. The first start after installing or updating takes a little longer while the app unpacks its engine. |
 
 The app brings everything it needs. You do not need to install anything else.
+
+#### Opening it on macOS
+
+The app is not notarised by Apple yet, so the first time you open it macOS stops it. You allow it once:
+
+1. Open the app from Applications. macOS says it **could not verify "Knowledge Vault" is free of malware**.
+   Choose **Done** — not *Move to Bin*, which deletes the app.
+2. Open **System Settings › Privacy & Security** and scroll down to **Security**. Next to *"Knowledge Vault" was
+   blocked to protect your Mac*, choose **Open Anyway**, and confirm with your password or Touch ID.
+3. Choose **Open** in the dialog that follows. From then on the app opens normally, updates included.
+
+If you prefer the Terminal, this does the same in one step:
+`xattr -dr com.apple.quarantine "/Applications/Knowledge Vault.app"`
 
 ### 2. Create a vault
 
