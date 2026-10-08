@@ -118,6 +118,18 @@ function toolChoiceOf(choice: unknown): unknown {
  * refused). Everything not mapped here — `max_tokens`, `temperature`, `top_p`, `user`, `metadata`, `stop`,
  * `n`, OpenRouter's `usage` and `models` — is left out: the route refuses them or has no such thing.
  */
+/** Adds "Answer in JSON." to the last user message (or a user message of its own when there is none). */
+function askForJson(input: Json[]): void {
+  const last = [...input].reverse().find((item) => item.role === "user");
+  if (!last) {
+    input.push({ role: "user", content: "Answer in JSON." });
+    return;
+  }
+  if (typeof last.content === "string") last.content = `${last.content}\n\nAnswer in JSON.`;
+  else if (Array.isArray(last.content)) last.content = [...last.content, { type: "input_text", text: "Answer in JSON." }];
+  else last.content = "Answer in JSON.";
+}
+
 export function toResponsesRequest(chat: Json, dropped: ReadonlySet<DropKey> = new Set()): { body: Json; json: boolean } {
   const messages = Array.isArray(chat.messages) ? chat.messages : [];
   const tools = toolsOf(chat.tools);
@@ -149,6 +161,9 @@ export function toResponsesRequest(chat: Json, dropped: ReadonlySet<DropKey> = n
   }
   const format = formatOf(chat.response_format);
   if (format && dropped.has("text")) instructions.push(jsonInstruction(format));
+  // OpenAI's JSON mode needs the word "json" in the input messages — instructions do not count, and a caller's
+  // system prompt became instructions above. Say it in the last user message when nothing in the input does.
+  if (format?.type === "json_object" && !dropped.has("text") && !JSON.stringify(input).toLowerCase().includes("json")) askForJson(input);
   const effort = effortOf(chat);
   const choice = toolChoiceOf(chat.tool_choice);
   const body: Json = {

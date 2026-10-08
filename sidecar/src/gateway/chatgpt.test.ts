@@ -212,7 +212,8 @@ describe("the ChatGPT bridge in the gateway", () => {
     expect(api.seen[0]!.body).toEqual({
       model: "gpt-6.1-sol",
       instructions: "Extract claims as JSON.",
-      input: [{ role: "user", content: "The text." }],
+      // The system prompt became instructions, which JSON mode does not read: the input says it too.
+      input: [{ role: "user", content: "The text.\n\nAnswer in JSON." }],
       store: false,
       stream: true,
       text: { format: { type: "json_object" } },
@@ -337,3 +338,16 @@ describe("ChatGPT refusals in plain words", () => {
     expect(chatGptFailureFromBody(404, JSON.stringify({ error: { message: "The model `x` does not exist" } })).code).toBe("provider_model");
   });
 });
+
+describe("JSON mode and the word json (OpenAI requires it in the input messages)", () => {
+  it("asks for JSON in the last user message when only the system prompt said so", () => {
+    const { body } = toResponsesRequest({ model: "m", messages: [{ role: "system", content: "Return JSON with the claims." }, { role: "user", content: "Extract the claims." }], response_format: { type: "json_object" } });
+    expect(body.instructions).toBe("Return JSON with the claims.");
+    expect((body.input as Array<{ content: unknown }>).at(-1)?.content).toBe("Extract the claims.\n\nAnswer in JSON.");
+  });
+  it("leaves the messages alone when they already mention JSON", () => {
+    const { body } = toResponsesRequest({ model: "m", messages: [{ role: "user", content: "Reply with a JSON object." }], response_format: { type: "json_object" } });
+    expect((body.input as Array<{ content: unknown }>).at(-1)?.content).toBe("Reply with a JSON object.");
+  });
+});
+
