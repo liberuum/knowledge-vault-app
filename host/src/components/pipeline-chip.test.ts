@@ -24,5 +24,6 @@ describe("describePipeline — the user's word is processing", () => {
     expect(describePipeline(failed({ kind: "slow-model", message: "slow" })).label).toBe("Processing stopped: the model did not answer in time");
     expect(describePipeline(failed({ kind: "rate-limited", message: "429" })).action).toBe("runs");
     expect(describePipeline(failed())).toEqual({ label: "Last processing run failed", tone: "warn", action: "runs", actionLabel: "See runs" });
+    expect(describePipeline(failed({ kind: "interrupted", message: "closed" } as never))).toMatchObject({ label: "Processing was interrupted when the app closed — it resumes on its own", tone: "quiet" });
   });
 });

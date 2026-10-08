@@ -23,4 +23,7 @@ describe("classifyRunError", () => {
     expect(classifyRunError("Step \"connect\" failed: something else entirely")).toBeNull();
     expect(classifyRunError(null)).toBeNull();
   });
+  it("recognises a run the app's closing cut off", () => {
+    expect(classifyRunError("Reactor stopped before the run finished; steps completed before then were journaled")?.kind).toBe("interrupted");
+  });
 });

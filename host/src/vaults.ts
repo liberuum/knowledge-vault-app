@@ -108,7 +108,7 @@ export async function removeConverterComponent(info: SidecarInfo, component: Con
 }
 
 /** Spec §4.5: a vault's pipeline as the engine reports it (sidecar/src/pipelines.ts). */
-export type RunProblem = { kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused"; message: string; model?: string };
+export type RunProblem = { kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused" | "interrupted"; message: string; model?: string };
 export type PipelineStatus =
   | { state: "unconfigured" }
   | { state: "missing" }

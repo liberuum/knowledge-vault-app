@@ -4,7 +4,7 @@
  * `… The model provider refused to ask <model> (<status>): <message> …`.
  */
 export type RunProblem = {
-  kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused";
+  kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused" | "interrupted";
   /** One sentence for the chip and the Models page. */
   message: string;
   model?: string;
@@ -14,6 +14,8 @@ const MODEL = /refused to ask ([^\s()]+) \((\d{3})\)/;
 
 export function classifyRunError(error: string | null | undefined): RunProblem | null {
   if (!error) return null;
+  // Cut off when the app (and its engine) stopped: the watchdog queues the source again at the next start.
+  if (/reactor stopped before the run finished/i.test(error)) return { kind: "interrupted", message: "The app was closed while this source was being processed; it is processed again on its own." };
   const m = MODEL.exec(error);
   const model = m?.[1];
   const status = m?.[2];
