@@ -5,6 +5,7 @@ mod engine_archive;
 mod host_server;
 mod log_tail;
 mod navigation;
+mod proc_tree;
 mod sidecar;
 mod smoke;
 mod tray;

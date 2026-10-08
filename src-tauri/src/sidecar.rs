@@ -589,6 +589,11 @@ fn begin_stop(app: &AppHandle) -> Option<CommandChild> {
 /// child's life, not on readiness — a sidecar still booting (first-run initdb, the moment a kill hurts
 /// most) gets the same grace period.
 fn finish_stop(app: &AppHandle, child: CommandChild) {
+    // The engine's workers are recorded while it lives: once it exits they are re-parented and
+    // can no longer be found from its pid (proc_tree.rs).
+    let root = child.pid();
+    let mut tree = crate::proc_tree::Tree::default();
+    tree.record(root);
     let mut polls = 0;
     while keep_waiting(
         app.state::<Mutex<SidecarState>>().lock().unwrap().running,
@@ -596,8 +601,15 @@ fn finish_stop(app: &AppHandle, child: CommandChild) {
     ) {
         std::thread::sleep(Duration::from_millis(STOP_POLL_MS));
         polls += 1;
+        if polls % 5 == 0 {
+            tree.record(root);
+        }
     }
+    #[cfg(windows)]
+    crate::proc_tree::end_tree_windows(root);
     let _ = child.kill();
+    // Whatever the engine left running dies with it, before the shell (and an AppImage's mount) goes.
+    tree.end();
     emit_status(app);
 }
 
