@@ -38,6 +38,10 @@ export function AboutSection({ info, api, feed = UPDATE_FEED }: { info: SidecarI
         </p>
       )}
       {feed && status && !update && <p className="kv-quiet">This is the latest version.</p>}
+      <p className="kv-hint">
+        New to the app, or helping someone get started?{" "}
+        <button type="button" className="kv-link" onClick={() => { window.location.hash = "#/welcome"; }}>Open the setup guide</button>
+      </p>
     </div>
   );
 }

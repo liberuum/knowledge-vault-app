@@ -10,7 +10,7 @@ afterEach(() => {
 describe("declareDesktopHost", () => {
   it("writes the slot the vault package reads, before the package is loaded", () => {
     declareDesktopHost("http://127.0.0.1:4201");
-    expect((globalThis as Record<string, unknown>)[HOST_SLOT]).toEqual({ kind: "desktop", switchboardOrigin: "http://127.0.0.1:4201" });
+    expect((globalThis as Record<string, unknown>)[HOST_SLOT]).toEqual({ kind: "desktop", switchboardOrigin: "http://127.0.0.1:4201", takeIntakeFiles: expect.any(Function), takeOpenView: expect.any(Function) });
   });
   it("re-declares with a bearer and identity for a remote vault, and tells the package", async () => {
     const heard = vi.fn();
@@ -49,12 +49,12 @@ describe("declareDesktopHost", () => {
     setHostModel(undefined);
     declareDesktopHost("http://127.0.0.1:4201");
     const slot = (globalThis as Record<string, unknown>)[HOST_SLOT] as object;
-    expect(Object.keys(slot).sort()).toEqual(["kind", "switchboardOrigin"]);
+    expect(Object.keys(slot).sort()).toEqual(["kind", "switchboardOrigin", "takeIntakeFiles", "takeOpenView"]);
   });
   it("a model without an opener declares the model alone", () => {
     setHostModel({ baseUrl: "http://127.0.0.1:4202/llm/v1", model: "m", label: "m on this computer" });
     declareDesktopHost("http://127.0.0.1:4201");
     const slot = (globalThis as Record<string, unknown>)[HOST_SLOT] as object;
-    expect(Object.keys(slot).sort()).toEqual(["kind", "model", "switchboardOrigin"]);
+    expect(Object.keys(slot).sort()).toEqual(["kind", "model", "switchboardOrigin", "takeIntakeFiles", "takeOpenView"]);
   });
 });

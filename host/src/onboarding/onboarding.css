@@ -1,0 +1,121 @@
+/* host/src/onboarding/onboarding.css — the setup guide (spec §5, Six Minds). Colours only through the app's tokens. */
+.kv-onb .kv-header { padding-bottom: 0; }
+.kv-onb-main { width: 100%; max-width: 680px; margin: 0 auto; padding: 22px var(--kv-gutter) 40px; box-sizing: border-box; }
+.kv-onb-foot { margin: 0; padding: 0 var(--kv-gutter) 22px; text-align: center; color: var(--bai-text-tertiary); font-size: 13px; }
+
+/* Wayfinding: the rail says where you are; the current step is the only lit one */
+.kv-onb-rail { list-style: none; margin: 0 0 26px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.kv-onb-rail li { display: flex; align-items: center; gap: 8px; min-width: 0; padding-top: 10px; border-top: 2px solid var(--bai-border); color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-onb-rail li > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-onb-rail li[data-state="current"] { border-top-color: var(--bai-accent); color: var(--bai-text); font-weight: 600; }
+.kv-onb-rail li[data-state="done"] { border-top-color: var(--bai-accent-soft); color: var(--bai-text-secondary); }
+.kv-onb-dot { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; border: 1px solid var(--bai-border); font-size: 12px; font-weight: 600; }
+.kv-onb-rail li[data-state="current"] .kv-onb-dot { background: var(--bai-accent); border-color: transparent; color: var(--bai-accent-text); }
+/* Emotion: a finished step's tick pops once */
+.kv-onb-rail li[data-state="done"] .kv-onb-dot { background: var(--bai-ok-soft); border-color: transparent; color: var(--bai-ok); animation: kv-onb-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1.2); }
+
+/* each step arrives from the side it lies on: forward from the right, back from the left */
+.kv-onb-step { animation: kv-onb-in-forward 260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.kv-onb-step[data-direction="back"] { animation-name: kv-onb-in-back; }
+@keyframes kv-onb-in-forward { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes kv-onb-in-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+@keyframes kv-onb-pop { 0% { transform: scale(0.6); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+/* type and fields */
+.kv-onb-title { font-family: var(--kv-font-name); font-weight: 500; font-size: 30px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 10px; }
+.kv-onb-lead { color: var(--bai-text-secondary); margin: 0 0 20px; max-width: 60ch; }
+.kv-onb-label { display: block; font-weight: 500; margin: 16px 0 6px; }
+.kv-onb-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid var(--bai-border); border-radius: 6px; background: var(--bai-deep); color: var(--bai-text); font: inherit; }
+.kv-onb-input:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: 1px; }
+.kv-onb-textarea { resize: vertical; min-height: 120px; }
+
+/* Vision: one primary action, bottom right; Back bottom left */
+.kv-onb-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 26px; }
+.kv-onb-actions-end { justify-content: flex-end; }
+.kv-onb-actions .kv-button-primary { min-width: 140px; }
+
+/* welcome */
+.kv-onb-sky { height: 190px; margin: 0 0 24px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-deep); overflow: hidden; }
+.kv-onb-sky .kv-constellation[data-real="false"] .kv-node { fill: var(--bai-accent); fill-opacity: 0.85; }
+.kv-onb-how { list-style: none; counter-reset: how; margin: 6px 0 16px; padding: 0; display: grid; gap: 14px; }
+.kv-onb-how li { counter-increment: how; display: grid; grid-template-columns: 30px 1fr; column-gap: 12px; }
+.kv-onb-how li::before { content: counter(how); grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--bai-accent-soft); color: var(--bai-accent); font-weight: 600; font-size: 13px; }
+.kv-onb-how strong { font-weight: 600; }
+.kv-onb-how span { color: var(--bai-text-secondary); }
+
+/* outcomes: a quiet success with a tick that pops once */
+.kv-onb-ok { color: var(--bai-ok); margin: 12px 0 0; display: flex; align-items: center; gap: 8px; }
+.kv-onb-ok::before { content: "✓"; flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--bai-ok-soft); font-size: 12px; font-weight: 700; animation: kv-onb-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1.2); }
+.kv-onb-verdict { min-height: 24px; }
+
+/* choose your AI */
+.kv-onb-local { display: grid; gap: 10px; }
+.kv-onb-found { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.kv-onb-found legend { padding: 0; margin: 0 0 6px; font-weight: 500; }
+.kv-onb-found-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--bai-border); border-radius: 8px; cursor: pointer; }
+.kv-onb-found-item[data-checked="true"] { border-color: var(--bai-accent); background: var(--bai-accent-soft); }
+.kv-onb-found-item input { margin-top: 3px; accent-color: var(--bai-accent); }
+.kv-onb-found-item > span { display: grid; gap: 2px; min-width: 0; }
+.kv-onb-found-item strong { overflow-wrap: anywhere; }
+.kv-onb-found-item .kv-hint { margin: 0; }
+.kv-onb-none p { margin: 0 0 6px; }
+.kv-onb-local-more { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.kv-onb-details summary { cursor: pointer; color: var(--bai-text-tertiary); font-size: 14px; }
+.kv-onb-details[open] { flex-basis: 100%; }
+.kv-onb-address { padding-top: 4px; }
+
+/* add your first sources */
+.kv-onb-drop { display: grid; justify-items: center; gap: 6px; padding: 28px 20px; border: 2px dashed var(--bai-border); border-radius: 12px; background: var(--bai-deep); text-align: center; transition: border-color 120ms, background 120ms; }
+.kv-onb-drop[data-over="true"] { border-color: var(--bai-accent); background: var(--bai-accent-soft); }
+.kv-onb-drop-title { margin: 0; font-size: 17px; font-weight: 600; }
+.kv-onb-drop .kv-hint { margin: 0 0 8px; max-width: 46ch; }
+.kv-onb-files { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.kv-onb-files li { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; border: 1px solid var(--bai-border); border-radius: 6px; }
+.kv-onb-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-onb-files .kv-hint { margin: 0; }
+.kv-onb-paste { display: inline-block; margin-top: 14px; }
+.kv-onb-guide { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-surface); }
+.kv-onb-guide p { margin: 0; }
+.kv-onb-check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.kv-onb-check input { margin-top: 3px; accent-color: var(--bai-accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .kv-onb-step, .kv-onb-ok::before, .kv-onb-rail li[data-state="done"] .kv-onb-dot { animation: none; }
+}
+/* narrow tiles: the rail keeps its numbers and the current step's name */
+@media (max-width: 560px) {
+  .kv-onb-title { font-size: 25px; }
+  .kv-onb-rail { display: flex; }
+  .kv-onb-rail li { flex: none; }
+  .kv-onb-rail li > span:nth-child(2) { display: none; }
+  .kv-onb-rail li[data-state="current"] { flex: 1 1 auto; }
+  .kv-onb-rail li[data-state="current"] > span:nth-child(2) { display: inline; }
+}
+
+/* the overview: progress while the vault fills, then what it can do */
+.kv-onb-progress { padding: 16px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); display: grid; gap: 12px; }
+.kv-onb-bar { height: 8px; border-radius: 4px; background: var(--bai-deep); overflow: hidden; }
+.kv-onb-bar > span { display: block; height: 100%; background: var(--bai-accent); border-radius: 4px; transition: width 400ms ease; }
+.kv-onb-filelist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.kv-onb-filelist li { display: flex; align-items: baseline; gap: 10px; }
+.kv-onb-filelist li .kv-hint { margin: 0; flex: none; }
+.kv-onb-filelist li[data-done="true"] .kv-hint { color: var(--bai-ok); }
+.kv-onb-filelist li[data-failed="true"] .kv-hint { color: var(--bai-danger); }
+.kv-onb-processing { margin: 0; color: var(--bai-text-secondary); display: flex; align-items: center; gap: 10px; }
+.kv-onb-processing[data-busy="true"]::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--bai-accent); animation: kv-onb-pulse 1.4s ease-in-out infinite; }
+@keyframes kv-onb-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+.kv-onb-subtitle { font-size: 16px; font-weight: 600; margin: 26px 0 10px; }
+.kv-onb-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kv-onb-card { width: 100%; height: 100%; display: grid; gap: 4px; align-content: start; text-align: left; padding: 14px 16px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-surface); color: var(--bai-text); font: inherit; cursor: pointer; }
+.kv-onb-card:hover:not(:disabled) { border-color: var(--bai-accent); }
+.kv-onb-card:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: 1px; }
+.kv-onb-card:disabled { cursor: default; opacity: 0.55; }
+.kv-onb-card span { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-onb-card-row { display: flex; justify-content: space-between; align-items: baseline; }
+.kv-onb-existing ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 8px; }
+.kv-onb-drop[data-off="true"] { border-style: solid; }
+@media (max-width: 560px) { .kv-onb-cards { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .kv-onb-processing[data-busy="true"]::before, .kv-onb-bar > span { animation: none; transition: none; } }
+.kv-onb-actions-right { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+/* the heading takes focus for screen readers when a step opens; it is not a control, so no ring */
+.kv-onb-title:focus, .kv-onb-title:focus-visible { outline: none; }

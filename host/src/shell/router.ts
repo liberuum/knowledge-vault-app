@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ONBOARDING_STEPS, type OnboardingStep } from "../onboarding/onboarding-state.js";
 
 /**
  * Hash routes: a desktop webview reloads at the app's root, so a path-based
@@ -12,7 +13,9 @@ export type Route =
   | { name: "remote"; id: string }
   /** Workflow Studio; `workflow` opens one workflow's live view (Studio keeps its selection in the fragment as `#<id>`). */
   | { name: "workflows"; workflow?: string }
-  | { name: "settings"; section: SettingsSection };
+  | { name: "settings"; section: SettingsSection }
+  /** The setup guide (spec §5); `vault` is the vault it created, for the sources step. */
+  | { name: "welcome"; step?: OnboardingStep; vault?: string };
 
 export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#/, "");
@@ -24,6 +27,10 @@ export function parseRoute(hash: string): Route {
   if (segments[0] === "vault" && segments[1]) return { name: "vault", id: decodeURIComponent(segments[1]) };
   if (segments[0] === "remote" && segments[1]) return { name: "remote", id: decodeURIComponent(segments[1]) };
   if (segments[0] === "workflows") return { name: "workflows" };
+  if (segments[0] === "welcome") {
+    const step = (ONBOARDING_STEPS as readonly string[]).includes(segments[1] ?? "") ? (segments[1] as OnboardingStep) : "welcome";
+    return segments[2] ? { name: "welcome", step, vault: decodeURIComponent(segments[2]) } : { name: "welcome", step };
+  }
   if (segments[0] === "settings") {
     const section = segments[1];
     return { name: "settings", section: (SETTINGS_SECTIONS as readonly string[]).includes(section ?? "") ? (section as SettingsSection) : "vaults" };
@@ -43,6 +50,8 @@ export function routeHash(route: Route): string {
       return route.workflow ? `#${route.workflow}` : "#/workflows";
     case "settings":
       return `#/settings/${route.section}`;
+    case "welcome":
+      return `#/welcome/${route.step ?? "welcome"}${route.vault ? `/${encodeURIComponent(route.vault)}` : ""}`;
   }
 }
 

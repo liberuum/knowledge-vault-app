@@ -23,7 +23,11 @@ import type { TokenProvider } from "./api/identity.js";
 import { EngineBanner } from "./components/EngineBanner.js";
 import { DownloadNotice } from "./components/DownloadNotice.js";
 import { useEngineHealth } from "./state/use-engine-health.js";
-import { fetchSettings } from "./vaults.js";
+import { fetchSettings, type AppSettings } from "./vaults.js";
+import { Onboarding } from "./onboarding/Onboarding.js";
+import type { OnboardingStep } from "./onboarding/onboarding-state.js";
+import { useOnboardingGate } from "./onboarding/use-onboarding-gate.js";
+import { setOpenView } from "./onboarding/pending-files.js";
 
 /** The packages the host mounts; boot.tsx installs the reactor with their document models, once. */
 export const LIBS: readonly DocumentModelLib[] = [
@@ -38,6 +42,10 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   const toWorkflows = useCallback(() => navigate({ name: "workflows" }), [navigate]);
   const inWorkspace = route.name === "vault" || route.name === "workflows" || route.name === "remote";
   const toIdentity = useCallback(() => navigate({ name: "settings", section: "identity" }), [navigate]);
+  const toGuide = useCallback((step: OnboardingStep = "welcome", vault?: string) => navigate({ name: "welcome", step, ...(vault ? { vault } : {}) }), [navigate]);
+  // A new install (or one stopped half-way) opens the setup guide from the landing, once per start.
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const gateDecided = useOnboardingGate(info, route.name === "vaults", appSettings, toGuide);
   const identity = useIdentity(info);
   // Spec §9: a crash the supervisor is restarting shows as a banner over whatever is open.
   const health = useEngineHealth(info);
@@ -70,6 +78,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
     void fetchSettings(info)
       .then((s) => {
         if (!alive) return;
+        setAppSettings(s);
         setHostModel(modelDeclaration(info, s.models), openModelSettings);
         if (!inRemote) declareDesktopHost(info.origin, { identity: hostIdentity, ...(bearer ? { bearer } : {}) });
       })
@@ -114,11 +123,28 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
     case "remote":
       screen = <RemoteRoute info={info} id={route.id} identity={hostIdentity} onBack={toVaults} onSettings={toSettings} />;
       break;
+    case "welcome":
+      screen = (
+        <Onboarding
+          info={info}
+          step={route.step ?? "welcome"}
+          vaultId={route.vault}
+          onStep={toGuide}
+          onFinish={(id, view) => {
+            if (view) setOpenView(id, view);
+            navigate({ name: "vault", id });
+          }}
+          onRuns={(workflow) => navigate({ name: "workflows", workflow })}
+          onLeave={toVaults}
+        />
+      );
+      break;
     case "settings":
       screen = <Settings info={info} section={route.section} onSection={(section) => navigate({ name: "settings", section })} onBack={toVaults} onOpenWorkflows={toWorkflows} identity={identity} />;
       break;
     default:
-      screen = (
+      // Until the start-up gate decided, the landing waits: a newcomer goes straight to the guide, no flash.
+      screen = !gateDecided ? <div className="kv-landing" aria-busy="true" /> : (
         <Landing
           engine={{ state: "ready" }}
           info={info}
@@ -131,6 +157,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           onWorkflows={toWorkflows}
           onSettings={toSettings}
           localBearer={bearer}
+          onGuide={() => toGuide()}
         />
       );
   }

@@ -79,6 +79,8 @@ type Props = {
   storage?: Storage;
   /** The user's bearer for a protected local engine (spec §4.4); its tiles then fetch as remote ones do. */
   localBearer?: () => Promise<string | undefined>;
+  /** Opens the setup guide (spec §5): offered on the first-run screen to anyone who skipped it. */
+  onGuide?: () => void;
 };
 
 /**
@@ -86,7 +88,7 @@ type Props = {
  * recently opened one largest; on first run, the inline create form; the
  * engine's state in a strip at the bottom. Never a workspace.
  */
-export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry }: Props) {
+export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const [vaults, setVaults] = useState<VaultSummary[] | null>(null);
   const [remotes, setRemotes] = useState<RemoteVault[] | null>(null);
@@ -284,6 +286,13 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
         {firstRun && (
           <>
             <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
+            {onGuide && (
+              <p className="kv-hint">
+                New here?{" "}
+                <button type="button" className="kv-link" onClick={onGuide}>Open the setup guide</button>
+                {" "}to choose an AI and add your first sources.
+              </p>
+            )}
             <p className="kv-hint">
               Already have a vault on a server?{" "}
               {signedIn ? (

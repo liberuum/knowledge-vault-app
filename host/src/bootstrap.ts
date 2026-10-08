@@ -3,6 +3,8 @@
  * time. The host writes it directly — it loads before the package — and
  * dispatches the package's change event so its hooks re-read it.
  */
+import { takeIntakeFiles, takeOpenView } from "./onboarding/pending-files.js";
+
 export const HOST_SLOT = "__knowledgeVaultHost";
 export const HOST_CHANGED_EVENT = "knowledge-vault-host:changed";
 
@@ -44,6 +46,10 @@ export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras
     ...(externalSignIn ? { externalSignIn } : {}),
     ...(hostModel !== undefined ? { model: hostModel } : {}),
     ...(openModelSettings ? { openModelSettings } : {}),
+    // Files the setup guide collected: the vault takes them into its intake when it opens.
+    takeIntakeFiles,
+    // The view a vault opens on, when the guide's overview sent the person somewhere specific.
+    takeOpenView,
   };
   if (typeof globalThis.dispatchEvent === "function" && typeof Event === "function") globalThis.dispatchEvent(new Event(HOST_CHANGED_EVENT));
 }

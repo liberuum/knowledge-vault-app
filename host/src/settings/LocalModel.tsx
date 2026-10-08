@@ -184,7 +184,7 @@ export function LocalModel({ current, probe, use, disabled, storage, discover }:
           )}
         </div>
       )}
-      <label htmlFor="local-model-url">{discover ? "Or enter its address" : "Local server address"}</label>
+      <label htmlFor="local-model-url">Local server address</label>
       <div className="kv-form-inline">
         <input id="local-model-url" value={url} onChange={(e) => { setUrl(e.target.value); setResult(null); }} placeholder={DEFAULT_LOCAL_ENDPOINT} disabled={disabled || checking} />
         <button type="button" className="kv-button" disabled={disabled || checking || !url.trim()} onClick={() => void connect(url)}>
