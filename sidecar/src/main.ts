@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSidecarConfig, switchboardEnv } from "./config.js";
 import { createControlServer } from "./control.js";
+import { detectGraphicsMemory, modelSizeHint } from "./gpu.js";
+import { discoverLocalModels } from "./model-discovery.js";
 import { converterEnvironment, createConverterManager } from "./converter.js";
 import { createIdentity, DEFAULT_RENOWN_URL, defaultIdentityDeps } from "./identity.js";
 import { bindLoopbackOnly } from "./loopback.js";
@@ -313,6 +315,13 @@ async function main(): Promise<void> {
     validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
     modelCatalog: (endpoint) => fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
     probeModels: (endpoint) => probeLocalModels(endpoint, (e) => isLocalEndpoint(e) || privateHostAllow(e) !== null),
+    discoverModels: async () => {
+      const [gpu, servers] = await Promise.all([
+        detectGraphicsMemory(),
+        discoverLocalModels({ exclude: [switchboard.port, boundControlPort, Number(new URL(cfg.hostOrigin).port) || 0] }),
+      ]);
+      return { servers, gpu, hint: modelSizeHint(gpu) };
+    },
     // Spec §4.4: the switch writes config.json's `local` section, answers, then the engine shuts down
     // and prints a restart line — whoever spawned it (the shell, the dev loop) starts it again with
     // KV_PROTECTED/KV_ADMIN_ADDRESS read from that section. The Switchboard's auth flags are fixed at

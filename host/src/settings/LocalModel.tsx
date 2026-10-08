@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { LocalProbe } from "../vaults.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { DiscoveredModel, DiscoveredServer, LocalDiscovery, LocalProbe } from "../vaults.js";
 
 export const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:8080/v1";
 /** The last address tried, so a failed connect does not send the user back to the default. */
@@ -15,13 +15,25 @@ type Props = {
   disabled?: boolean;
   /** Where the last address tried is kept (tests inject one). */
   storage?: UrlStore;
+  /** Find the model servers running on this computer (the engine scans); absent, only an address can be entered. */
+  discover?: () => Promise<LocalDiscovery>;
 };
+
+/** One line about a found model, in words: where it runs, whether it is ready, how much it reads at once. */
+export function describeFound(server: DiscoveredServer, model: DiscoveredModel): string {
+  const parts = [`${server.provider} on port ${server.port}`];
+  if (model.loaded === true) parts.push("loaded");
+  if (model.loaded === false) parts.push("not loaded yet, so the first answer takes longer");
+  if (model.contextLength) parts.push(`reads ${model.contextLength.toLocaleString("en")} tokens at once`);
+  const sentence = `${parts.join(", ")}.`;
+  return model.contextLength && model.contextLength < 16_384 ? `${sentence} That is short for whole sources: long ones will be cut.` : sentence;
+}
 
 /**
  * Settings › Models: run the pipeline on a model on this computer — llama.cpp, Ollama, LM Studio, any
  * OpenAI-compatible server. Connect to its address, see what it serves, use it; no key needed.
  */
-export function LocalModel({ current, probe, use, disabled, storage }: Props) {
+export function LocalModel({ current, probe, use, disabled, storage, discover }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const lastTried = (): string | null => {
     try {
@@ -37,6 +49,38 @@ export function LocalModel({ current, probe, use, disabled, storage }: Props) {
   const [checking, setChecking] = useState(false);
   const [chosen, setChosen] = useState("");
   const [saving, setSaving] = useState(false);
+  const [found, setFound] = useState<LocalDiscovery | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  const scan = useCallback(async () => {
+    if (!discover) return;
+    setScanning(true);
+    try {
+      setFound(await discover());
+    } catch {
+      setFound(null); // the address field below still works
+    } finally {
+      setScanning(false);
+    }
+  }, [discover]);
+  // Opening the panel looks for running servers straight away: nothing to type when one is found.
+  // Keyed on opening only — a parent may pass a new `discover` on every render.
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  useEffect(() => {
+    if (open) void scanRef.current();
+  }, [open]);
+
+  const choose = (endpoint: string, model: string) => {
+    setSaving(true);
+    void use(endpoint, model).then(
+      () => {
+        setOpen(false);
+        setSaving(false);
+      },
+      () => setSaving(false),
+    );
+  };
 
   const connect = async (address: string) => {
     try {
@@ -95,7 +139,52 @@ export function LocalModel({ current, probe, use, disabled, storage }: Props) {
 
   return (
     <section className="kv-local-model" aria-label="Local model">
-      <label htmlFor="local-model-url">Local server address</label>
+      {discover && (
+        <div className="kv-local-found" aria-live="polite" aria-busy={scanning}>
+          {scanning && <p className="kv-quiet" role="status">Looking for AI models on this computer…</p>}
+          {!scanning && found && found.servers.length > 0 && (
+            <>
+              <p className="kv-local-found-title">Found on this computer</p>
+              <ul className="kv-local-found-list">
+                {found.servers.flatMap((server) =>
+                  server.models.map((model) => (
+                    <li key={`${server.endpoint} ${model.id}`} className="kv-local-found-item">
+                      <div className="kv-local-found-text">
+                        <strong>{model.id}</strong>
+                        <span className="kv-hint">{describeFound(server, model)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="kv-button kv-button-primary"
+                        disabled={disabled || saving}
+                        aria-label={`Use ${model.id}`}
+                        onClick={() => choose(server.endpoint, model.id)}
+                      >
+                        {current.local && current.endpoint === server.endpoint && current.model === model.id ? "In use" : "Use"}
+                      </button>
+                    </li>
+                  )),
+                )}
+              </ul>
+            </>
+          )}
+          {!scanning && found && found.servers.length === 0 && (
+            <p className="kv-hint">
+              No AI model is running on this computer. <a href="https://ollama.com" target="_blank" rel="noreferrer">Ollama</a> and{" "}
+              <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a> are free ways to run one; start it, then scan again.
+            </p>
+          )}
+          {!scanning && found && <p className="kv-hint">{found.hint}</p>}
+          {!scanning && (
+            <div className="kv-form-actions">
+              <button type="button" className="kv-button" disabled={disabled || saving} onClick={() => void scan()}>
+                Scan again
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <label htmlFor="local-model-url">{discover ? "Or enter its address" : "Local server address"}</label>
       <div className="kv-form-inline">
         <input id="local-model-url" value={url} onChange={(e) => { setUrl(e.target.value); setResult(null); }} placeholder={DEFAULT_LOCAL_ENDPOINT} disabled={disabled || checking} />
         <button type="button" className="kv-button" disabled={disabled || checking || !url.trim()} onClick={() => void connect(url)}>

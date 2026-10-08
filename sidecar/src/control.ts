@@ -53,6 +53,8 @@ export type ControlDeps = {
   modelCatalog: (endpoint?: string) => Promise<unknown>;
   /** Try a local model server's address before saving it: what it serves, or why it did not answer. */
   probeModels: (endpoint: string) => Promise<unknown>;
+  /** Model servers running on this computer, and what its graphics memory runs well (model-discovery.ts, gpu.ts). */
+  discoverModels?: () => Promise<unknown>;
   /** Spec §4.5: each vault's pipeline (template instantiation, status, removal). */
   pipelines: {
     ensure: (vaultId: string) => Promise<EnsureResult>;
@@ -313,6 +315,9 @@ export function createControlServer(deps: ControlDeps) {
         const endpoint = url.searchParams.get("endpoint")?.trim() ?? "";
         if (!endpoint) return send(res, 400, { error: "Give the server's address, e.g. http://127.0.0.1:8080/v1." }, allowed);
         return send(res, 200, await deps.probeModels(endpoint), allowed);
+      }
+      if (req.method === "GET" && url.pathname === "/settings/models/discover" && deps.discoverModels) {
+        return send(res, 200, await deps.discoverModels(), allowed);
       }
       if (req.method === "GET" && url.pathname === "/settings/models/catalog") {
         if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: "Save a key first." }, allowed);

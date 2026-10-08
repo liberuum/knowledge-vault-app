@@ -138,6 +138,13 @@ export type LocalProbe = { ok: true; endpoint: string; models: string[] } | { ok
 export async function probeLocalModels(info: SidecarInfo, endpoint: string, fetchImpl: typeof fetch = fetch): Promise<LocalProbe> {
   return control<LocalProbe>(info, `/settings/models/probe?endpoint=${encodeURIComponent(endpoint)}`, { method: "GET" }, fetchImpl);
 }
+/** What the engine found running on this computer, and what its graphics memory runs well (sidecar model-discovery.ts, gpu.ts). */
+export type DiscoveredModel = { id: string; loaded: boolean | null; contextLength: number | null; vision: boolean | null };
+export type DiscoveredServer = { endpoint: string; port: number; provider: string; models: DiscoveredModel[]; parallel: number | null };
+export type LocalDiscovery = { servers: DiscoveredServer[]; gpu: { kind: "dedicated" | "unified" | "none"; bytes: number; name: string | null }; hint: string };
+export async function discoverLocalModels(info: SidecarInfo, fetchImpl: typeof fetch = fetch): Promise<LocalDiscovery> {
+  return control<LocalDiscovery>(info, "/settings/models/discover", { method: "GET" }, fetchImpl);
+}
 /** The provider's model list with the saved key, for the picker (the engine asks; the page never holds the key). */
 export type ModelCatalog = { ok: true; models: import("./settings/model-picker.js").CatalogModel[] } | { ok: false; detail: string };
 export async function fetchModelCatalog(info: SidecarInfo, endpoint?: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
