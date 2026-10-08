@@ -1961,6 +1961,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "signal-hook",
  "tar",
  "tauri",
  "tauri-build",

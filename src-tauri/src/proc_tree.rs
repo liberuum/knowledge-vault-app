@@ -132,6 +132,25 @@ mod tests {
         assert_eq!(descendants(100, &table), vec![101]);
     }
 
+    // A real process tree on this machine — the same `ps` and `kill` the shell uses (Linux and macOS).
+    #[cfg(unix)]
+    #[test]
+    fn records_and_ends_a_real_tree() {
+        let mut parent = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 & sleep 30 & wait"])
+            .spawn()
+            .expect("sh");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let mut tree = Tree::default();
+        tree.record(parent.id());
+        let recorded: Vec<u32> = tree.known.iter().copied().collect();
+        assert_eq!(recorded.len(), 2, "both sleeps recorded: {recorded:?}");
+        let _ = parent.kill();
+        let _ = parent.wait();
+        tree.end();
+        assert!(recorded.iter().all(|&p| !alive(p)), "a recorded child survived");
+    }
+
     #[test]
     fn parses_ps_output_and_skips_junk() {
         assert_eq!(

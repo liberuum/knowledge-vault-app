@@ -25,6 +25,7 @@ import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelin
 import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
+import { reapChildren } from "./child-reaper.js";
 import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
 
 /** When this engine came up: runs that began earlier belong to a previous life of it. */
@@ -390,6 +391,11 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => {
     void converter.stop();
     void control.close();
+  });
+  // Whatever the engine started and is still running ends with it (child-reaper.ts).
+  process.on("exit", () => {
+    const reaped = reapChildren();
+    if (reaped.length) console.error(`[sidecar] ended ${reaped.length} worker(s) left running at exit`);
   });
 }
 

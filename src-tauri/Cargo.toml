@@ -30,3 +30,7 @@ tauri-plugin-window-state = "2"
 tiny_http = "0.12"
 tauri-plugin-dialog = "2"
 tar = "0.4"
+
+# A session logout or `kill` sends SIGTERM: quit gracefully (stop the engine) instead of dying at once.
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.4"

@@ -145,6 +145,25 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            // SIGTERM (a session logout, `kill`), SIGINT and SIGHUP take the graceful path the tray's
+            // Quit takes — stop the engine and its workers, then exit — instead of ending the shell at
+            // once and leaving the engine to notice on its own.
+            #[cfg(unix)]
+            {
+                use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
+                let on_signal = handle.clone();
+                match signal_hook::iterator::Signals::new([SIGTERM, SIGINT, SIGHUP]) {
+                    Ok(mut signals) => {
+                        std::thread::spawn(move || {
+                            if let Some(sig) = signals.forever().next() {
+                                eprintln!("[shell] signal {sig}: stopping the engine, then quitting");
+                                quit(&on_signal);
+                            }
+                        });
+                    }
+                    Err(e) => eprintln!("[shell] could not watch for SIGTERM ({e}); a kill ends the shell at once"),
+                }
+            }
             if let Err(e) = tray::build(&handle) {
                 eprintln!("[shell] no system tray ({e}); closing the window will quit the app");
             }
