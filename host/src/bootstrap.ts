@@ -24,6 +24,13 @@ export function setExternalSignIn(fn: ExternalSignIn | undefined): void {
   externalSignIn = fn;
 }
 
+/** Reads files a drop carried only by address (WebKitGTK): the engine reads them. Set once at boot. */
+export type DroppedFileReader = (uriList: string) => Promise<File[]>;
+let droppedFileReader: DroppedFileReader | undefined;
+export function setDroppedFileReader(fn: DroppedFileReader | undefined): void {
+  droppedFileReader = fn;
+}
+
 /**
  * The model the vault chat runs on: the app's, reached through the engine's gateway. `null` means the app manages
  * the model and none is set up (the chat shows its set-up panel); absent means the chat keeps its own connections.
@@ -50,6 +57,7 @@ export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras
     takeIntakeFiles,
     // The view a vault opens on, when the guide's overview sent the person somewhere specific.
     takeOpenView,
+    ...(droppedFileReader ? { readDroppedFiles: droppedFileReader } : {}),
   };
   if (typeof globalThis.dispatchEvent === "function" && typeof Event === "function") globalThis.dispatchEvent(new Event(HOST_CHANGED_EVENT));
 }

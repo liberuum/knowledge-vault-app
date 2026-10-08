@@ -1,6 +1,7 @@
 import { initTheme, useTheme, type GraphQLReactorClient } from "@powerhousedao/reactor-browser";
+import { filesFromUriList } from "./api/dropped-files.js";
 import { useEffect, useRef, useState, type ComponentType } from "react";
-import { declareDesktopHost, setExternalSignIn, setHostModel } from "./bootstrap.js";
+import { declareDesktopHost, setDroppedFileReader, setExternalSignIn, setHostModel } from "./bootstrap.js";
 import { externalSignIn } from "./api/oauth.js";
 import { installExternalLinksForTauri } from "./links.js";
 import { localHostExtras } from "./local-engine.js";
@@ -38,6 +39,8 @@ export const loadApp: AppLoader = (info) => {
     const extras = localHostExtras(status?.protected === true, info);
     // The vault chat's OpenRouter sign-in returns through the engine, not to this window (api/oauth.ts).
     setExternalSignIn((buildUrl) => externalSignIn(info, buildUrl));
+    // Files dragged from a Linux file manager arrive as addresses: the engine reads them for the vault's drop zones.
+    setDroppedFileReader(async (uriList) => (await filesFromUriList(info, uriList)).files);
     // The app manages the chat's model. `null`: none is set up (or the engine did not say yet), and the chat shows its set-up panel; App re-reads and re-declares.
     setHostModel(settings ? modelDeclaration(info, settings.models) : null, openModelSettings);
     declareDesktopHost(info.origin, extras);
