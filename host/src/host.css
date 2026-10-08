@@ -286,8 +286,10 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-appbar .kv-pipeline-chip .kv-pipeline-link { padding: 0; border: 0; background: none; font-size: 12px; line-height: inherit; }
 
 /* ---- start-up stages (the landing while the engine starts) ---- */
-.kv-startup { margin: 24px 0 0; padding: 20px 22px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); max-width: 520px; }
-.kv-startup-head { display: flex; align-items: center; gap: 12px; }
+/* Centred in the page while the engine starts: the main area becomes a column and the panel floats to its middle. */
+.kv-landing[data-engine="starting"] .kv-main { display: flex; flex-direction: column; }
+.kv-startup { margin: auto; width: 100%; max-width: 460px; padding: 24px 26px 22px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); box-sizing: border-box; }
+.kv-startup-head { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .kv-startup-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--bai-text); }
 .kv-spinner { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bai-border); border-top-color: var(--bai-accent); }
 @media (prefers-reduced-motion: no-preference) {
