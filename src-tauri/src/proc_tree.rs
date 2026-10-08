@@ -3,6 +3,9 @@
 //! they then crash with SIGBUS the moment the shell exits and the image is unmounted. The shell
 //! therefore records the whole tree while it waits for the engine to stop, and ends what is left.
 
+// The tree walk and ps parsing serve the Unix path (and the tests); Windows ends the tree with taskkill /T.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use std::collections::{BTreeSet, HashMap};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -148,7 +151,10 @@ mod tests {
         let _ = parent.kill();
         let _ = parent.wait();
         tree.end();
-        assert!(recorded.iter().all(|&p| !alive(p)), "a recorded child survived");
+        assert!(
+            recorded.iter().all(|&p| !alive(p)),
+            "a recorded child survived"
+        );
     }
 
     #[test]
