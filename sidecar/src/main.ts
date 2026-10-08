@@ -24,6 +24,7 @@ import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
 import { createPipelineManager, mintEngineToken } from "./pipelines.js";
 import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, validateModelEndpoint } from "./models-validate.js";
+import { watchParent } from "./parent-watch.js";
 import { privateHostAllow } from "./egress.js";
 import type { PipelineTemplate } from "./templates.js";
 import { createRequire } from "node:module";
@@ -355,6 +356,16 @@ async function main(): Promise<void> {
     process.stdin.on("end", () => process.kill(process.pid, "SIGINT"));
     process.stdin.on("data", (chunk) => {
       if (String(chunk).trim() === "stop") process.kill(process.pid, "SIGINT");
+    });
+  }
+  // And if whoever spawned us dies without closing the pipe, stop all the same (parent-watch.ts).
+  if (process.env.KV_STDIN_STOP === "1") {
+    watchParent({
+      getPpid: () => process.ppid,
+      onGone: () => {
+        console.error("[sidecar] the shell is gone; stopping");
+        process.kill(process.pid, "SIGINT");
+      },
     });
   }
   process.on("SIGINT", () => {
