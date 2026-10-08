@@ -202,7 +202,7 @@ pub fn run() {
             tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("Knowledge Vault")
                 .inner_size(1280.0, 820.0)
-                .min_inner_size(960.0, 640.0)
+                .min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1)
                 .disable_drag_drop_handler()
                 .on_download(|webview, event| {
                     use tauri::webview::DownloadEvent;
@@ -420,6 +420,33 @@ pub fn run() {
                 stop_sidecar_blocking(app);
             }
         });
+}
+
+/// The smallest the window may be. Small enough for a half-width tile in a tiling window manager:
+/// a minimum larger than the tile makes the compositor squeeze the window, and the pointer then
+/// lands beside what it hovers (Hyprland at 1.6 scale, a ~950-pixel tile, under the old 960).
+const MIN_WINDOW: (f64, f64) = (480.0, 480.0);
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::MIN_WINDOW;
+
+    /// A tiling window manager (Hyprland, Sway, i3) squeezes a window it cannot shrink, and the
+    /// pointer then misses what it hovers. The minimum must fit a half-width tile of a 1920-wide
+    /// display at 150 % scaling (640 logical pixels, minus borders and gaps) and a short tile.
+    #[test]
+    fn the_minimum_fits_a_half_width_tile() {
+        assert!(
+            MIN_WINDOW.0 <= 600.0,
+            "minimum width {} is wider than a half tile",
+            MIN_WINDOW.0
+        );
+        assert!(
+            MIN_WINDOW.1 <= 500.0,
+            "minimum height {} is taller than a short tile",
+            MIN_WINDOW.1
+        );
+    }
 }
 
 #[cfg(test)]
