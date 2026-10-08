@@ -26,7 +26,8 @@ let modelsApplied = 0;
 let scheduled: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+let settingsPatches: unknown[] = [];
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -83,7 +84,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       },
     },
     readSettings: () => settings,
-    writeSettings: (patch) => { settings = { ...settings, models: { ...settings.models, ...(patch.models?.endpoint ? { endpoint: patch.models.endpoint } : {}), ...(patch.models?.model !== undefined ? { model: patch.models.model } : {}), ...(patch.models?.apiKey !== undefined ? { hasKey: !!patch.models.apiKey } : {}) }, conversion: { ...settings.conversion, ...(patch.conversion ?? {}) } }; return settings; },
+    writeSettings: (patch) => { settingsPatches.push(patch); settings = { ...settings, models: { ...settings.models, ...(patch.models?.endpoint ? { endpoint: patch.models.endpoint } : {}), ...(patch.models?.model !== undefined ? { model: patch.models.model } : {}), ...(patch.models?.apiKey !== undefined ? { hasKey: !!patch.models.apiKey } : {}) }, conversion: { ...settings.conversion, ...(patch.conversion ?? {}) } }; return settings; },
     converter: {
       status: async () => converterStatus,
       restart: async () => { restarted += 1; return converterStatus; },
@@ -175,6 +176,17 @@ describe("control API", () => {
     expect(body.models).toEqual({ endpoint: "https://openrouter.ai/api/v1", model: "gpt-4o-mini", hasKey: true, local: false, provider: "openrouter" });
     expect(JSON.stringify(body)).not.toContain("sk-x");
     expect((await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { apiKey: 42 } }) })).status).toBe(400);
+  });
+  it("forwards a provider to writeSettings, and answers 400 for a provider that is not a fixed service", async () => {
+    const base = await start();
+    const h = { authorization: "Bearer secret", "content-type": "application/json" };
+    const ok = await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { provider: "gemini" } }) });
+    expect(ok.status).toBe(200);
+    expect(settingsPatches).toEqual([{ models: { provider: "gemini" } }]);
+    const bad = await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { provider: "constructor" } }) });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai." });
+    expect(settingsPatches).toHaveLength(1);
   });
   it("allows the management methods in the CORS preflight", async () => {
     const base = await start();

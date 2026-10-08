@@ -40,6 +40,12 @@ describe("settings", () => {
     expect(readModelKey(d)).toBeUndefined();
     expect(existsSync(join(d, "secrets", "llm.key"))).toBe(false);
   });
+  it("refuses a provider that is not one of the fixed services, including inherited object keys", () => {
+    expect(() => writeSettings(dir(), { models: { provider: "constructor" as never } })).toThrow(SettingsError);
+    expect(() => writeSettings(dir(), { models: { provider: "__proto__" as never } })).toThrow(SettingsError);
+    expect(() => writeSettings(dir(), { models: { provider: "toString" as never } })).toThrow(SettingsError);
+    expect(() => writeSettings(dir(), { models: { provider: "nope" as never } })).toThrow(SettingsError);
+  });
   it("rejects a model endpoint that is not an http(s) URL — a key will be sent there", () => {
     expect(() => writeSettings(dir(), { models: { endpoint: "ftp://x" } })).toThrow(SettingsError);
     expect(() => writeSettings(dir(), { models: { endpoint: "openrouter.ai/api/v1" } })).toThrow(SettingsError);

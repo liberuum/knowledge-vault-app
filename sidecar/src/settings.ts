@@ -133,9 +133,9 @@ export function writeSettings(dataDir: string, patch: SettingsPatch): AppSetting
   const models = { endpoint: current.models.endpoint, model: current.models.model };
   if (patch.models) {
     if (patch.models.provider && typeof patch.models.endpoint !== "string") {
-      const address = PROVIDER_ENDPOINTS[patch.models.provider];
-      if (!address) throw new SettingsError("Unknown model provider.");
-      models.endpoint = address;
+      const provider = patch.models.provider;
+      if (!Object.hasOwn(PROVIDER_ENDPOINTS, provider)) throw new SettingsError("Unknown model provider.");
+      models.endpoint = PROVIDER_ENDPOINTS[provider];
     }
     if (typeof patch.models.endpoint === "string") {
       const endpoint = patch.models.endpoint.trim() || DEFAULT_ENDPOINT;

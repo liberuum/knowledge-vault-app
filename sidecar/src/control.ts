@@ -7,7 +7,7 @@ import { RemoteAccessError, RemoteAuthError, RemoteInputError, RemoteNotFoundErr
 import { ConverterBusyError, ConverterInputError, type ConverterStatus } from "./converter.js";
 import { ConnectionError, type FillResult } from "./connections.js";
 import type { EnsureResult, PipelineStatus } from "./pipelines.js";
-import { SettingsError, type AppSettings, type ConversionMode, type ConversionSettings, type SettingsPatch, type LocalProtection } from "./settings.js";
+import { PROVIDER_ENDPOINTS, SettingsError, type AppSettings, type ConversionMode, type ConversionSettings, type SettingsPatch, type LocalProtection } from "./settings.js";
 import { NotAVaultError, type DriveRef, type VaultSummary } from "./vaults.js";
 import type { BackupInfo } from "./backups.js";
 import type { ExportResult } from "./export.js";
@@ -117,6 +117,12 @@ function settingsPatch(body: Record<string, unknown>): SettingsPatch {
     if (m.endpoint !== undefined) {
       if (typeof m.endpoint !== "string") throw new BadRequestError("`models.endpoint` must be a string.");
       mp.endpoint = m.endpoint;
+    }
+    if (m.provider !== undefined) {
+      if (typeof m.provider !== "string" || !Object.hasOwn(PROVIDER_ENDPOINTS, m.provider)) {
+        throw new BadRequestError("`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai.");
+      }
+      mp.provider = m.provider as keyof typeof PROVIDER_ENDPOINTS;
     }
     if (m.model !== undefined) {
       if (typeof m.model !== "string") throw new BadRequestError("`models.model` must be a string.");
