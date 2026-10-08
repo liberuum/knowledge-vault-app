@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SettingsApi } from "./Settings.js";
 import { Settings } from "./Settings.js";
+import { MODELS_CHANGED_EVENT } from "../model-declaration.js";
 import type { SettingsSection } from "../shell/router.js";
 import type { ConverterStatus, SettingsPatch } from "../vaults.js";
 
@@ -361,5 +362,80 @@ describe("Settings", () => {
     await waitFor(() => expect(box.checked).toBe(true));
     fireEvent.click(box);
     await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { ui: { closeToTray: false } }));
+  });
+});
+
+/** The vault chat runs on the model saved here (the app declares it to the vault), so every save that can change it is announced. */
+describe("Settings › Models tells the app when the model changes", () => {
+  const listeners: Array<() => void> = [];
+  function listen() {
+    const heard = vi.fn();
+    window.addEventListener(MODELS_CHANGED_EVENT, heard);
+    listeners.push(() => window.removeEventListener(MODELS_CHANGED_EVENT, heard));
+    return heard;
+  }
+  afterEach(() => {
+    while (listeners.length) listeners.pop()?.();
+  });
+  const withKey = () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna", hasKey: true, provider: "openrouter" as const }, conversion: { mode: "off" as const, remoteUrl: "" } });
+
+  it("after the form saves, once per save", async () => {
+    const heard = listen();
+    const a = api();
+    render(<Harness api={a} start="models" />);
+    fireEvent.change(await screen.findByLabelText("Model (required for processing)"), { target: { value: "llama3" } });
+    expect(heard).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved")).toBeTruthy();
+    expect(heard).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(heard).toHaveBeenCalledTimes(2));
+  });
+
+  it("not when the save fails: the engine kept the old model", async () => {
+    const heard = listen();
+    const a = api({ saveSettings: vi.fn(async () => { throw new Error("The engine said no"); }) });
+    render(<Harness api={a} start="models" />);
+    fireEvent.change(await screen.findByLabelText("Model (required for processing)"), { target: { value: "llama3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Could not save: The engine said no")).toBeTruthy();
+    expect(heard).not.toHaveBeenCalled();
+  });
+
+  it("after a model on this computer is chosen", async () => {
+    const heard = listen();
+    const a = api();
+    render(<Harness api={a} start="models" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use a local model…" }));
+    fireEvent.change(screen.getByLabelText("Local server address"), { target: { value: "http://127.0.0.1:8080/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await screen.findByText(/Connected to http:\/\/127.0.0.1:8080\/v1/);
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "qwen3.8-flash-next" } });
+    expect(heard).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Use qwen3.8-flash-next" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { endpoint: "http://127.0.0.1:8080/v1", model: "qwen3.8-flash-next" } }));
+    await waitFor(() => expect(heard).toHaveBeenCalledTimes(1));
+  });
+
+  it("after the key is removed: a hosted model without its key is no longer one the chat can use", async () => {
+    const heard = listen();
+    const a = api({
+      fetchSettings: vi.fn(async () => withKey()),
+      saveSettings: vi.fn(async () => ({ ...withKey(), models: { ...withKey().models, hasKey: false } })),
+    });
+    render(<Harness api={a} start="models" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { apiKey: "" } }));
+    await waitFor(() => expect(heard).toHaveBeenCalledTimes(1));
+  });
+
+  it("not for a change that cannot touch the model", async () => {
+    const heard = listen();
+    const a = api({ fetchSettings: vi.fn(async () => ({ ...withKey(), ui: { closeToTray: true } })) });
+    render(<Harness api={a} start="appearance" />);
+    fireEvent.click(await screen.findByLabelText("Keep the engine running when the window closes"));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { ui: { closeToTray: false } }));
+    expect(heard).not.toHaveBeenCalled();
   });
 });

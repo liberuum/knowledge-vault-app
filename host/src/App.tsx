@@ -9,7 +9,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIdentity } from "./state/use-identity.js";
 import { useReturnHomeAfterSignIn } from "./state/return-home-after-sign-in.js";
 import { fetchRemoteVaults, type RemoteVault } from "./api/remote.js";
-import { declareDesktopHost } from "./bootstrap.js";
+import { declareDesktopHost, setHostModel } from "./bootstrap.js";
+import { MODELS_CHANGED_EVENT, modelDeclaration, openModelSettings } from "./model-declaration.js";
 import { Landing } from "./screens/Landing.js";
 import { RemoteWorkspaceScreen } from "./screens/RemoteWorkspaceScreen.js";
 import { Settings } from "./screens/Settings.js";
@@ -22,6 +23,7 @@ import type { TokenProvider } from "./api/identity.js";
 import { EngineBanner } from "./components/EngineBanner.js";
 import { DownloadNotice } from "./components/DownloadNotice.js";
 import { useEngineHealth } from "./state/use-engine-health.js";
+import { fetchSettings } from "./vaults.js";
 
 /** The packages the host mounts; boot.tsx installs the reactor with their document models, once. */
 export const LIBS: readonly DocumentModelLib[] = [
@@ -54,6 +56,28 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   // A protected local engine (spec §4.4) is declared with the user's bearer, open with none; coming
   // back from a remote vault re-declares the local engine (the remote screen declared its own).
   const inRemote = route.name === "remote";
+  // The vault chat uses the app's model (spec §3.1): read it, and again whenever Settings › Models saves.
+  // A save only bumps `modelVersion`; it is a dependency of the read below, though its body never uses it —
+  // that is what runs the read again, so it stays in the list.
+  const [modelVersion, setModelVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setModelVersion((n) => n + 1);
+    globalThis.addEventListener(MODELS_CHANGED_EVENT, bump);
+    return () => globalThis.removeEventListener(MODELS_CHANGED_EVENT, bump);
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    void fetchSettings(info)
+      .then((s) => {
+        if (!alive) return;
+        setHostModel(modelDeclaration(info, s.models), openModelSettings);
+        if (!inRemote) declareDesktopHost(info.origin, { identity: hostIdentity, ...(bearer ? { bearer } : {}) });
+      })
+      .catch(() => undefined); // the engine not answering is shown elsewhere; the chat keeps its last model
+    return () => {
+      alive = false;
+    };
+  }, [info, modelVersion, inRemote, hostIdentity, bearer]);
   useEffect(() => {
     if (inRemote) return; // the remote screen is the sole declarer while it is open
     declareDesktopHost(info.origin, { identity: hostIdentity, ...(bearer ? { bearer } : {}) });

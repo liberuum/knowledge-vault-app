@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Boot } from "./boot.js";
 import type { SidecarStatus } from "./sidecar.js";
 
@@ -114,5 +114,80 @@ describe("Boot — the engine restarts", () => {
     w.emit({ state: "starting", preparing: true });
     expect(screen.getByText("Unpacking the engine").closest("li")!.getAttribute("data-state")).toBe("current");
     expect(screen.getByText("Unpacking the engine…")).toBeTruthy();
+  });
+});
+
+describe("loadApp: the first declaration already says which model the chat runs on", () => {
+  const SLOT = "__knowledgeVaultHost";
+  type Declared = { switchboardOrigin?: string; model?: { baseUrl: string; model: string; label: string; headers: () => Record<string, string> } | null; openModelSettings?: () => void };
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const settings = (models: Record<string, unknown>) => ({ version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna", hasKey: true, local: false, provider: "openrouter", ...models }, conversion: { mode: "local", remoteUrl: "" } });
+  /** The engine's control server: /status, and /settings answering whatever the case says. */
+  const engine = (settingsAnswer: () => Response) =>
+    vi.fn(async (url: string | URL | Request) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/status") return json({ ok: true, protected: false });
+      if (path === "/settings") return settingsAnswer();
+      return json({ error: `unexpected ${path}` }, 404);
+    });
+  /**
+   * A fresh boot (loadApp keeps one load per engine, and the host's model is module state). loadApp imports the vault app and the
+   * reactor on demand: the stand-in for the app records the host slot at the moment it is imported, which is when the real vault
+   * package reads it (its boot runs on import). Resolves with the slot the vault app found.
+   */
+  async function boot(): Promise<Declared | undefined> {
+    let found: Declared | undefined;
+    vi.resetModules();
+    vi.doMock("./App.js", () => {
+      const slot = (globalThis as Record<string, unknown>)[SLOT];
+      found = slot === undefined ? undefined : { ...(slot as Declared) };
+      return { App: () => null, LIBS: [] };
+    });
+    vi.doMock("./reactor.js", () => ({ installReactor: () => ({}) }));
+    delete (globalThis as Record<string, unknown>)[SLOT];
+    const { loadApp } = await import("./boot.js");
+    await loadApp(info);
+    return found;
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (globalThis as Record<string, unknown>)[SLOT];
+    window.location.hash = "";
+  });
+  // Not per case: an unmock and the next case's mock of the same module are resolved together, in no fixed order.
+  afterAll(() => {
+    vi.doUnmock("./App.js");
+    vi.doUnmock("./reactor.js");
+  });
+
+  it("declares the model the engine's settings name, with the control token, before the vault package is imported", async () => {
+    vi.stubGlobal("fetch", engine(() => json(settings({}))));
+    const declared = await boot();
+    expect(declared?.switchboardOrigin).toBe(info.origin);
+    expect(declared?.model).toMatchObject({ baseUrl: "http://127.0.0.1:4302/llm/v1", model: "openai/gpt-6-luna", label: "openai/gpt-6-luna via OpenRouter" });
+    expect(declared?.model?.headers()).toEqual({ authorization: "Bearer t" });
+  });
+
+  it("declares the opener with it, and the opener goes to Settings › Models", async () => {
+    vi.stubGlobal("fetch", engine(() => json(settings({}))));
+    const declared = await boot();
+    expect(typeof declared?.openModelSettings).toBe("function");
+    declared?.openModelSettings?.();
+    expect(window.location.hash).toBe("#/settings/models");
+  });
+
+  it("with no model set up declares null, not nothing: the app manages the model, so the chat shows its set-up panel and never the browser's connect form", async () => {
+    vi.stubGlobal("fetch", engine(() => json(settings({ model: "" }))));
+    const declared = await boot();
+    expect(declared).toHaveProperty("model", null);
+    expect(typeof declared?.openModelSettings).toBe("function");
+  });
+
+  it("when the engine's settings do not answer, still declares null and still loads the app", async () => {
+    vi.stubGlobal("fetch", engine(() => json({ error: "Not ready" }, 503)));
+    const declared = await boot();
+    expect(declared).toHaveProperty("model", null);
+    expect(typeof declared?.openModelSettings).toBe("function");
+    expect(declared?.switchboardOrigin).toBe(info.origin);
   });
 });

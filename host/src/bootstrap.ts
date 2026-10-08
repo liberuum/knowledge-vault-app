@@ -22,6 +22,19 @@ export function setExternalSignIn(fn: ExternalSignIn | undefined): void {
   externalSignIn = fn;
 }
 
+/**
+ * The model the vault chat runs on: the app's, reached through the engine's gateway. `null` means the app manages
+ * the model and none is set up (the chat shows its set-up panel); absent means the chat keeps its own connections.
+ */
+export type HostModel = { baseUrl: string; model: string; label: string; headers?: () => Record<string, string> };
+let hostModel: HostModel | null | undefined;
+let openModelSettings: (() => void) | undefined;
+/** Set by App from the engine's settings; every declaration carries it, whichever screen declares. Takes effect with the next declaration. */
+export function setHostModel(model: HostModel | null | undefined, openSettings?: () => void): void {
+  hostModel = model;
+  openModelSettings = openSettings;
+}
+
 export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras = {}): void {
   (globalThis as Record<string, unknown>)[HOST_SLOT] = {
     kind: "desktop",
@@ -29,6 +42,8 @@ export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras
     ...(extras.bearer ? { bearer: extras.bearer } : {}),
     ...(extras.identity ? { identity: { ...extras.identity } } : {}),
     ...(externalSignIn ? { externalSignIn } : {}),
+    ...(hostModel !== undefined ? { model: hostModel } : {}),
+    ...(openModelSettings ? { openModelSettings } : {}),
   };
   if (typeof globalThis.dispatchEvent === "function" && typeof Event === "function") globalThis.dispatchEvent(new Event(HOST_CHANGED_EVENT));
 }

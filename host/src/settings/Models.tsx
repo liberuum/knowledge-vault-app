@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ModelPicker } from "./ModelPicker.js";
 import { LocalModel } from "./LocalModel.js";
+import { announceModelsChanged } from "../model-declaration.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { AppSettings } from "../vaults.js";
@@ -41,6 +42,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     setSaved(false);
     try {
       const next = await api.saveSettings(info, { models: { endpoint, model, ...(apiKey ? { apiKey } : {}) } });
+      announceModelsChanged(); // the vault chat runs on this model: the app re-declares it
       setSettings(next);
       // The engine normalises what was pasted (a chat-completions URL becomes the API root): the form shows its value.
       setEndpoint(next.models.endpoint);
@@ -58,6 +60,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     setSaved(false);
     try {
       const next = await api.saveSettings(info, { models: { endpoint: localEndpoint, model: localModel } });
+      announceModelsChanged();
       setSettings(next);
       setEndpoint(next.models.endpoint);
       setModel(next.models.model);
@@ -83,6 +86,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     setError(null);
     try {
       setSettings(await api.saveSettings(info, { models: { apiKey: "" } }));
+      announceModelsChanged(); // a hosted model without its key is no longer one the chat can use
     } catch (err) {
       setError(`Could not remove the key: ${err instanceof Error ? err.message : String(err)}`);
     } finally {

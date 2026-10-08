@@ -1,10 +1,11 @@
 import { initTheme, useTheme, type GraphQLReactorClient } from "@powerhousedao/reactor-browser";
 import { useEffect, useRef, useState, type ComponentType } from "react";
-import { declareDesktopHost, setExternalSignIn } from "./bootstrap.js";
+import { declareDesktopHost, setExternalSignIn, setHostModel } from "./bootstrap.js";
 import { externalSignIn } from "./api/oauth.js";
 import { installExternalLinksForTauri } from "./links.js";
 import { localHostExtras } from "./local-engine.js";
-import { fetchStatus } from "./vaults.js";
+import { modelDeclaration, openModelSettings } from "./model-declaration.js";
+import { fetchSettings, fetchStatus } from "./vaults.js";
 import type { TokenProvider } from "./api/identity.js";
 import { Landing } from "./screens/Landing.js";
 import { watchSidecar, watchSidecarLog, type LogWatcher, type SidecarInfo, type SidecarStatus, type StatusWatcher } from "./sidecar.js";
@@ -27,14 +28,18 @@ let loading: Promise<LoadedApp> | undefined;
  * once per engine, however often React re-runs effects (StrictMode mounts twice).
  * Order matters: the package runs its boot on import and reads the host slot
  * at that moment, so nothing in this module imports it statically. A protected
- * engine (spec §4.4) is declared with the user's bearer.
+ * engine (spec §4.4) is declared with the user's bearer. The first declaration
+ * already says which model the chat runs on, so the chat never mounts its own
+ * connect form in the desktop app.
  */
 export const loadApp: AppLoader = (info) => {
   loading ??= (async () => {
-    const status = await fetchStatus(info).catch(() => undefined);
+    const [status, settings] = await Promise.all([fetchStatus(info).catch(() => undefined), fetchSettings(info).catch(() => undefined)]);
     const extras = localHostExtras(status?.protected === true, info);
     // The vault chat's OpenRouter sign-in returns through the engine, not to this window (api/oauth.ts).
     setExternalSignIn((buildUrl) => externalSignIn(info, buildUrl));
+    // The app manages the chat's model. `null`: none is set up (or the engine did not say yet), and the chat shows its set-up panel; App re-reads and re-declares.
+    setHostModel(settings ? modelDeclaration(info, settings.models) : null, openModelSettings);
     declareDesktopHost(info.origin, extras);
     const [{ App, LIBS }, { installReactor }] = await Promise.all([import("./App.js"), import("./reactor.js")]);
     return { App, client: installReactor(info, LIBS, extras.bearer), ...(extras.bearer ? { bearer: extras.bearer } : {}) };
