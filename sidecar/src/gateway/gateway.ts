@@ -35,8 +35,17 @@ export function createGateway(deps: GatewayDeps) {
     const controller = new AbortController();
     res.on("close", () => { if (!res.writableEnded) controller.abort(); });
     const interactive = req.headers["x-kv-priority"] === "interactive";
-    queue.setLimit(limitFor(deps.readSettings()));
+    const fail = () => {
+      if (!res.headersSent) sendJson(res, 500, openAiError(500, "The model gateway could not handle the request.", "gateway_error"), cors);
+      else if (!res.writableEnded) res.end();
+    };
+    try {
+      queue.setLimit(limitFor(deps.readSettings()));
+    } catch {
+      return fail();
+    }
     await queue.run(interactive, async () => {
+     try {
       // Read here, not on arrival: a request that waited goes to the provider set up now (Review Focus 2).
       const settings = deps.readSettings();
       queue.setLimit(limitFor(settings));
@@ -50,6 +59,9 @@ export function createGateway(deps: GatewayDeps) {
           payload = body.length ? (JSON.parse(body.toString("utf8")) as Record<string, unknown>) : {};
         } catch {
           return sendJson(res, 400, openAiError(400, "The request body is not valid JSON."), cors);
+        }
+        if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+          return sendJson(res, 400, openAiError(400, "The request body must be a JSON object."), cors);
         }
         if (typeof payload.model !== "string" || !payload.model.trim()) payload.model = settings.models.model;
         if (settings.models.provider === "anthropic" && payload.response_format && deps.anthropicJson && key) {
@@ -89,6 +101,9 @@ export function createGateway(deps: GatewayDeps) {
         }
       }
       res.end();
+     } catch {
+      fail();
+     }
     });
   }
 

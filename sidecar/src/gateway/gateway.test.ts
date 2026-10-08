@@ -117,4 +117,27 @@ describe("gateway", () => {
     const gw = await gatewayAt(() => settingsFor(`${upstream}/v1`));
     expect(await (await fetch(`${gw}${GATEWAY_PATH}/models`)).json()).toEqual({ data: [{ id: "/v1/models" }] });
   });
+
+  it("a body that is JSON but not an object: 400", async () => {
+    const gw = await gatewayAt(() => settingsFor("http://127.0.0.1:9/v1"));
+    for (const raw of ["null", "[]"]) {
+      const res = await fetch(`${gw}${GATEWAY_PATH}/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: raw });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.message).toBe("The request body must be a JSON object.");
+    }
+  });
+
+  it("an internal error answers 500, and the queue slot is released", async () => {
+    const upstream = await listen((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
+    let calls = 0;
+    const gw = await gatewayAt(() => {
+      if (++calls === 1) throw new Error("broken");
+      return settingsFor(`${upstream}/v1`);
+    });
+    const res = await ask(gw, { messages: [] });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatchObject({ message: "The model gateway could not handle the request.", code: "gateway_error" });
+    const next = await ask(gw, { messages: [] });
+    expect(next.status).toBe(200);
+  });
 });
