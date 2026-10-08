@@ -413,33 +413,42 @@ pub fn spawn_sidecar(
             match event {
                 CommandEvent::Stdout(bytes) => {
                     let line = String::from_utf8_lossy(&bytes);
-                    let state = handle.state::<Mutex<SidecarState>>();
-                    let mut st = state.lock().unwrap();
-                    st.record_line(&line);
-                    if st.ready.is_none() {
-                        emit_log(&handle, &line);
-                    }
-                    if let Some((port, control_port)) = parse_ready_line(&line) {
-                        st.ready = Some(ReadyInfo {
-                            port,
-                            control_port,
-                            control_token: token.clone(),
-                        });
-                        // The crash count is the window's (two minutes), not a healthy start's: an engine
-                        // that comes up and then crashes every half-minute must still be reported.
-                        st.delay_ms = None;
-                        drop(st);
+                    // Everything under the state lock happens in this block; the emits below run
+                    // after it is released — never wait on the webview while holding the state.
+                    let (forward, became_ready) = {
+                        let state = handle.state::<Mutex<SidecarState>>();
+                        let mut st = state.lock().unwrap();
+                        st.record_line(&line);
+                        let forward = st.ready.is_none();
+                        let mut became_ready = false;
+                        if let Some((port, control_port)) = parse_ready_line(&line) {
+                            st.ready = Some(ReadyInfo {
+                                port,
+                                control_port,
+                                control_token: token.clone(),
+                            });
+                            // The crash count is the window's (two minutes), not a healthy start's: an engine
+                            // that comes up and then crashes every half-minute must still be reported.
+                            st.delay_ms = None;
+                            became_ready = true;
+                        } else if parse_restart_line(&line) {
+                            st.restart_requested = true;
+                            println!("[shell] the engine asked to be restarted");
+                        } else if let Some(fatal) = parse_fatal_line(&line) {
+                            eprintln!("[shell] the engine refused to start: {}", fatal.message);
+                            st.fatal = Some(fatal);
+                        } else if parse_shutdown_line(&line) {
+                            st.shutdown_requested = true;
+                        } else {
+                            print!("[sidecar] {line}");
+                        }
+                        (forward, became_ready)
+                    };
+                    if became_ready {
                         emit_status(&handle);
-                    } else if parse_restart_line(&line) {
-                        st.restart_requested = true;
-                        println!("[shell] the engine asked to be restarted");
-                    } else if let Some(fatal) = parse_fatal_line(&line) {
-                        eprintln!("[shell] the engine refused to start: {}", fatal.message);
-                        st.fatal = Some(fatal);
-                    } else if parse_shutdown_line(&line) {
-                        st.shutdown_requested = true;
-                    } else {
-                        print!("[sidecar] {line}");
+                    }
+                    if forward {
+                        emit_log(&handle, &line);
                     }
                 }
                 CommandEvent::Stderr(bytes) => {
