@@ -26,6 +26,9 @@ import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
 import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
+
+/** When this engine came up: runs that began earlier belong to a previous life of it. */
+const ENGINE_STARTED_AT = new Date().toISOString();
 import { privateHostAllow } from "./egress.js";
 import type { PipelineTemplate } from "./templates.js";
 import { createRequire } from "node:module";
@@ -278,7 +281,7 @@ async function main(): Promise<void> {
     repairQueue: (vaultId) => {
       const record = readPipelines(cfg.dataDir)[vaultId];
       if (!record || record.disabled) return Promise.resolve({ requeued: [], dropped: [], skipped: "no pipeline" });
-      return repairQueue({ origin, fetchImpl: engineFetch }, vaultId, record.workflowId);
+      return repairQueue({ origin, fetchImpl: engineFetch }, vaultId, record.workflowId, { engineStartedAt: ENGINE_STARTED_AT });
     },
     readSettings: () => readSettings(cfg.dataDir),
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
@@ -356,6 +359,7 @@ async function main(): Promise<void> {
   // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).
   startQueueWatchdog({
     deps: { origin, fetchImpl: engineFetch },
+    engineStartedAt: ENGINE_STARTED_AT,
     pipelines: () =>
       Object.entries(readPipelines(cfg.dataDir))
         .filter(([, r]) => !r.disabled)
