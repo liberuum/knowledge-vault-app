@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PROVIDER_LABELS, type AppSettings } from "../settings.js";
 import { anthropicJson as defaultAnthropicJson } from "./anthropic.js";
+import type { ChatGptBridge } from "./chatgpt.js";
 import { openAiError, providerMessage } from "./errors.js";
 import { createQueue } from "./queue.js";
 
@@ -15,6 +16,8 @@ export type GatewayDeps = {
   readModelKey: () => string | undefined;
   fetchImpl?: typeof fetch;
   anthropicJson?: AnthropicJson;
+  /** Provider "chatgpt": the user's ChatGPT plan, through the Responses API (gateway/chatgpt.ts). */
+  chatgpt?: ChatGptBridge;
 };
 
 const limitFor = (s: AppSettings) => (s.models.local ? 1 : 4);
@@ -75,6 +78,11 @@ export function createGateway(deps: GatewayDeps) {
             return sendJson(res, 502, openAiError(502, `Could not reach Anthropic: ${error instanceof Error ? error.message : String(error)}`, "provider_unreachable"), cors);
           }
         }
+      }
+      // The ChatGPT plan speaks only the Responses API: its bridge translates both ways, with the sign-in's token.
+      if (settings.models.provider === "chatgpt") {
+        if (!deps.chatgpt) return sendJson(res, 503, openAiError(503, "This build of the engine cannot use a ChatGPT plan.", "chatgpt_unavailable"), cors);
+        return await deps.chatgpt.handle({ kind: isChat ? "chat" : "models", payload, res, cors, signal: controller.signal, interactive });
       }
       let upstream: Response;
       try {

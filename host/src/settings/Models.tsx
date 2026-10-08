@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ModelPicker } from "./ModelPicker.js";
 import { LocalModel } from "./LocalModel.js";
 import { ProviderChoice, signInFirst, type ApiService, type Choice } from "./ProviderChoice.js";
+import { ChatGptChoice } from "./ChatGptChoice.js";
 import { signInWithOpenRouter } from "../api/openrouter.js";
 import { announceModelsChanged } from "../model-declaration.js";
 import type { SettingsApi } from "../screens/Settings.js";
@@ -15,6 +16,8 @@ function selectionOf(models: ModelSettings): Selection {
   switch (models.provider) {
     case "local":
       return { choice: "local", service: "openai", customEndpoint: "" };
+    case "chatgpt":
+      return { choice: "chatgpt", service: "openai", customEndpoint: "" };
     case "openrouter":
       return { choice: "openrouter", service: "openai", customEndpoint: "" };
     case "openai":
@@ -28,7 +31,7 @@ function selectionOf(models: ModelSettings): Selection {
 }
 
 /** What Save sends for a card. The key goes only when one was entered: the engine keeps the saved one otherwise. */
-function savePatch(choice: "openrouter" | "apikey", service: ApiService, customEndpoint: string, model: string, apiKey: string): NonNullable<SettingsPatch["models"]> {
+function savePatch(choice: Exclude<Choice, "local" | "chatgpt">, service: ApiService, customEndpoint: string, model: string, apiKey: string): NonNullable<SettingsPatch["models"]> {
   const key = apiKey ? { apiKey } : {};
   if (choice === "openrouter") return { provider: "openrouter", model, ...key };
   if (service === "custom") return { endpoint: customEndpoint, model, ...key };
@@ -93,7 +96,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (choice === "local") return; // a model on this computer is saved by Use, in its card
+    if (choice === "local" || choice === "chatgpt") return; // saved in their cards: Use, or signing in with ChatGPT
     if (choice === "apikey" && service === "custom" && !customEndpoint.trim()) {
       setSaved(false);
       setError("Enter the address of the service."); // an empty address would send the engine back to its default, OpenRouter
@@ -172,7 +175,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     }
   }
 
-  const canSave = choice !== "local";
+  const canSave = choice !== "local" && choice !== "chatgpt";
   const canValidate = onSaved && settings !== null && (settings.models.hasKey || settings.models.local === true);
 
   return (
@@ -201,6 +204,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
             signingIn={signingIn}
             disabled={busy}
             onRemoveKey={() => void removeKey()}
+            chatgptBlock={<ChatGptChoice info={info} current={settings.models} allowChange active={choice === "chatgpt"} onActivate={() => { setChoice("chatgpt"); clearNotes(); }} onChosen={() => void api.fetchSettings(info).then((s) => { adopt(s); setModel(s.models.model); setSaved(true); })} />}
             localBlock={
               <>
                 <LocalModel

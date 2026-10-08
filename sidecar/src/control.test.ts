@@ -1,5 +1,6 @@
 import { ConnectionError } from "./connections.js";
 import { afterEach, describe, expect, it } from "vitest";
+import { ChatGptError } from "./chatgpt/session.js";
 import { ConverterBusyError, ConverterInputError } from "./converter.js";
 import { createControlServer } from "./control.js";
 import { SettingsError, type AppSettings } from "./settings.js";
@@ -188,7 +189,7 @@ describe("control API", () => {
     expect(settingsPatches).toEqual([{ models: { provider: "gemini" } }]);
     const bad = await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { provider: "constructor" } }) });
     expect(bad.status).toBe(400);
-    expect(await bad.json()).toEqual({ error: "`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai." });
+    expect(await bad.json()).toEqual({ error: "`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai, chatgpt." });
     expect(settingsPatches).toHaveLength(1);
   });
   it("allows the management methods in the CORS preflight", async () => {
@@ -506,5 +507,58 @@ describe("model gateway route", () => {
     const base = await start();
     const res = await fetch(`${base}/llm/v1/chat/completions`, { method: "OPTIONS", headers: { origin: "http://127.0.0.1:4200" } });
     expect(res.headers.get("access-control-allow-headers")).toContain("x-kv-priority");
+  });
+});
+
+describe("Sign in with ChatGPT over the control API", () => {
+  async function startWithChatGpt(over: Partial<NonNullable<Parameters<typeof createControlServer>[0]["chatgpt"]>> = {}) {
+    const started: unknown[] = [];
+    const deps = await harnessDeps();
+    deps.chatgpt = {
+      status: () => ({ signedIn: false, planUsage: false, scopes: [], pending: null }),
+      startLogin: (options) => {
+        started.push(options);
+        return { url: "https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client" };
+      },
+      cancelLogin: () => {},
+      callback: async (query) => ({ status: query.get("state") === "s1" ? 200 : 404, html: "<h1>Signed in with ChatGPT</h1>" }),
+      logout: async () => ({ revoked: false }),
+      models: async () => [{ slug: "gpt-6.1-sol", name: "GPT-6.1 Sol" }],
+      ...over,
+    };
+    const server = createControlServer(deps);
+    const port = await server.listen();
+    close = server.close;
+    return { base: `http://127.0.0.1:${port}`, port, started };
+  }
+  const h = { authorization: "Bearer secret", "content-type": "application/json" };
+
+  it("gives the window a link with a 127.0.0.1 return address on the fixed path, and takes the browser back without a token", async () => {
+    const { base, port, started } = await startWithChatGpt();
+    const res = await fetch(`${base}/chatgpt/login`, { method: "POST", headers: h, body: JSON.stringify({ allowPlanUsage: true }) });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ url: "https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client" });
+    expect(started).toEqual([{ redirectUri: `http://127.0.0.1:${port}/auth/callback`, newAccount: false, allowPlanUsage: true }]);
+    expect((await fetch(`${base}/chatgpt/login`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${base}/chatgpt/status`)).status).toBe(401);
+    const back = await fetch(`${base}/auth/callback?code=c&state=s1`); // the system browser: no token
+    expect(back.status).toBe(200);
+    expect(back.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(back.headers.get("referrer-policy")).toBe("no-referrer");
+    expect((await fetch(`${base}/auth/callback?code=c&state=forged`)).status).toBe(404);
+    expect(await (await fetch(`${base}/chatgpt/status`, { headers: h })).json()).toEqual({ signedIn: false, planUsage: false, scopes: [], pending: null });
+    expect(await (await fetch(`${base}/chatgpt/logout`, { method: "POST", headers: h })).json()).toEqual({ signedOut: true, revoked: false });
+    expect(await (await fetch(`${base}/chatgpt/models`, { headers: h })).json()).toEqual({ ok: true, models: [{ id: "gpt-6.1-sol", name: "GPT-6.1 Sol", free: false }] });
+  });
+
+  it("answers a ChatGPT refusal with its status and sentence", async () => {
+    const { base } = await startWithChatGpt({
+      startLogin: () => {
+        throw new ChatGptError("Sign out of ChatGPT first, then sign in with the other account.", 409, "chatgpt_signed_in");
+      },
+    });
+    const res = await fetch(`${base}/chatgpt/login`, { method: "POST", headers: h, body: JSON.stringify({ newAccount: true }) });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Sign out of ChatGPT first, then sign in with the other account.", code: "chatgpt_signed_in" });
   });
 });

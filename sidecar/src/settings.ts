@@ -1,6 +1,7 @@
 import { isLocalEndpoint, privateHostAllow } from "./egress.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { chatGptReady } from "./chatgpt/store.js";
 import { writeFileAtomic } from "./process-identity.js";
 
 /**
@@ -8,14 +9,19 @@ import { writeFileAtomic } from "./process-identity.js";
  * model key lives in `secrets/llm.key` (0600) and is reported only as `hasKey`.
  * Other keys in config.json (the shell's `ui`, later `vaults`) are preserved.
  */
-export type ModelProvider = "local" | "openrouter" | "openai" | "anthropic" | "gemini" | "xai" | "custom";
-/** The services with a fixed address; "local" and "custom" are whatever the user points at. */
+export type ModelProvider = "local" | "openrouter" | "openai" | "anthropic" | "gemini" | "xai" | "chatgpt" | "custom";
+/**
+ * The services with a fixed address; "local" and "custom" are whatever the user points at. "chatgpt" (the user's
+ * ChatGPT plan, signed in with ChatGPT) shares OpenAI's address, so it is never inferred from it: config.json
+ * marks it (`models.provider`), and its credentials are the sign-in's tokens (chatgpt/), not `llm.key`.
+ */
 export const PROVIDER_ENDPOINTS = {
   openrouter: "https://openrouter.ai/api/v1",
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
   xai: "https://api.x.ai/v1",
+  chatgpt: "https://api.openai.com/v1",
 } as const;
 export const PROVIDER_LABELS: Record<ModelProvider, string> = {
   local: "this computer",
@@ -24,13 +30,14 @@ export const PROVIDER_LABELS: Record<ModelProvider, string> = {
   anthropic: "Anthropic",
   gemini: "Google Gemini",
   xai: "xAI",
+  chatgpt: "ChatGPT",
   custom: "your model server",
 };
-/** Which provider an endpoint is: a known service by its exact address, else local or custom. */
+/** Which provider an endpoint is: a known service by its exact address, else local or custom (never "chatgpt", see above). */
 export function inferProvider(endpoint: string, local: boolean): ModelProvider {
   if (local) return "local";
   const norm = endpoint.trim().replace(/\/+$/, "");
-  for (const [provider, address] of Object.entries(PROVIDER_ENDPOINTS)) if (norm === address) return provider as ModelProvider;
+  for (const [provider, address] of Object.entries(PROVIDER_ENDPOINTS)) if (provider !== "chatgpt" && norm === address) return provider as ModelProvider;
   return "custom";
 }
 /** `local`: the endpoint is on this computer — no key is needed (a placeholder is used). */
@@ -112,14 +119,16 @@ export function readSettings(dataDir: string): AppSettings {
   const endpoint = typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT;
   // This computer or the local network: needs no key, takes one source at a time (review I1).
   const local = isLocalEndpoint(endpoint) || privateHostAllow(endpoint) !== null;
+  // The ChatGPT plan is marked, not inferred (it shares OpenAI's address); its "key" is a sign-in allowed to use the plan.
+  const chatgpt = models.provider === "chatgpt" && !local;
   return {
     version: 1,
     models: {
       endpoint,
       model: typeof models.model === "string" ? models.model : "",
-      hasKey: readModelKey(dataDir) !== undefined,
+      hasKey: chatgpt ? chatGptReady(dataDir) : readModelKey(dataDir) !== undefined,
       local,
-      provider: inferProvider(endpoint, local),
+      provider: chatgpt ? "chatgpt" : inferProvider(endpoint, local),
     },
     conversion: {
       mode: CONVERSION_MODES.includes(conversion.mode as ConversionMode) ? (conversion.mode as ConversionMode) : "local",
@@ -133,14 +142,25 @@ export function readSettings(dataDir: string): AppSettings {
 export function writeSettings(dataDir: string, patch: SettingsPatch): AppSettings {
   const raw = readRaw(dataDir);
   const current = readSettings(dataDir);
-  const models = { endpoint: current.models.endpoint, model: current.models.model };
+  // "chatgpt" is a mark beside OpenAI's address: it stays until another provider or an address is chosen.
+  const models: { endpoint: string; model: string; provider?: "chatgpt" } = {
+    endpoint: current.models.endpoint,
+    model: current.models.model,
+    ...(current.models.provider === "chatgpt" ? { provider: "chatgpt" as const } : {}),
+  };
   if (patch.models) {
-    if (patch.models.provider && typeof patch.models.endpoint !== "string") {
+    if (patch.models.provider === "chatgpt") {
+      models.endpoint = PROVIDER_ENDPOINTS.chatgpt; // an endpoint given with it is ignored: the plan has one address
+      models.provider = "chatgpt";
+    } else if (patch.models.provider || typeof patch.models.endpoint === "string") {
+      delete models.provider;
+    }
+    if (patch.models.provider && patch.models.provider !== "chatgpt" && typeof patch.models.endpoint !== "string") {
       const provider = patch.models.provider;
       if (!Object.hasOwn(PROVIDER_ENDPOINTS, provider)) throw new SettingsError("Unknown model provider.");
       models.endpoint = PROVIDER_ENDPOINTS[provider];
     }
-    if (typeof patch.models.endpoint === "string") {
+    if (typeof patch.models.endpoint === "string" && patch.models.provider !== "chatgpt") {
       const endpoint = patch.models.endpoint.trim() || DEFAULT_ENDPOINT;
       if (!/^https?:\/\//.test(endpoint)) throw new SettingsError("The model endpoint must be an http(s) URL.");
       models.endpoint = normalizeEndpoint(endpoint);

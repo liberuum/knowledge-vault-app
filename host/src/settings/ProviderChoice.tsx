@@ -1,10 +1,11 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
-export type Choice = "local" | "openrouter" | "apikey";
+export type Choice = "local" | "chatgpt" | "openrouter" | "apikey";
 export type ApiService = "openai" | "anthropic" | "gemini" | "xai" | "custom";
 
 const CHOICES: ReadonlyArray<{ id: Choice; title: string; line: string }> = [
   { id: "local", title: "On this computer", line: "A model running here: free, private, no key." },
+  { id: "chatgpt", title: "ChatGPT", line: "Use your ChatGPT Plus or Pro plan: just sign in, no key." },
   { id: "openrouter", title: "OpenRouter", line: "One account, hundreds of models, pay as you go." },
   { id: "apikey", title: "API key", line: "OpenAI, Anthropic, Google Gemini, xAI or another service." },
 ];
@@ -21,9 +22,9 @@ const SERVICES: ReadonlyArray<{ id: ApiService; name: string; keyPage?: string; 
 /** With no key saved or pasted yet, signing in is the one thing to do on the OpenRouter card; Save waits. */
 export const signInFirst = (hasKey: boolean, apiKey: string): boolean => !hasKey && !apiKey.trim();
 
-/** Which card an arrow key leads to from card `index` (the ends wrap round), or null for any other key. */
-function cardAfterKey(key: string, index: number): number | null {
-  const last = CHOICES.length - 1;
+/** Which card an arrow key leads to from card `index` of `count` (the ends wrap round), or null for any other key. */
+function cardAfterKey(key: string, index: number, count: number): number | null {
+  const last = count - 1;
   if (key === "ArrowDown" || key === "ArrowRight") return index === last ? 0 : index + 1;
   if (key === "ArrowUp" || key === "ArrowLeft") return index === 0 ? last : index - 1;
   if (key === "Home") return 0;
@@ -46,6 +47,8 @@ type Props = {
   signingIn: boolean;
   /** The existing `<LocalModel …/>`. */
   localBlock: ReactNode;
+  /** The ChatGPT card's body (`<ChatGptChoice …/>`); without it the card is not offered. */
+  chatgptBlock?: ReactNode;
   /** The form is busy saving. */
   disabled?: boolean;
   /** Drops the saved key; the button sits beside the key field while one is saved. */
@@ -60,10 +63,11 @@ type Props = {
 export function ProviderChoice(props: Props) {
   const { choice, onChoice } = props;
   const cards = useRef<Array<HTMLButtonElement | null>>([]);
+  const offered = CHOICES.filter((c) => c.id !== "chatgpt" || props.chatgptBlock !== undefined);
 
   function onKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const to = cardAfterKey(e.key, index);
-    const next = to === null ? undefined : CHOICES[to];
+    const to = cardAfterKey(e.key, index, offered.length);
+    const next = to === null ? undefined : offered[to];
     if (to === null || !next) return;
     e.preventDefault();
     if (to !== index) onChoice(next.id);
@@ -72,7 +76,7 @@ export function ProviderChoice(props: Props) {
 
   return (
     <div className="kv-providers" role="radiogroup" aria-label="AI model provider">
-      {CHOICES.map((c, index) => {
+      {offered.map((c, index) => {
         const checked = c.id === choice;
         return (
           <div key={c.id} className="kv-provider" data-selected={checked}>
@@ -94,9 +98,10 @@ export function ProviderChoice(props: Props) {
               <span className="kv-provider-title">{c.title}</span>{" "}
               <span className="kv-provider-line">{c.line}</span>
             </button>
-            {checked && (
-              <div className="kv-provider-body">
+            {(checked || (c.id === "chatgpt" && props.chatgptBlock !== undefined)) && (
+              <div className="kv-provider-body" data-compact={!checked}>
                 {c.id === "local" && props.localBlock}
+                {c.id === "chatgpt" && props.chatgptBlock}
                 {c.id === "openrouter" && <OpenRouterCard {...props} />}
                 {c.id === "apikey" && <ApiKeyCard {...props} />}
               </div>

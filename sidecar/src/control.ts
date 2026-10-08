@@ -8,6 +8,8 @@ import { GATEWAY_PATH } from "./gateway/gateway.js";
 import { openAiError } from "./gateway/errors.js";
 import { allowedHost } from "./loopback.js";
 import { callbackPage, createOAuthStore } from "./oauth.js";
+import { CALLBACK_PATH as CHATGPT_CALLBACK_PATH } from "./chatgpt/constants.js";
+import { ChatGptError, type ChatGptModel, type ChatGptStatus } from "./chatgpt/session.js";
 import type { AccessToken, IdentityStatus } from "./identity.js";
 import { RemoteAccessError, RemoteAuthError, RemoteInputError, RemoteNotFoundError, RemoteTooOldError, type RemoteCheck, type RemoteVault } from "./remote.js";
 import { ConverterBusyError, ConverterInputError, type ConverterStatus } from "./converter.js";
@@ -92,6 +94,18 @@ export type ControlDeps = {
     logout: () => Promise<void>;
     token: () => Promise<AccessToken>;
   };
+  /**
+   * Sign in with ChatGPT (chatgpt/session.ts): the engine holds the tokens and answers only with a status; the
+   * window opens the link `startLogin` returns. The browser comes back to GET /auth/callback, which needs no token.
+   */
+  chatgpt?: {
+    status: () => ChatGptStatus;
+    startLogin: (options: { redirectUri: string; newAccount?: boolean; allowPlanUsage?: boolean }) => { url: string };
+    cancelLogin: () => void;
+    callback: (query: URLSearchParams) => Promise<{ status: number; html: string }>;
+    logout: () => Promise<{ revoked: boolean }>;
+    models: () => Promise<ChatGptModel[]>;
+  };
   remote: {
     list: () => RemoteVault[];
     check: (url: string, drive?: string) => Promise<RemoteCheck>;
@@ -136,7 +150,7 @@ function settingsPatch(body: Record<string, unknown>): SettingsPatch {
     }
     if (m.provider !== undefined) {
       if (typeof m.provider !== "string" || !Object.hasOwn(PROVIDER_ENDPOINTS, m.provider)) {
-        throw new BadRequestError("`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai.");
+        throw new BadRequestError("`models.provider` must be one of: openrouter, openai, anthropic, gemini, xai, chatgpt.");
       }
       mp.provider = m.provider as keyof typeof PROVIDER_ENDPOINTS;
     }
@@ -179,6 +193,9 @@ function settingsPatch(body: Record<string, unknown>): SettingsPatch {
 }
 
 class BadRequestError extends Error {}
+
+/** What the provider needs before it can be asked anything: a key, or for the ChatGPT plan, the sign-in. */
+const credentialsFirst = (settings: AppSettings) => (settings.models.provider === "chatgpt" ? "Sign in with ChatGPT first." : "Save a key first.");
 
 function send(res: ServerResponse, status: number, body: unknown, origin?: string): void {
   res.statusCode = status;
@@ -237,6 +254,15 @@ export function createControlServer(deps: ControlDeps) {
       const code = new URL(req.url ?? "/", "http://control").searchParams.get("code");
       const ok = !!code && oauth.receive(decodeURIComponent(callback[1]!), code);
       res.writeHead(ok ? 200 : 404, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }).end(callbackPage(ok));
+      return;
+    }
+    // The same for Sign in with ChatGPT, at the fixed address OpenAI registered: it completes only the sign-in
+    // whose random `state` it carries (once, within ten minutes), and the engine exchanges the code itself.
+    if (deps.chatgpt && req.method === "GET" && new URL(req.url ?? "/", "http://control").pathname === CHATGPT_CALLBACK_PATH) {
+      const answer = await deps.chatgpt
+        .callback(new URL(req.url ?? "/", "http://control").searchParams)
+        .catch(() => ({ status: 500, html: callbackPage(false) }));
+      res.writeHead(answer.status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" }).end(answer.html);
       return;
     }
     if (new URL(req.url ?? "/", "http://control").pathname.startsWith(`${GATEWAY_PATH}/`)) {
@@ -329,7 +355,7 @@ export function createControlServer(deps: ControlDeps) {
       }
       if (req.method === "GET" && url.pathname === "/settings") return send(res, 200, deps.readSettings(), allowed);
       if (req.method === "POST" && url.pathname === "/settings/models/validate") {
-        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: "Save a key first." }, allowed);
+        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: credentialsFirst(deps.readSettings()) }, allowed);
         return send(res, 200, await deps.validateModels(), allowed);
       }
       // A model server on this computer or the local network, tried before it is saved: no key is sent.
@@ -343,7 +369,7 @@ export function createControlServer(deps: ControlDeps) {
         return send(res, 200, await deps.discoverModels(), allowed);
       }
       if (req.method === "GET" && url.pathname === "/settings/models/catalog") {
-        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: "Save a key first." }, allowed);
+        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: credentialsFirst(deps.readSettings()) }, allowed);
         const endpoint = url.searchParams.get("endpoint")?.trim() || undefined;
         return send(res, 200, await deps.modelCatalog(endpoint), allowed);
       }
@@ -386,6 +412,26 @@ export function createControlServer(deps: ControlDeps) {
           if (/expired/i.test(message)) return send(res, 401, { error: message }, allowed);
           if (/not authenticated/i.test(message)) return send(res, 401, { error: "Not signed in." }, allowed);
           return send(res, 500, { error: `Could not mint a token: ${message}` }, allowed);
+        }
+      }
+      // Sign in with ChatGPT: the status and the link go to the window, the tokens never do.
+      if (deps.chatgpt && url.pathname.startsWith("/chatgpt/")) {
+        if (req.method === "GET" && url.pathname === "/chatgpt/status") return send(res, 200, deps.chatgpt.status(), allowed);
+        if (req.method === "POST" && url.pathname === "/chatgpt/login") {
+          const body = await readJson(req);
+          const bound = server.address();
+          const port = typeof bound === "object" && bound ? bound.port : 0;
+          // 127.0.0.1, never localhost, and always the same path: OpenAI lets only the port change between sign-ins.
+          const redirectUri = `http://127.0.0.1:${port}${CHATGPT_CALLBACK_PATH}`;
+          return send(res, 202, deps.chatgpt.startLogin({ redirectUri, newAccount: body.newAccount === true, allowPlanUsage: body.allowPlanUsage === true }), allowed);
+        }
+        if (req.method === "POST" && url.pathname === "/chatgpt/cancel") {
+          deps.chatgpt.cancelLogin();
+          return send(res, 200, { cancelled: true }, allowed);
+        }
+        if (req.method === "POST" && url.pathname === "/chatgpt/logout") return send(res, 200, { signedOut: true, ...(await deps.chatgpt.logout()) }, allowed);
+        if (req.method === "GET" && url.pathname === "/chatgpt/models") {
+          return send(res, 200, { ok: true, models: (await deps.chatgpt.models()).map((m) => ({ id: m.slug, name: m.name, free: false })) }, allowed);
         }
       }
       // remote vaults (spec §5.5)
@@ -455,6 +501,7 @@ export function createControlServer(deps: ControlDeps) {
       if (error instanceof RemoteAccessError) return send(res, 403, { error: error.message }, allowed);
       if (error instanceof RemoteNotFoundError) return send(res, 404, { error: error.message }, allowed);
       if (error instanceof RemoteTooOldError) return send(res, 409, { error: error.message }, allowed);
+      if (error instanceof ChatGptError) return send(res, error.status, { error: error.message, code: error.code }, allowed);
       return send(res, 500, { error: error instanceof Error ? error.message : String(error) }, allowed);
     }
   });

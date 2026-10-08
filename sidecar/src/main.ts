@@ -18,6 +18,9 @@ import { applyEnvironment, engineEnvironment } from "./environment.js";
 import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
 import { createGateway, GATEWAY_PATH } from "./gateway/gateway.js";
+import { createChatGptBridge } from "./gateway/chatgpt.js";
+import { createChatGpt } from "./chatgpt/session.js";
+import { chatGptReady } from "./chatgpt/store.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
 import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion } from "./settings.js";
@@ -257,6 +260,14 @@ async function main(): Promise<void> {
   // The port the control server actually binds (it falls back upward when the configured one is busy).
   let boundControlPort = cfg.controlPort;
   const gatewayKey = ensureSecret(join(cfg.dataDir, "secrets", "gateway.key"));
+  // Sign in with ChatGPT (chatgpt/session.ts): the user's ChatGPT plan as the model; its tokens stay in the engine.
+  const chatgpt = createChatGpt({ dataDir: cfg.dataDir, log: (line) => console.log(`[chatgpt] ${line}`) });
+  /**
+   * The pipelines' "is a model usable?" — pipelines.ts only checks that a key exists (their connection holds the
+   * gateway's key, never this one). The ChatGPT plan has no key: a sign-in allowed to use the plan stands for it.
+   * To keep processing off the ChatGPT plan (spec §7 Q4: chat only), answer undefined for "chatgpt" here.
+   */
+  const pipelineModelKey = () => (readSettings(cfg.dataDir).models.provider === "chatgpt" ? (chatGptReady(cfg.dataDir) ? "chatgpt-plan" : undefined) : readModelKey(cfg.dataDir));
   const pipelines = createPipelineManager({
     dataDir: cfg.dataDir,
     origin,
@@ -265,7 +276,7 @@ async function main(): Promise<void> {
     gateway: { url: () => `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, key: gatewayKey },
     pieceVersion: VAULT_PACKAGE_VERSION,
     readSettings: () => readSettings(cfg.dataDir),
-    readModelKey: () => readModelKey(cfg.dataDir),
+    readModelKey: pipelineModelKey,
     identity: { status: () => identity.status(), token: (expiresIn) => identity.token(expiresIn) },
     workflowsDrive,
     vaultName: async (id) => (await listVaultDrives(origin, engineFetch)).find((v) => v.id === id)?.name ?? "Vault",
@@ -286,7 +297,11 @@ async function main(): Promise<void> {
 
   /** The saved key, for a hosted service only: never sent to a model server here or on the network. */
   const hostedKey = () => (readSettings(cfg.dataDir).models.local ? "" : (readModelKey(cfg.dataDir) ?? ""));
-  const gateway = createGateway({ readSettings: () => readSettings(cfg.dataDir), readModelKey: () => readModelKey(cfg.dataDir) });
+  const gateway = createGateway({
+    readSettings: () => readSettings(cfg.dataDir),
+    readModelKey: () => readModelKey(cfg.dataDir),
+    chatgpt: createChatGptBridge({ session: chatgpt, log: (line) => console.warn(`[gateway] ${line}`) }),
+  });
   const control = createControlServer({
     gateway,
     gatewayKey,
@@ -334,8 +349,10 @@ async function main(): Promise<void> {
     },
     readSettings: () => readSettings(cfg.dataDir),
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
-    validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, hostedKey()),
-    modelCatalog: (endpoint) => fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, hostedKey()),
+    validateModels: () => (readSettings(cfg.dataDir).models.provider === "chatgpt" ? chatgpt.validate() : validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, hostedKey())),
+    // An address from the form asks that service with the key; without one, the saved provider answers (ChatGPT: the account's models).
+    modelCatalog: (endpoint) =>
+      !endpoint && readSettings(cfg.dataDir).models.provider === "chatgpt" ? chatgpt.catalog() : fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, hostedKey()),
     probeModels: (endpoint) => probeLocalModels(endpoint, (e) => isLocalEndpoint(e) || privateHostAllow(e) !== null),
     discoverModels: async () => {
       const [gpu, servers] = await Promise.all([
@@ -402,6 +419,7 @@ async function main(): Promise<void> {
       logout: () => identity.logout(),
       token: () => identity.token(),
     },
+    chatgpt,
     remote: {
       list: () => readRemoteVaults(cfg.dataDir),
       check: async (url, drive) => {

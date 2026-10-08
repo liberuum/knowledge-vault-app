@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { writeChatGpt } from "./chatgpt/store.js";
 import { readLocalProtection, readModelKey, readSettings, setComponentRemoved, SettingsError, writeLocalProtection, writeSettings } from "./settings.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "kv-settings-"));
@@ -134,5 +135,20 @@ describe("the model's provider", () => {
   });
   it("an endpoint given with the provider wins", () => {
     expect(writeSettings(dir(), { models: { provider: "openai", endpoint: "https://proxy.example.com/v1" } }).models).toMatchObject({ endpoint: "https://proxy.example.com/v1", provider: "custom" });
+  });
+  it("the ChatGPT plan is marked, not inferred from OpenAI's address; its key is a sign-in allowed to use the plan", () => {
+    const d = dir();
+    expect(writeSettings(d, { models: { provider: "chatgpt", model: "gpt-6.1-sol" } }).models).toEqual({ endpoint: "https://api.openai.com/v1", model: "gpt-6.1-sol", hasKey: false, local: false, provider: "chatgpt" });
+    expect(JSON.parse(readFileSync(join(d, "config.json"), "utf8")).models).toEqual({ endpoint: "https://api.openai.com/v1", model: "gpt-6.1-sol", provider: "chatgpt" });
+    const tokens = { accessToken: "at", refreshToken: "rt", idToken: "id", tokenType: "Bearer", expiresAt: "2026-10-09T01:00:00.000Z", savedAt: "2026-10-09T00:00:00.000Z" };
+    writeChatGpt(d, { version: 1, hostId: "urn:uuid:x", registrations: [], active: "c", tokens: { ...tokens, scopes: ["openid", "offline_access"] } });
+    expect(readSettings(d).models.hasKey).toBe(false); // signed in, but not allowed to use the plan
+    writeChatGpt(d, { version: 1, hostId: "urn:uuid:x", registrations: [], active: "c", tokens: { ...tokens, scopes: ["openid", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"] } });
+    expect(readSettings(d).models.hasKey).toBe(true);
+    // A model or an API key saved alongside keeps the mark; another provider or an address drops it.
+    expect(writeSettings(d, { models: { model: "gpt-6-mini", apiKey: "sk-openai" } }).models).toMatchObject({ provider: "chatgpt", hasKey: true });
+    expect(writeSettings(d, { models: { provider: "openai" } }).models).toMatchObject({ endpoint: "https://api.openai.com/v1", provider: "openai", hasKey: true });
+    writeSettings(d, { models: { provider: "chatgpt" } });
+    expect(writeSettings(d, { models: { endpoint: "https://api.openai.com/v1" } }).models.provider).toBe("openai");
   });
 });

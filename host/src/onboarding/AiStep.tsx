@@ -6,6 +6,7 @@ import { DEFAULT_LOCAL_ENDPOINT } from "../settings/LocalModel.js";
 import { ModelPicker } from "../settings/ModelPicker.js";
 import { formatPrice, recommendedModels, type CatalogModel } from "../settings/model-picker.js";
 import { ProviderChoice, type ApiService, type Choice } from "../settings/ProviderChoice.js";
+import { ChatGptChoice } from "../settings/ChatGptChoice.js";
 import {
   discoverLocalModels,
   fetchModelCatalog,
@@ -52,13 +53,14 @@ const onThisComputer = (endpoint: string) => {
 /** The card a saved model setting belongs to. */
 function cardOf(m: ModelSettings): { choice: Choice; service: ApiService; customEndpoint: string } {
   if (m.provider === "local") return { choice: "local", service: "openai", customEndpoint: "" };
+  if (m.provider === "chatgpt") return { choice: "chatgpt", service: "openai", customEndpoint: "" };
   if (m.provider === "openrouter") return { choice: "openrouter", service: "openai", customEndpoint: "" };
   if (m.provider === "custom") return { choice: "apikey", service: "custom", customEndpoint: m.endpoint };
   return { choice: "apikey", service: m.provider, customEndpoint: "" };
 }
 
 /** What Save sends for a hosted card; the key only when one was entered (the engine keeps the saved one). */
-function hostedPatch(choice: "openrouter" | "apikey", service: ApiService, customEndpoint: string, model: string, apiKey: string): NonNullable<SettingsPatch["models"]> {
+function hostedPatch(choice: Exclude<Choice, "local" | "chatgpt">, service: ApiService, customEndpoint: string, model: string, apiKey: string): NonNullable<SettingsPatch["models"]> {
   const key = apiKey.trim() ? { apiKey: apiKey.trim() } : {};
   if (choice === "openrouter") return { provider: "openrouter", model, ...key };
   if (service === "custom") return { endpoint: customEndpoint.trim(), model, ...key };
@@ -110,7 +112,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
     const best = bestFound(d);
     const served = (p: Pick) => d?.servers.some((s) => s.endpoint === p.endpoint && s.models.some((m) => m.id === p.model)) ?? false;
     setPick((p) => (p && (p.typed || served(p)) ? p : best ? { endpoint: best.server.endpoint, model: best.model.id } : null));
-    if (!settled.current) setChoice(best ? "local" : "openrouter"); // nothing running here: the simplest online option
+    if (!settled.current) setChoice(best ? "local" : "chatgpt"); // nothing running here: one sign-in, no key
   }, []);
 
   const scan = useCallback(async () => {
@@ -187,7 +189,34 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
     setModel(same && settings && !settings.models.local ? settings.models.model : "");
   };
 
+  /** Ask the model saved now for one tiny answer, timed: "Ready" is a real answer. */
+  async function check(next: AppSettings) {
+    setPhase({ kind: "checking", model: next.models.model, local: next.models.local === true });
+    try {
+      const verdict = await checkModel(info);
+      setPhase(verdict.ok ? { kind: "ready", message: `Ready: ${next.models.model} answered in ${seconds(verdict.ms)} s.` } : { kind: "failed", message: verdict.detail });
+    } catch (e) {
+      setPhase({ kind: "failed", message: message(e) });
+    }
+  }
+
+  /** Signed in with ChatGPT and its default model saved by the card: read the setting back, then check it. */
+  async function afterChatGpt() {
+    settled.current = true;
+    try {
+      const next = await fetchSettings(info);
+      setSettings(next);
+      if (modelReady(next.models)) await check(next);
+    } catch (e) {
+      setPhase({ kind: "failed", message: message(e) });
+    }
+  }
+
   async function use(local?: Pick) {
+    if (!local && choice === "chatgpt") {
+      if (settings?.models.provider !== "chatgpt" || !settings.models.hasKey) return setPhase({ kind: "failed", message: "Continue with ChatGPT first: sign in on the page that opens." });
+      return check(settings);
+    }
     setPhase({ kind: "saving" });
     try {
       let next: AppSettings;
@@ -197,7 +226,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
         next = await saveSettings(info, { models: { endpoint: p.endpoint, model: p.model } });
       } else {
         if (choice === "apikey" && service === "custom" && !customEndpoint.trim()) return setPhase({ kind: "failed", message: "Enter the address of the service." });
-        next = await saveSettings(info, { models: hostedPatch(choice, service, customEndpoint, model, apiKey) });
+        next = await saveSettings(info, { models: hostedPatch(choice as Exclude<Choice, "local" | "chatgpt">, service, customEndpoint, model, apiKey) });
         if (!next.models.model.trim()) {
           // A key, no model yet: the best value the key can use for processing.
           const c = await fetchModelCatalog(info);
@@ -214,9 +243,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
       if (!modelReady(next.models)) {
         return setPhase({ kind: "failed", message: next.models.local ? "Saved, but no model is chosen." : "Saved, but it still needs its key before it can process anything." });
       }
-      setPhase({ kind: "checking", model: next.models.model, local: next.models.local === true });
-      const verdict = await checkModel(info);
-      setPhase(verdict.ok ? { kind: "ready", message: `Ready: ${next.models.model} answered in ${seconds(verdict.ms)} s.` } : { kind: "failed", message: verdict.detail });
+      await check(next);
     } catch (e) {
       setPhase({ kind: "failed", message: `Could not save: ${message(e)}` });
     }
@@ -241,13 +268,17 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
 
   const busy = phase.kind === "saving" || phase.kind === "checking";
   const options: Found[] = found?.servers.flatMap((server) => server.models.map((m) => ({ server, model: m }))) ?? [];
-  const canUse = choice === "local" ? pick !== null : (keySaved || apiKey.trim() !== "") && (choice !== "apikey" || service !== "custom" || customEndpoint.trim() !== "");
-  const useLabel = phase.kind === "saving" ? "Saving…" : phase.kind === "checking" ? "Checking…" : choice === "local" && pick ? `Use ${pick.model}` : "Use this AI";
+  const onChatGpt = settings?.models.provider === "chatgpt" && settings.models.hasKey;
+  const canUse =
+    choice === "local" ? pick !== null : choice === "chatgpt" ? onChatGpt === true : (keySaved || apiKey.trim() !== "") && (choice !== "apikey" || service !== "custom" || customEndpoint.trim() !== "");
+  const useLabel = phase.kind === "saving" ? "Saving…" : phase.kind === "checking" ? "Checking…" : choice === "local" && pick ? `Use ${pick.model}` : choice === "chatgpt" ? "Use ChatGPT" : "Use this AI";
   const chosen = catalog.find((m) => m.id === model);
   const price = chosen ? formatPrice(chosen) : null;
   const payer = choice === "openrouter" ? "OpenRouter" : "the service";
   const privacy =
-    choice !== "local"
+    choice === "chatgpt"
+      ? "Your files stay on this computer; only the text being processed goes to ChatGPT, under your plan."
+      : choice !== "local"
       ? "Your files stay on this computer; only the text being processed is sent to the service you choose."
       : pick && !onThisComputer(pick.endpoint)
         ? `Your text goes to the computer at ${hostOf(pick.endpoint)} on your network, and nowhere else.`
@@ -347,9 +378,10 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
             onOpenRouterSignIn={() => void signIn()}
             signingIn={signingIn}
             localBlock={localBlock}
+            chatgptBlock={<ChatGptChoice info={info} current={settings.models} active={choice === "chatgpt"} onActivate={() => switchTo("chatgpt", service)} onChosen={() => void afterChatGpt()} />}
             disabled={busy}
           />
-          {choice !== "local" && (
+          {choice !== "local" && choice !== "chatgpt" && (
             <>
               <label htmlFor="onb-model" className="kv-onb-label">Model</label>
               <ModelPicker

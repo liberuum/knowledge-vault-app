@@ -5,6 +5,7 @@ import type { ModelSettings } from "./vaults.js";
 
 const VIA: Record<ModelSettings["provider"], string> = {
   local: "on this computer",
+  chatgpt: "on your ChatGPT plan",
   openrouter: "via OpenRouter",
   openai: "via OpenAI",
   anthropic: "via Anthropic",

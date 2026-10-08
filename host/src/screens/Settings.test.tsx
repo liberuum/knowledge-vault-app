@@ -36,17 +36,19 @@ const info = { origin: "http://127.0.0.1:4301", graphqlUrl: "http://127.0.0.1:43
 
 /** The address each named service means (the engine's own table). */
 const ADDRESS = { openrouter: "https://openrouter.ai/api/v1", openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com/v1", gemini: "https://generativelanguage.googleapis.com/v1beta/openai", xai: "https://api.x.ai/v1" } as const;
+/** ChatGPT is reached at OpenAI's address (settings.ts keeps a marker for it). */
+const ADDRESS_OF = (provider: string) => (provider === "chatgpt" ? "https://api.openai.com/v1" : ADDRESS[provider as keyof typeof ADDRESS]);
 const LOOPBACK = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])([:/]|$)/;
 /** What the engine answers to a save: a named service means its own address; a loopback address is a model on this computer; any other address is another service. */
 function engineAnswer(patch: SettingsPatch) {
   const m = patch.models;
-  const endpoint = (m?.endpoint ?? ADDRESS[m?.provider ?? "openrouter"]).replace(/\/chat\/completions$/, "");
+  const endpoint = (m?.endpoint ?? ADDRESS_OF(m?.provider ?? "openrouter")).replace(/\/chat\/completions$/, "");
   const provider: ModelSettings["provider"] = m?.provider ?? (m?.endpoint ? (LOOPBACK.test(endpoint) ? "local" : "custom") : "openrouter");
   return { version: 1 as const, models: { endpoint, model: m?.model ?? "", hasKey: !!m?.apiKey, local: provider === "local", provider }, conversion: { mode: patch.conversion?.mode ?? ("local" as const), remoteUrl: patch.conversion?.remoteUrl ?? "" } };
 }
 /** Saved settings for a provider, as `fetchSettings` answers them. */
 function savedWith(provider: ModelSettings["provider"], over: Partial<ModelSettings> = {}) {
-  const endpoint = provider === "local" ? "http://127.0.0.1:8080/v1" : provider === "custom" ? "https://models.example.com/v1" : ADDRESS[provider];
+  const endpoint = provider === "local" ? "http://127.0.0.1:8080/v1" : provider === "custom" ? "https://models.example.com/v1" : ADDRESS_OF(provider);
   return { version: 1 as const, models: { endpoint, model: "", hasKey: false, local: provider === "local", provider, ...over }, conversion: { mode: "off" as const, remoteUrl: "" } };
 }
 function api(over: Partial<SettingsApi> = {}): SettingsApi {
@@ -498,20 +500,21 @@ describe("Settings › Models chooses a provider", () => {
     expect(screen.getByText("Free tier: Google uses what you send to improve its products.")).toBeTruthy();
   });
 
-  it("offers this computer, OpenRouter and an API key as three cards in one radio group", async () => {
+  it("offers this computer, ChatGPT, OpenRouter and an API key as four cards in one radio group", async () => {
     render(<Harness api={api()} start="models" />);
     const group = await screen.findByRole("radiogroup", { name: "AI model provider" });
     const cards = within(group).getAllByRole("radio");
     expect(cards.map((c) => c.textContent)).toEqual([
       "On this computer A model running here: free, private, no key.",
+      "ChatGPT Use your ChatGPT Plus or Pro plan: just sign in, no key.",
       "OpenRouter One account, hundreds of models, pay as you go.",
       "API key OpenAI, Anthropic, Google Gemini, xAI or another service.",
     ]);
-    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]); // the saved provider is OpenRouter
-    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]); // one tab stop: the chosen card
-    fireEvent.click(cards[2]!);
-    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
-    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "0"]);
+    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"]); // the saved provider is OpenRouter
+    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "0", "-1"]); // one tab stop: the chosen card
+    fireEvent.click(cards[3]!);
+    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "true"]);
+    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "0"]);
   });
 
   it.each([
@@ -539,7 +542,7 @@ describe("Settings › Models chooses a provider", () => {
 
   it("moves between the cards with the arrow keys, choosing as it goes — and leaves the arrows to the fields inside", async () => {
     render(<Harness api={api()} start="models" />);
-    const [local, router, apiKey] = (await screen.findAllByRole("radio")) as [HTMLElement, HTMLElement, HTMLElement];
+    const [local, , router, apiKey] = (await screen.findAllByRole("radio")) as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
     const chosen = () => screen.getByRole("radio", { checked: true });
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowLeft" });
