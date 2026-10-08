@@ -15,7 +15,7 @@ import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
 import { readModelKey, readSettings, readStackVersion, writeSettings, writeStackVersion } from "./settings.js";
-import { acquireEngineLock, StoreInUseError } from "./engine-lock.js";
+import { acquireEngineLockWaiting, StoreInUseError } from "./engine-lock.js";
 import { readLastAction, runPendingAction, takePending, writeLastAction, writePending } from "./pending.js";
 import { cleanPartialBackups, listBackups, recoverInterruptedRestore } from "./backups.js";
 import { stopOrphanedHelper } from "./orphans.js";
@@ -100,7 +100,9 @@ async function main(): Promise<void> {
   // (1) one engine per data dir; another live engine is a refusal, a dead one's lock is replaced.
   let releaseLock: () => void;
   try {
-    releaseLock = acquireEngineLock(cfg.dataDir, process.pid);
+    releaseLock = await acquireEngineLockWaiting(cfg.dataDir, process.pid, {
+      onWait: (holder) => console.log(`[sidecar] waiting for the previous engine (pid ${holder}) to finish stopping`),
+    });
   } catch (error) {
     if (error instanceof StoreInUseError) return fatalExit("store-in-use", error.message);
     throw error;

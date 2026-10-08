@@ -25,3 +25,29 @@ describe("engine lock", () => {
     expect(() => acquireEngineLock(d, process.pid, { ...engine, command: () => undefined })).toThrow(StoreInUseError); // cannot tell: refuse
   });
 });
+
+describe("taking the lock while a previous engine stops", () => {
+  it("waits for a holder that exits, and refuses one that stays", async () => {
+    const { acquireEngineLockWaiting, StoreInUseError } = await import("./engine-lock.js");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "kv-lock-wait-"));
+    writeFileSync(join(dir, "engine.lock"), JSON.stringify({ pid: 777, bootTime: 1000 }));
+    let alive = true;
+    let clock = 0;
+    const probe = { alive: (p: number) => p === 777 && alive, command: () => "node sidecar/dist/main.js", bootTime: () => 1000 };
+    const waited: number[] = [];
+    // the holder exits after three polls
+    let polls = 0;
+    const release = await acquireEngineLockWaiting(dir, 42, { probe, waitMs: 30_000, pollMs: 1000, now: () => clock, sleep: async (ms) => { clock += ms; if (++polls === 3) alive = false; }, onWait: (h) => waited.push(h) });
+    expect(waited).toEqual([777]);
+    expect(polls).toBe(3);
+    release();
+    // a holder that never exits: refused after the wait
+    writeFileSync(join(dir, "engine.lock"), JSON.stringify({ pid: 777, bootTime: 1000 }));
+    alive = true;
+    clock = 0;
+    await expect(acquireEngineLockWaiting(dir, 42, { probe, waitMs: 5_000, pollMs: 1000, now: () => clock, sleep: async (ms) => { clock += ms; } })).rejects.toBeInstanceOf(StoreInUseError);
+  });
+});

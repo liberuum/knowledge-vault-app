@@ -51,3 +51,33 @@ export function acquireEngineLock(dataDir: string, pid: number, probe: ProcessPr
     }
   };
 }
+
+/**
+ * Takes the lock, waiting for a holder that is on its way out: the previous engine of an app that was
+ * just closed (or restarted) can need a few seconds to flush and exit — on Windows a quit did not
+ * always wait for it. A holder still alive after `waitMs` is a real second engine: refused.
+ */
+export async function acquireEngineLockWaiting(
+  dataDir: string,
+  pid: number,
+  opts: { waitMs?: number; pollMs?: number; probe?: ProcessProbe; sleep?: (ms: number) => Promise<void>; now?: () => number; onWait?: (holder: number) => void } = {},
+): Promise<() => void> {
+  const waitMs = opts.waitMs ?? 30_000;
+  const pollMs = opts.pollMs ?? 1_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? Date.now;
+  const until = now() + waitMs;
+  let told = false;
+  for (;;) {
+    try {
+      return acquireEngineLock(dataDir, pid, opts.probe);
+    } catch (error) {
+      if (!(error instanceof StoreInUseError) || now() >= until) throw error;
+      if (!told) {
+        opts.onWait?.(error.pid);
+        told = true;
+      }
+      await sleep(pollMs);
+    }
+  }
+}
