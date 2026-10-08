@@ -12,6 +12,14 @@ const fresh = process.argv.includes("--fresh"); // wipe the store first (e2e run
 // The e2e runs on its own store (.e2e-data): --fresh must never touch the developer's .dev-data.
 const dataDirIndex = process.argv.indexOf("--data-dir");
 const dataDir = resolve(dataDirIndex >= 0 && process.argv[dataDirIndex + 1] ? process.argv[dataDirIndex + 1] : ".dev-data");
+// --vault <path>: serve the vault package from that checkout's source, with hot reload (host/vite.config.ts).
+const vaultIndex = process.argv.indexOf("--vault");
+if (vaultIndex >= 0) {
+  const path = process.argv[vaultIndex + 1];
+  if (!path) throw new Error("--vault needs the path of a bai-knowledge-note checkout");
+  process.env.KV_VAULT_PKG = resolve(path);
+  console.log(`[dev] vault package from source: ${process.env.KV_VAULT_PKG} (UI changes reload live; the engine keeps the installed package)`);
+}
 const TOKEN = "dev-token";
 const children = [];
 /** The Tauri shell's process group (it runs detached so the group can be signalled). */
