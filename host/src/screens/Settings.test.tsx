@@ -41,8 +41,8 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     fetchModelCatalog: vi.fn(async () => ({
       ok: true as const,
       models: [
-        { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna", contextLength: 400_000, promptPrice: 1.25, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, maxOutput: 128_000, quality: 38 },
-        { id: "google/gemini-3-flash", name: "Google: Gemini 3 Flash", contextLength: 1_000_000, promptPrice: 0.3, completionPrice: 2.5, free: false, jsonOutput: true, textOutput: true, maxOutput: 65_000, quality: 42 },
+        { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna", contextLength: 400_000, promptPrice: 1.25, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 128_000, quality: 38 },
+        { id: "google/gemini-3-flash", name: "Google: Gemini 3 Flash", contextLength: 1_000_000, promptPrice: 0.3, completionPrice: 2.5, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 65_000, quality: 42 },
         { id: "meta/llama-5-8b:free", name: "Meta: Llama 5 8B (free)", contextLength: 128_000, promptPrice: 0, completionPrice: 0, free: true, jsonOutput: false, textOutput: true },
         { id: "stability/sd4", name: "Stability: SD4", contextLength: 8_000, promptPrice: 0.1, completionPrice: 0.1, free: false, jsonOutput: true, textOutput: false, quality: 10 },
       ],
@@ -139,8 +139,8 @@ describe("Settings", () => {
     expect(recommended[1]).toContain("openai/gpt-6-luna");
     expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("free");
     // each entry says whether the model can answer in JSON, which processing needs
-    expect(recommended[0]).toContain("JSON output");
-    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("no JSON output");
+    expect(recommended[0]).toContain("fits processing");
+    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("not for processing: no JSON output");
     // typing searches every group
     fireEvent.change(field, { target: { value: "luna" } });
     expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option")).toHaveLength(1);
@@ -148,7 +148,7 @@ describe("Settings", () => {
     fireEvent.click(screen.getByRole("option", { name: /openai\/gpt-6-luna/ }));
     expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("openai/gpt-6-luna");
     expect(screen.queryByRole("listbox")).toBeNull();
-    expect(screen.getByText(/OpenAI: GPT-6 Luna · 400k context · \$1.25 \/ \$10 per M tokens/)).toBeTruthy();
+    expect(screen.getByText(/OpenAI: GPT-6 Luna · 400k context · \$1.25 \/ \$10 per M tokens · fits processing/)).toBeTruthy();
     // clicking the field again shows the whole list, not just the chosen model, with it highlighted — so another can be picked without clearing
     fireEvent.click(screen.getByLabelText("Model (required for processing)"));
     const reopened = within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option");

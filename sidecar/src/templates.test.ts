@@ -72,7 +72,7 @@ describe("instantiatePipeline", () => {
     expect(wf.map((x) => x.type)).toEqual(["SET_WORKFLOW_NAME", "SET_TRIGGER", "ADD_STEP", "PUBLISH_WORKFLOW", "SET_WORKFLOW_STATUS"]);
     expect(wf[0]!.input).toEqual({ name: "Research — Vault pipeline" });
     expect(wf[1]!.input).toEqual({ id: "trig", config: { drive: "vault1", phase: "create" }, connectionId: "doc1", pieceVersion: "1.0.54-dev.23" });
-    expect(wf[2]!.input).toEqual({ id: "s1", config: { drive: "vault1", model: "openai/gpt-6-luna", source_id: "{{trigger.payload.source_id}}" }, connectionId: "doc1" });
+    expect(wf[2]!.input).toEqual({ id: "s1", config: { drive: "vault1", model: "", source_id: "{{trigger.payload.source_id}}" }, connectionId: "doc1" });
     expect(wf[3]!.input).toEqual({ publishedAt: "2026-10-07T10:00:00.000Z" });
   });
   it("deletes what it created when a replayed operation is rejected, naming the operation and the reason", async () => {

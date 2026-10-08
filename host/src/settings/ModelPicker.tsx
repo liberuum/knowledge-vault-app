@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { filterModels, formatContext, formatPrice, freeModels, recommendedModels, type CatalogModel } from "./model-picker.js";
+import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, recommendedModels, type CatalogModel } from "./model-picker.js";
 
 export type CatalogResult = { ok: true; models: CatalogModel[] } | { ok: false; detail: string };
 
@@ -116,7 +116,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
       : catalog && !catalog.ok
         ? `Could not list models: ${catalog.detail}`
         : catalog?.ok
-          ? `${catalog.models.length} models available — type to search, or pick from the list. Recommended ones can do the pipeline's job, ranked by the quality score the provider reports.`
+          ? `${catalog.models.length} models available — type to search, or pick from the list. Recommended ones fit the pipeline — JSON answers, text only, room for a whole source — ranked by the quality score the provider reports.`
           : null;
   const current = catalog?.ok ? catalog.models.find((m) => m.id === value) : undefined;
   let index = -1;
@@ -154,6 +154,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
                 const i = index;
                 const price = formatPrice(m);
                 const ctx = formatContext(m);
+                const fit = fitForProcessing(m);
                 return (
                   <div
                     key={m.id}
@@ -172,8 +173,8 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
                       {m.name !== m.id && <span>{m.name}</span>}
                       {ctx && <span>{ctx}</span>}
                       {price && <span>{price}</span>}
-                      {m.jsonOutput === true && <span className="kv-picker-badge" data-kind="ok" title="Accepts response_format, which processing needs">JSON output</span>}
-                      {m.jsonOutput === false && <span className="kv-picker-badge" data-kind="warn" title="No response_format: processing would fail with this model">no JSON output</span>}
+                      {fit.ok === true && <span className="kv-picker-badge" data-kind="ok" title="Answers in JSON, text only, takes a whole source: the pipeline can use it">fits processing</span>}
+                      {fit.ok === false && <span className="kv-picker-badge" data-kind="warn" title="The pipeline would fail with this model">not for processing: {fit.reason}</span>}
                     </span>
                   </div>
                 );
@@ -187,7 +188,10 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         <p className="kv-hint">
           {current.name !== current.id ? `${current.name} · ` : ""}
           {[formatContext(current), formatPrice(current)].filter(Boolean).join(" · ")}
-          {current.jsonOutput === false ? " · does not support JSON output, which processing needs" : ""}
+          {(() => {
+            const fit = fitForProcessing(current);
+            return fit.ok === false ? ` · not for processing: ${fit.reason}` : fit.ok === true ? " · fits processing" : "";
+          })()}
         </p>
       )}
     </div>

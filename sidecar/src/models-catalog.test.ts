@@ -17,7 +17,7 @@ describe("the model catalog", () => {
         benchmarks: { artificial_analysis: { intelligence_index: 38.1 } },
       },
     ]);
-    expect(m).toEqual({ id: "openai/gpt-6.1-sol-pro", name: "OpenAI: GPT-6.1 Sol Pro", contextLength: 1_050_000, promptPrice: 2, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, maxOutput: 128_000, quality: 38.1 });
+    expect(m).toEqual({ id: "openai/gpt-6.1-sol-pro", name: "OpenAI: GPT-6.1 Sol Pro", contextLength: 1_050_000, promptPrice: 2, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 128_000, quality: 38.1 });
   });
 
   it("marks free models, image-only models and models without JSON output", () => {
@@ -26,7 +26,12 @@ describe("the model catalog", () => {
       { id: "img/gen", pricing: { prompt: "0.00001", completion: "0.00002" }, supported_parameters: ["response_format"], architecture: { output_modalities: ["image"] } },
     ]);
     expect(models[0]).toMatchObject({ free: true, jsonOutput: false, textOutput: true, name: "x/y:free" });
-    expect(models[1]).toMatchObject({ free: false, jsonOutput: true, textOutput: false });
+    expect(models[1]).toMatchObject({ free: false, jsonOutput: true, textOutput: false, outputs: ["image"] });
+  });
+
+  it("keeps every output of a model that makes more than text (a music model also says 'text')", () => {
+    const [m] = normaliseCatalog([{ id: "google/lyria-3-pro-preview", supported_parameters: ["response_format"], architecture: { output_modalities: ["text", "audio"] } }]);
+    expect(m).toMatchObject({ jsonOutput: true, textOutput: true, outputs: ["text", "audio"] });
   });
 
   it("treats a negative price (OpenRouter's routers: 'varies') as unknown, not free", () => {
@@ -37,8 +42,8 @@ describe("the model catalog", () => {
   it("keeps a bare list (OpenAI, Ollama) usable: ids only, nothing claimed about the rest", () => {
     const models = normaliseCatalog([{ id: "gpt-4.1", object: "model", owned_by: "openai" }, { id: "llama3:latest" }, { nope: 1 }, null]);
     expect(models).toEqual([
-      { id: "gpt-4.1", name: "gpt-4.1", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, maxOutput: undefined, quality: undefined },
-      { id: "llama3:latest", name: "llama3:latest", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, maxOutput: undefined, quality: undefined },
+      { id: "gpt-4.1", name: "gpt-4.1", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, maxOutput: undefined, quality: undefined },
+      { id: "llama3:latest", name: "llama3:latest", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, maxOutput: undefined, quality: undefined },
     ]);
   });
 

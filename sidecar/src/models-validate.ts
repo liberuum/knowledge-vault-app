@@ -53,6 +53,8 @@ export type CatalogModel = {
   jsonOutput?: boolean;
   /** Produces text (an image or audio model is no use to the vault). Undefined when the provider does not say. */
   textOutput?: boolean;
+  /** Everything the model produces (OpenRouter's output_modalities): a music or image model also lists "text". */
+  outputs?: string[];
   /** The longest reply the model can give, in tokens (the pipeline asks for up to 32k). */
   maxOutput?: number;
   /** Artificial Analysis' intelligence index, as OpenRouter relays it — the picker ranks "recommended" by it. */
@@ -92,6 +94,7 @@ export function normaliseCatalog(data: unknown): CatalogModel[] {
       free: id.endsWith(":free") || (promptPrice === 0 && completionPrice === 0),
       jsonOutput: params ? params.includes("response_format") || params.includes("structured_outputs") : undefined,
       textOutput: outputs ? outputs.includes("text") : undefined,
+      outputs: outputs ? outputs.filter((o): o is string => typeof o === "string") : undefined,
       maxOutput: typeof top?.max_completion_tokens === "number" ? top.max_completion_tokens : undefined,
       quality: typeof aa?.intelligence_index === "number" ? aa.intelligence_index : undefined,
     });

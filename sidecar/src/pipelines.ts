@@ -23,6 +23,8 @@ export type PipelineRecord = {
   token: { kind: "open" | "minted"; expiresAt: string | null };
   /** Set when the pipeline was disabled (the model key was removed); the reason is what the chip says. */
   disabled?: string;
+  /** The steps leave their model empty and the connection's default applies: a model change is a config write. Older records baked the model into the steps. */
+  modelFromConnection?: boolean;
 };
 export type PipelineStatus =
   | { state: "unconfigured" }
@@ -136,9 +138,8 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     return undefined;
   }
 
-  return {
-    /** Create (or re-create) this vault's pipeline. Nothing happens without a model key and a model. */
-    async ensure(vaultId: string): Promise<EnsureResult> {
+  /** Create (or re-create) this vault's pipeline. Nothing happens without a model key and a model. */
+  async function ensure(vaultId: string): Promise<EnsureResult> {
       const settings = deps.readSettings();
       const key = deps.readModelKey();
       if (!modelsConfigured(settings) || !key) return { state: "unconfigured" };
@@ -178,6 +179,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             createdAt: now(),
             models: { endpoint: settings.models.endpoint, model: settings.models.model },
             token: { kind: token.kind, expiresAt: token.expiresAt },
+            modelFromConnection: true,
           },
         });
         return { state: "ready", workflowId, connectionId };
@@ -187,6 +189,55 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         await deleteSecret(llmRef);
         throw error;
       }
+  }
+
+  /** Point a connection at the model settings: the config is rewritten whole, the other keys kept. */
+  async function updateConnectionModels(connectionId: string, settings: AppSettings): Promise<void> {
+    const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
+      deps.origin,
+      `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+      { id: connectionId },
+      f,
+    );
+    const config = data.document.document.state.global.config ?? {};
+    await execute(
+      deps.origin,
+      connectionId,
+      toActions([{ type: "SET_CONFIG", input: { config: { ...config, llm_base_url: settings.models.endpoint, llm_default_model: settings.models.model } } }], now),
+      f,
+    );
+  }
+
+  return {
+    ensure,
+
+    /**
+     * Settings › Models changed: every pipeline follows. One whose steps defer to the connection gets
+     * its connection's config rewritten in place (runs and history kept); an older one, with the model
+     * baked into its steps, is set up again. Disabled pipelines stay disabled.
+     */
+    async applyModels(): Promise<{ updated: string[]; recreated: string[] }> {
+      const settings = deps.readSettings();
+      const out = { updated: [] as string[], recreated: [] as string[] };
+      if (!modelsConfigured(settings)) return out;
+      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
+        if (record.disabled) continue;
+        if (record.models && record.models.endpoint === settings.models.endpoint && record.models.model === settings.models.model) continue;
+        if (record.modelFromConnection) {
+          await updateConnectionModels(record.connectionId, settings);
+          const records = readPipelines(deps.dataDir);
+          const current = records[vaultId];
+          if (current) {
+            records[vaultId] = { ...current, models: { endpoint: settings.models.endpoint, model: settings.models.model } };
+            writePipelines(deps.dataDir, records);
+          }
+          out.updated.push(vaultId);
+        } else {
+          await ensure(vaultId);
+          out.recreated.push(vaultId);
+        }
+      }
+      return out;
     },
 
     /** The model key was removed: every recorded pipeline is disabled and its key secret deleted; the records say why. */

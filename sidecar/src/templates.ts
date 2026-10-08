@@ -88,11 +88,14 @@ export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ w
     const connectionId = await createDocument(opts.origin, opts.template.connection.documentType, `${opts.vaultName} — Knowledge Vault`, opts.workflowsDriveId, f);
     created.push(connectionId);
     const values = valuesWith(connectionId);
-    const fill = (ops: TemplateOp[]) => toActions(ops.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, values) })), now);
-    await execute(opts.origin, connectionId, fill(opts.template.connection.operations), f);
+    // The connection carries the model (llm_default_model); the steps leave theirs empty so the piece
+    // falls back to it (runner.ts) — a model change in Settings is then one config write, not a new workflow.
+    const stepValues: PlaceholderValues = { ...values, "{{LLM_MODEL}}": "" };
+    const fill = (ops: TemplateOp[], v: PlaceholderValues) => toActions(ops.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, v) })), now);
+    await execute(opts.origin, connectionId, fill(opts.template.connection.operations, values), f);
     const workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, `${opts.vaultName} — Vault pipeline`, opts.workflowsDriveId, f);
     created.push(workflowId);
-    await execute(opts.origin, workflowId, fill(opts.template.workflow.operations), f);
+    await execute(opts.origin, workflowId, fill(opts.template.workflow.operations, stepValues), f);
     return { workflowId, connectionId };
   } catch (error) {
     for (const id of created) await deleteDocument(opts.origin, id, f).catch(() => undefined);

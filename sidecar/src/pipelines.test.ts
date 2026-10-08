@@ -20,6 +20,7 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     if (q.includes("deleteSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { deleteSecret: true } } }) };
     if (q.includes("deleteDocument")) return { ok: true, json: async () => ({ data: { deleteDocument: true } }) };
     if (q.includes("execute(")) return { ok: true, json: async () => ({ data: { execute: { id: body.variables.id } } }) };
+    if (q.includes("document { state }")) return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { config: { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "openai/gpt-6-luna", llm_api_key: "secret://v1:2" } } } } } } }) };
     if (q.includes("operations(")) return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: [{ index: 0, error: null, action: { type: "SET_WORKFLOW_STATUS" } }], hasNextPage: false, cursor: null } } } } }) };
     if (q.includes("triggerStates")) {
       return { ok: true, json: async () => ({ data: { workflowRuntime: { triggerStates: triggers.map((t) => ({ ...t, lastPollAt: "2026-10-07T10:00:00.000Z", lastError: null })), runsPage: { items: [{ id: `run-${body.variables.w}`, status: "FAILED", startedAt: "2026-10-07T09:59:00.000Z", endedAt: "2026-10-07T09:59:30.000Z", error: "no model here" }] } } } }) };
@@ -87,7 +88,7 @@ describe("pipeline manager — ensure", () => {
       llm: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" },
       pieceVersion: "1.0.54-dev.23",
     }));
-    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } });
+    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } , modelFromConnection: true });
   });
   it("uses a placeholder token for an open engine with nobody signed in — the engine ignores bearers there", async () => {
     const { manager, engine } = deps({ signedIn: false });
@@ -199,5 +200,34 @@ describe("pipeline manager — lifecycle (review fixes)", () => {
     expect(records.vault1!.disabled).toBe("the model key was removed");
     // with a key again, the record is stale (its secret is gone) and Update re-creates it
     expect(await manager.status("vault1")).toMatchObject({ state: "stale", reason: "the model key was removed" });
+  });
+});
+
+describe("pipeline manager — the model settings changed", () => {
+  it("rewrites the connection of a pipeline whose steps defer to it, keeping the other config keys, and sets an older one up again", async () => {
+    const h = deps({ model: "anthropic/claude-sonnet-5.5" });
+    writePipelines(h.dataDir, {
+      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, modelFromConnection: true },
+      vault2: { workflowId: "wf-old", connectionId: "conn-old", secretRefs: { token: "secret://v1:3", llm: "secret://v1:4" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } },
+      vault3: { workflowId: "wf-3", connectionId: "conn-3", secretRefs: { token: "secret://v1:5", llm: "secret://v1:6" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, disabled: "the model key was removed" },
+    });
+    expect(await h.manager.applyModels()).toEqual({ updated: ["vault1"], recreated: ["vault2"] });
+    const setConfig = h.engine.calls.find((c) => c.query.includes("execute(") && JSON.stringify(c.variables).includes("SET_CONFIG"));
+    const action = (setConfig!.variables.a as Array<{ input: unknown }>)[0]!;
+    expect(action.input).toEqual({ config: { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "anthropic/claude-sonnet-5.5", llm_api_key: "secret://v1:2" } });
+    const records = readPipelines(h.dataDir);
+    expect(records.vault1).toMatchObject({ workflowId: "wf-1", models: { model: "anthropic/claude-sonnet-5.5" } });
+    expect(h.instantiate).toHaveBeenCalledTimes(1); // only the older pipeline was set up again
+    expect(records.vault2).toMatchObject({ workflowId: "wf-1", modelFromConnection: true, models: { model: "anthropic/claude-sonnet-5.5" } });
+    expect(records.vault3?.disabled).toBe("the model key was removed");
+    // and status no longer reads stale
+    expect((await h.manager.status("vault1")).state).toBe("ready");
+  });
+
+  it("does nothing while no model is configured", async () => {
+    const h = deps({ hasKey: false });
+    writePipelines(h.dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "a", llm: "b" }, createdAt: "x", models: { endpoint: "e", model: "m" }, token: { kind: "open", expiresAt: null }, modelFromConnection: true } });
+    expect(await h.manager.applyModels()).toEqual({ updated: [], recreated: [] });
+    expect(h.engine.calls).toEqual([]);
   });
 });

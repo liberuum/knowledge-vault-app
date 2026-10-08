@@ -22,10 +22,11 @@ let expired = false;
 let modelKey = false;
 let removedPipelines: string[] = [];
 let disabledFor: string[] = [];
+let modelsApplied = 0;
 let scheduled: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; scheduled = []; shutdowns = 0; debugRoutes = false; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -68,6 +69,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       status: async (id: string) => (modelKey ? { state: "ready" as const, workflowId: `wf-${id}`, connectionId: `conn-${id}`, trigger: { status: "ENABLED", lastPollAt: null, lastError: null } } : { state: "unconfigured" as const }),
       remove: async (id: string) => { removedPipelines.push(id); },
       disableAll: async (reason: string) => { disabledFor.push(reason); },
+      applyModels: async () => { modelsApplied += 1; return { updated: [], recreated: [] }; },
     },
     protection: {
       get: () => protection,
@@ -343,12 +345,18 @@ describe("model validation over the control API", () => {
 
 describe("settings changes reach the pipelines", () => {
   const h = { authorization: "Bearer secret", "content-type": "application/json" };
-  it("removing the key disables every pipeline; changing the endpoint does not (status reads stale instead)", async () => {
+  it("removing the key disables every pipeline; changing the endpoint or the model makes every pipeline follow", async () => {
     const base = await start();
     await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { endpoint: "http://127.0.0.1:11434/v1" } }) });
     expect(disabledFor).toEqual([]);
+    expect(modelsApplied).toBe(1);
+    await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { model: "llama3" } }) });
+    expect(modelsApplied).toBe(2);
+    await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ ui: { closeToTray: false } }) });
+    expect(modelsApplied).toBe(2);
     await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { apiKey: "" } }) });
     expect(disabledFor).toEqual(["the model key was removed"]);
+    expect(modelsApplied).toBe(2);
   });
 
   it("Plan 5: lists backups with the last action, and schedules a backup, a restore or a delete-all for the next start (202 restarting)", async () => {

@@ -8,6 +8,7 @@ export type CatalogModel = {
   free: boolean;
   jsonOutput?: boolean;
   textOutput?: boolean;
+  outputs?: string[];
   maxOutput?: number;
   quality?: number;
 };
@@ -27,20 +28,36 @@ export const MIN_CONTEXT_FOR_PROCESSING = 64_000;
 /** The longest reply the pipeline asks for; a model that cannot give it would cut extractions short. */
 export const MIN_OUTPUT_FOR_PROCESSING = 16_000;
 
+export type Fit = { ok: true } | { ok: false; reason: string } | { ok: null };
+
 /**
- * Models that suit processing, best first: text output, `response_format`, 64k+ context, room for a
- * 16k reply, a known price — ranked by the quality score the provider relays (Artificial Analysis'
- * intelligence index), cheaper first among equals. Only a catalog that describes its models
- * (OpenRouter) can say; a bare list recommends nothing.
+ * Whether the pipeline can use a model: it must answer in JSON (`response_format`), produce text
+ * and nothing else (a music or image model also lists "text" and still refuses the work), take a
+ * whole source (64k+ context) and give a long reply (16k+). `ok: null` when the provider's list
+ * says too little to tell (OpenAI, a local server).
+ */
+export function fitForProcessing(m: CatalogModel): Fit {
+  if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) return { ok: null };
+  if (m.jsonOutput === false) return { ok: false, reason: "no JSON output" };
+  if (m.textOutput === false) return { ok: false, reason: "does not produce text" };
+  const media = (m.outputs ?? []).filter((o) => o !== "text");
+  if (media.length) return { ok: false, reason: `makes ${media.join(" and ")}, not a text model` };
+  if (m.contextLength !== undefined && m.contextLength < MIN_CONTEXT_FOR_PROCESSING) return { ok: false, reason: "context too small for a whole source" };
+  if (m.maxOutput !== undefined && m.maxOutput < MIN_OUTPUT_FOR_PROCESSING) return { ok: false, reason: "replies too short for an extraction" };
+  if (m.jsonOutput !== true) return { ok: null };
+  return { ok: true };
+}
+
+/**
+ * Models that suit processing, best first: the ones that fit (above), with a known price and a
+ * quality score — ranked by the score the provider relays (Artificial Analysis' intelligence
+ * index), cheaper first among equals. A bare list recommends nothing.
  */
 export function recommendedModels(models: readonly CatalogModel[], limit = 8): CatalogModel[] {
   return models
     .filter(
       (m) =>
-        m.jsonOutput === true &&
-        m.textOutput !== false &&
-        (m.contextLength ?? 0) >= MIN_CONTEXT_FOR_PROCESSING &&
-        (m.maxOutput === undefined || m.maxOutput >= MIN_OUTPUT_FOR_PROCESSING) &&
+        fitForProcessing(m).ok === true &&
         m.quality !== undefined &&
         m.promptPrice !== undefined &&
         !m.free &&
@@ -51,7 +68,9 @@ export function recommendedModels(models: readonly CatalogModel[], limit = 8): C
     .slice(0, limit);
 }
 
-export const freeModels = (models: readonly CatalogModel[]) => models.filter((m) => m.free);
+/** Free models, the ones that fit processing first. */
+export const freeModels = (models: readonly CatalogModel[]) =>
+  models.filter((m) => m.free).sort((a, b) => Number(fitForProcessing(b).ok === true) - Number(fitForProcessing(a).ok === true) || a.id.localeCompare(b.id));
 
 /** "$2 / $10 per M tokens", "free", or nothing when the provider did not say. */
 export function formatPrice(m: CatalogModel): string | null {
