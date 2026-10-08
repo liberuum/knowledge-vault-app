@@ -45,6 +45,7 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
         { id: "google/gemini-3-flash", name: "Google: Gemini 3 Flash", contextLength: 1_000_000, promptPrice: 0.3, completionPrice: 2.5, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 65_000, quality: 42 },
         { id: "meta/llama-5-8b:free", name: "Meta: Llama 5 8B (free)", contextLength: 128_000, promptPrice: 0, completionPrice: 0, free: true, jsonOutput: false, textOutput: true },
         { id: "stability/sd4", name: "Stability: SD4", contextLength: 8_000, promptPrice: 0.1, completionPrice: 0.1, free: false, jsonOutput: true, textOutput: false, quality: 10 },
+        { id: "mistral/small-5:free", name: "Mistral: Small 5 (free)", contextLength: 128_000, promptPrice: 0, completionPrice: 0, free: true, jsonOutput: true, textOutput: true, outputs: ["text"], inputs: ["text"], maxOutput: 32_000, quality: 20 },
       ],
     })),
     validateModels: vi.fn(async () => ({ ok: false, detail: "The provider refused the key: Invalid API key", warning: "This server is on your local network; restart the app after saving so the engine may reach it." })),
@@ -126,12 +127,14 @@ describe("Settings", () => {
     render(<Harness api={a} start="models" />);
     const field = await screen.findByLabelText("Model (required for processing)");
     await waitFor(() => expect(a.fetchModelCatalog).toHaveBeenCalledWith(info, "https://openrouter.ai/api/v1"));
-    expect(await screen.findByText(/4 models available — type to search/)).toBeTruthy();
+    expect(await screen.findByText(/3 of the 5 models your key gives you can do the vault/)).toBeTruthy();
     fireEvent.focus(field);
     const list = await screen.findByRole("listbox", { name: "Models" });
-    // best-scored capable model first; the free one under Free; the image model only under All models
+    // best-scored capable model first; the usable free one under Free; the image model and the free one without JSON are not offered at all
     const groups = within(list).getAllByRole("group").map((g) => g.getAttribute("aria-label"));
-    expect(groups).toEqual(["Recommended for processing", "Free", "All models"]);
+    expect(groups).toEqual(["Recommended for processing", "Free"]);
+    expect(within(list).queryByText(/stability\/sd4/)).toBeNull();
+    expect(within(list).queryByText(/meta\/llama-5-8b:free/)).toBeNull();
     const recommended = within(within(list).getByRole("group", { name: "Recommended for processing" })).getAllByRole("option").map((o) => o.textContent);
     expect(recommended[0]).toContain("google/gemini-3-flash");
     expect(recommended[0]).toContain("1M context");
@@ -140,7 +143,7 @@ describe("Settings", () => {
     expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("free");
     // each entry says whether the model can answer in JSON, which processing needs
     expect(recommended[0]).toContain("fits processing");
-    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("not for processing: no JSON output");
+    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("mistral/small-5:free");
     // typing searches every group
     fireEvent.change(field, { target: { value: "luna" } });
     expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option")).toHaveLength(1);
@@ -152,7 +155,7 @@ describe("Settings", () => {
     // clicking the field again shows the whole list, not just the chosen model, with it highlighted — so another can be picked without clearing
     fireEvent.click(screen.getByLabelText("Model (required for processing)"));
     const reopened = within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option");
-    expect(reopened).toHaveLength(4);
+    expect(reopened).toHaveLength(3);
     expect(reopened.find((o) => o.textContent?.includes("openai/gpt-6-luna"))?.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("option", { name: /google\/gemini-3-flash/ }));
     expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("google/gemini-3-flash");

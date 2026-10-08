@@ -9,6 +9,7 @@ export type CatalogModel = {
   jsonOutput?: boolean;
   textOutput?: boolean;
   outputs?: string[];
+  inputs?: string[];
   maxOutput?: number;
   quality?: number;
 };
@@ -31,14 +32,15 @@ export const MIN_OUTPUT_FOR_PROCESSING = 16_000;
 export type Fit = { ok: true } | { ok: false; reason: string } | { ok: null };
 
 /**
- * Whether the pipeline can use a model: it must answer in JSON (`response_format`), produce text
- * and nothing else (a music or image model also lists "text" and still refuses the work), take a
+ * Whether the pipeline can use a model: it must take text (images are welcome, for figures),
+ * answer in JSON (`response_format`), produce text and nothing else (a music or image model also lists "text" and still refuses the work), take a
  * whole source (64k+ context) and give a long reply (16k+). `ok: null` when the provider's list
  * says too little to tell (OpenAI, a local server).
  */
 export function fitForProcessing(m: CatalogModel): Fit {
   if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) return { ok: null };
   if (m.jsonOutput === false) return { ok: false, reason: "no JSON output" };
+  if (m.inputs && !m.inputs.includes("text")) return { ok: false, reason: "does not take text input" };
   if (m.textOutput === false) return { ok: false, reason: "does not produce text" };
   const media = (m.outputs ?? []).filter((o) => o !== "text");
   if (media.length) return { ok: false, reason: `makes ${media.join(" and ")}, not a text model` };
@@ -85,4 +87,9 @@ export function formatContext(m: CatalogModel): string | null {
   const n = m.contextLength;
   if (!n) return null;
   return n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(2))}M context` : `${Math.round(n / 1000)}k context`;
+}
+
+/** The models the picker offers: the ones that can do the vault's work, or might (the provider said too little), plus the one currently chosen. */
+export function offerableModels(models: readonly CatalogModel[], current: string): CatalogModel[] {
+  return models.filter((m) => fitForProcessing(m).ok !== false || m.id === current);
 }

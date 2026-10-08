@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, recommendedModels, type CatalogModel } from "./model-picker.js";
+import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, offerableModels, recommendedModels, type CatalogModel } from "./model-picker.js";
 
 export type CatalogResult = { ok: true; models: CatalogModel[] } | { ok: false; detail: string };
 
@@ -63,7 +63,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
 
   const groups = useMemo<Group[]>(() => {
     if (!catalog?.ok) return [];
-    const matching = filterModels(catalog.models, typed ? value : "");
+    const matching = filterModels(offerableModels(catalog.models, value), typed ? value : "");
     const recommended = recommendedModels(matching);
     const free = freeModels(matching);
     const seen = new Set([...recommended, ...free].map((m) => m.id));
@@ -116,7 +116,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
       : catalog && !catalog.ok
         ? `Could not list models: ${catalog.detail}`
         : catalog?.ok
-          ? `${catalog.models.length} models available — type to search, or pick from the list. Recommended ones fit the pipeline — JSON answers, text only, room for a whole source — ranked by the quality score the provider reports.`
+          ? `${offerableModels(catalog.models, "").length} of the ${catalog.models.length} models your key gives you can do the vault's work (text in, JSON out) — type to search, or pick from the list. Recommended ones are ranked by the quality score the provider reports.`
           : null;
   const current = catalog?.ok ? catalog.models.find((m) => m.id === value) : undefined;
   let index = -1;

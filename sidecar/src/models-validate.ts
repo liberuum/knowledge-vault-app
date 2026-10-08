@@ -55,6 +55,8 @@ export type CatalogModel = {
   textOutput?: boolean;
   /** Everything the model produces (OpenRouter's output_modalities): a music or image model also lists "text". */
   outputs?: string[];
+  /** What the model accepts (OpenRouter's input_modalities): the vault sends text, and figures as images. */
+  inputs?: string[];
   /** The longest reply the model can give, in tokens (the pipeline asks for up to 32k). */
   maxOutput?: number;
   /** Artificial Analysis' intelligence index, as OpenRouter relays it — the picker ranks "recommended" by it. */
@@ -82,6 +84,7 @@ export function normaliseCatalog(data: unknown): CatalogModel[] {
     const params = Array.isArray(m.supported_parameters) ? (m.supported_parameters as unknown[]) : undefined;
     const arch = m.architecture && typeof m.architecture === "object" ? (m.architecture as Record<string, unknown>) : undefined;
     const outputs = arch && Array.isArray(arch.output_modalities) ? (arch.output_modalities as unknown[]) : undefined;
+    const inputs = arch && Array.isArray(arch.input_modalities) ? (arch.input_modalities as unknown[]) : undefined;
     const top = m.top_provider && typeof m.top_provider === "object" ? (m.top_provider as Record<string, unknown>) : undefined;
     const bench = m.benchmarks && typeof m.benchmarks === "object" ? (m.benchmarks as Record<string, unknown>) : undefined;
     const aa = bench?.artificial_analysis && typeof bench.artificial_analysis === "object" ? (bench.artificial_analysis as Record<string, unknown>) : undefined;
@@ -95,6 +98,7 @@ export function normaliseCatalog(data: unknown): CatalogModel[] {
       jsonOutput: params ? params.includes("response_format") || params.includes("structured_outputs") : undefined,
       textOutput: outputs ? outputs.includes("text") : undefined,
       outputs: outputs ? outputs.filter((o): o is string => typeof o === "string") : undefined,
+      inputs: inputs ? inputs.filter((o): o is string => typeof o === "string") : undefined,
       maxOutput: typeof top?.max_completion_tokens === "number" ? top.max_completion_tokens : undefined,
       quality: typeof aa?.intelligence_index === "number" ? aa.intelligence_index : undefined,
     });

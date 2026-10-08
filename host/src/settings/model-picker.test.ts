@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, recommendedModels, type CatalogModel } from "./model-picker.js";
+import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, offerableModels, recommendedModels, type CatalogModel } from "./model-picker.js";
 
 const m = (id: string, over: Partial<CatalogModel> = {}): CatalogModel => ({ id, name: id, free: false, ...over });
 const rich = (id: string, over: Partial<CatalogModel> = {}) => m(id, { contextLength: 200_000, promptPrice: 2, completionPrice: 10, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 64_000, quality: 30, ...over });
@@ -50,6 +50,8 @@ describe("the model picker's logic", () => {
     expect(fitForProcessing(rich("good"))).toEqual({ ok: true });
     expect(fitForProcessing(rich("google/lyria-3-pro-preview", { outputs: ["text", "audio"] }))).toEqual({ ok: false, reason: "makes audio, not a text model" });
     expect(fitForProcessing(rich("x", { jsonOutput: false }))).toEqual({ ok: false, reason: "no JSON output" });
+    expect(fitForProcessing(rich("x", { inputs: ["audio"] }))).toEqual({ ok: false, reason: "does not take text input" });
+    expect(fitForProcessing(rich("x", { inputs: ["text", "image"] }))).toEqual({ ok: true });
     expect(fitForProcessing(rich("x", { contextLength: 32_000 }))).toEqual({ ok: false, reason: "context too small for a whole source" });
     expect(fitForProcessing(rich("x", { maxOutput: 4_000 }))).toEqual({ ok: false, reason: "replies too short for an extraction" });
     expect(fitForProcessing(m("llama3"))).toEqual({ ok: null });
@@ -58,5 +60,11 @@ describe("the model picker's logic", () => {
   it("lists free models with the usable ones first", () => {
     const models = [rich("free/music:free", { free: true, outputs: ["text", "audio"] }), rich("free/text:free", { free: true })];
     expect(freeModels(models).map((x) => x.id)).toEqual(["free/text:free", "free/music:free"]);
+  });
+
+  it("offers only the models that can (or might) do the vault's work, and the chosen one whatever it is", () => {
+    const models = [rich("good"), rich("music", { outputs: ["text", "audio"] }), rich("nojson", { jsonOutput: false }), m("llama3"), rich("chosen-bad", { jsonOutput: false })];
+    expect(offerableModels(models, "chosen-bad").map((x) => x.id)).toEqual(["good", "llama3", "chosen-bad"]);
+    expect(offerableModels(models, "").map((x) => x.id)).toEqual(["good", "llama3"]);
   });
 });

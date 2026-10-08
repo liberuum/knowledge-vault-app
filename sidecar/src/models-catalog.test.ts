@@ -12,12 +12,12 @@ describe("the model catalog", () => {
         context_length: 1_050_000,
         pricing: { prompt: "0.000002", completion: "0.00001" },
         supported_parameters: ["max_tokens", "response_format", "structured_outputs"],
-        architecture: { output_modalities: ["text"] },
+        architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
         top_provider: { context_length: 1_050_000, max_completion_tokens: 128_000 },
         benchmarks: { artificial_analysis: { intelligence_index: 38.1 } },
       },
     ]);
-    expect(m).toEqual({ id: "openai/gpt-6.1-sol-pro", name: "OpenAI: GPT-6.1 Sol Pro", contextLength: 1_050_000, promptPrice: 2, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], maxOutput: 128_000, quality: 38.1 });
+    expect(m).toEqual({ id: "openai/gpt-6.1-sol-pro", name: "OpenAI: GPT-6.1 Sol Pro", contextLength: 1_050_000, promptPrice: 2, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, outputs: ["text"], inputs: ["text", "image"], maxOutput: 128_000, quality: 38.1 });
   });
 
   it("marks free models, image-only models and models without JSON output", () => {
@@ -42,8 +42,8 @@ describe("the model catalog", () => {
   it("keeps a bare list (OpenAI, Ollama) usable: ids only, nothing claimed about the rest", () => {
     const models = normaliseCatalog([{ id: "gpt-4.1", object: "model", owned_by: "openai" }, { id: "llama3:latest" }, { nope: 1 }, null]);
     expect(models).toEqual([
-      { id: "gpt-4.1", name: "gpt-4.1", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, maxOutput: undefined, quality: undefined },
-      { id: "llama3:latest", name: "llama3:latest", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, maxOutput: undefined, quality: undefined },
+      { id: "gpt-4.1", name: "gpt-4.1", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, inputs: undefined, maxOutput: undefined, quality: undefined },
+      { id: "llama3:latest", name: "llama3:latest", free: false, contextLength: undefined, promptPrice: undefined, completionPrice: undefined, jsonOutput: undefined, textOutput: undefined, outputs: undefined, inputs: undefined, maxOutput: undefined, quality: undefined },
     ]);
   });
 
