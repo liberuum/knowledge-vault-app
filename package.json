@@ -2,7 +2,7 @@
   "name": "knowledge-vault-app",
   "license": "AGPL-3.0-only",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "workspaces": [
     "host",
     "sidecar"
