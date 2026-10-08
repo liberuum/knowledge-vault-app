@@ -1,8 +1,8 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { createPipelineManager, readPipelines, templateDigest, writePipelines, type PipelineManagerDeps } from "./pipelines.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createPipelineManager, readPipelines, templateDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
 import type { PipelineTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
@@ -13,6 +13,8 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
   const calls: Call[] = [];
   let secrets = 0;
   const connectionConfig: Record<string, unknown> = { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "openai/gpt-6-luna", llm_api_key: "secret://v1:2" };
+  /** Documents whose writes (`execute`) the engine refuses, the way it answers a rejected write: a GraphQL `errors` array. */
+  const failExecuteFor = new Set<string>();
   const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
     const body = JSON.parse(String(init?.body)) as Call;
     calls.push(body);
@@ -20,7 +22,11 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     if (q.includes("createSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { createSecret: { ref: `secret://v1:${++secrets}` } } } }) };
     if (q.includes("deleteSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { deleteSecret: true } } }) };
     if (q.includes("deleteDocument")) return { ok: true, json: async () => ({ data: { deleteDocument: true } }) };
-    if (q.includes("execute(")) return { ok: true, json: async () => ({ data: { execute: { id: body.variables.id } } }) };
+    if (q.includes("execute(")) {
+      const id = String(body.variables.id);
+      if (failExecuteFor.has(id)) return { ok: true, json: async () => ({ errors: [{ message: `the engine refused the write to ${id}` }] }) };
+      return { ok: true, json: async () => ({ data: { execute: { id } } }) };
+    }
     if (q.includes("document { state }")) return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { config: connectionConfig } } } } } }) };
     if (q.includes("operations(")) return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: [{ index: 0, error: null, action: { type: "SET_WORKFLOW_STATUS" } }], hasNextPage: false, cursor: null } } } } }) };
     if (q.includes("triggerStates")) {
@@ -28,7 +34,7 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     }
     throw new Error(`unexpected query: ${q}`);
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls, connectionConfig };
+  return { fetchImpl, calls, connectionConfig, failExecuteFor };
 }
 function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; endpoint?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "kv-pipelines-"));
@@ -152,6 +158,16 @@ describe("pipeline manager — lifecycle (review fixes)", () => {
   it("a failed instantiation deletes the two new secrets and leaves no record — status reads missing, never ready", async () => {
     const { manager, engine, dataDir } = deps({ instantiate: vi.fn(async () => { throw new Error("Operation SET_TRIGGER was rejected: drive unknown"); }) });
     await expect(manager.ensure("vault1")).rejects.toThrow(/SET_TRIGGER/);
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument"))).toEqual([]); // instantiate removed its own; ensure never saw their ids
+    expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
+    expect(readPipelines(dataDir).vault1).toBeUndefined();
+    expect(await manager.status("vault1")).toEqual({ state: "missing" });
+  });
+  it("a failure after the documents were made — the config write — deletes them too, with both secrets, and leaves no record", async () => {
+    const { manager, engine, dataDir } = deps();
+    engine.failExecuteFor.add("conn-1"); // the connection the fake instantiate returns: its config write is refused
+    await expect(manager.ensure("vault1")).rejects.toThrow(/refused the write to conn-1/);
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort()).toEqual(["conn-1", "wf-1"]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
     expect(readPipelines(dataDir).vault1).toBeUndefined();
     expect(await manager.status("vault1")).toEqual({ state: "missing" });
@@ -253,12 +269,17 @@ describe("pipeline manager — a newer template", () => {
 });
 
 describe("pipelines and the model gateway", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const configWrites = (calls: Call[]) =>
     calls
       .filter((c) => c.query.includes("execute("))
       .flatMap((c) => (c.variables.a ?? []) as Array<{ type: string; input: { config?: Record<string, unknown> } }>)
       .filter((a) => a.type === "SET_CONFIG")
       .map((a) => a.input.config);
+  const secretCalls = (calls: Call[], kind: "createSecret" | "deleteSecret") => calls.filter((c) => c.query.includes(kind));
+  /** A pipeline recorded before the gateway: its connection's key is a secret holding the model key itself. */
+  const older = (n: number): PipelineRecord => ({ workflowId: `wf-${n}`, connectionId: `conn-${n}`, secretRefs: { token: `secret://tok:vault${n}`, llm: `secret://old:vault${n}` }, createdAt: "x" }) as PipelineRecord;
 
   it("a new pipeline's connection points at the gateway with the gateway key and says where the model runs", async () => {
     const { manager, engine } = deps({ endpoint: "http://127.0.0.1:8084/v1" });
@@ -271,14 +292,14 @@ describe("pipelines and the model gateway", () => {
   it("follows a moved gateway", async () => {
     const { d, dataDir, engine } = deps({ gateway: { url: () => "http://127.0.0.1:4299/llm/v1", key: "gw-key" } });
     writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x", gatewayKeyed: true } as never });
-    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"] });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"], failed: [] });
     expect(configWrites(engine.calls).at(-1)).toMatchObject({ llm_base_url: "http://127.0.0.1:4299/llm/v1", llm_api_key: "secret://v1:2" });
   });
 
   it("moves an older pipeline to the gateway and deletes its old key secret", async () => {
     const { d, dataDir, engine } = deps();
     writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x" } as never });
-    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"] });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"], failed: [] });
     expect(engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.v)).toEqual(["gw-key"]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref)).toEqual(["secret://v1:2"]);
     expect(configWrites(engine.calls).at(-1)).toMatchObject({ llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_api_key: expect.stringMatching(/^secret:\/\/v1:/) });
@@ -289,6 +310,54 @@ describe("pipelines and the model gateway", () => {
     const { d, dataDir, engine } = deps();
     engine.connectionConfig.llm_base_url = "http://127.0.0.1:4202/llm/v1";
     writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x", gatewayKeyed: true } as never });
-    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: [] });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: [], failed: [] });
+    expect(secretCalls(engine.calls, "createSecret")).toEqual([]);
+    expect(secretCalls(engine.calls, "deleteSecret")).toEqual([]);
+    expect(configWrites(engine.calls)).toEqual([]);
+  });
+
+  it("moves an older pipeline new-key-first: the new secret, the connection, the record — and only then the old secret", async () => {
+    const { d, dataDir } = deps();
+    writePipelines(dataDir, { vault1: older(1) });
+    const steps: string[] = [];
+    const engineFetch = d.fetchImpl;
+    const fetchImpl = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const { query, variables } = JSON.parse(String(init?.body)) as Call;
+      if (query.includes("createSecret")) steps.push("create the gateway-key secret");
+      else if (query.includes("execute(")) steps.push("repoint the connection");
+      else if (query.includes("deleteSecret")) steps.push(`delete ${String(variables.ref)} (the record already holds ${readPipelines(dataDir).vault1?.secretRefs.llm})`);
+      return engineFetch(url, init);
+    }) as unknown as typeof fetch;
+    await createPipelineManager({ ...d, fetchImpl }).followGateway();
+    expect(steps).toEqual(["create the gateway-key secret", "repoint the connection", "delete secret://old:vault1 (the record already holds secret://v1:1)"]);
+  });
+
+  it("a pipeline that cannot be moved keeps its record and its old key, loses the secret made for it and is reported — the others still move", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { d, dataDir, engine } = deps();
+    writePipelines(dataDir, { vault1: older(1), vault2: older(2) });
+    engine.failExecuteFor.add("conn-1");
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault2"], failed: ["vault1"] });
+    const records = readPipelines(dataDir);
+    expect(records.vault1).toEqual(older(1)); // not gatewayKeyed, still the old key secret
+    expect(records.vault2).toMatchObject({ gatewayKeyed: true, secretRefs: { token: "secret://tok:vault2", llm: "secret://v1:2" } });
+    // vault1's new secret (secret://v1:1) is deleted and its old one stays; vault2 loses only its old one
+    expect(secretCalls(engine.calls, "deleteSecret").map((c) => c.variables.ref)).toEqual(["secret://v1:1", "secret://old:vault2"]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/vault1.*refused the write to conn-1/);
+  });
+
+  it("a pipeline that already holds the gateway key but cannot be repointed is reported; nothing is created or deleted for it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { d, dataDir, engine } = deps({ gateway: { url: () => "http://127.0.0.1:4299/llm/v1", key: "gw-key" } });
+    const keyed: PipelineRecord = { ...older(1), gatewayKeyed: true };
+    writePipelines(dataDir, { vault1: keyed });
+    engine.failExecuteFor.add("conn-1");
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: [], failed: ["vault1"] });
+    expect(readPipelines(dataDir).vault1).toEqual(keyed);
+    expect(secretCalls(engine.calls, "createSecret")).toEqual([]);
+    expect(secretCalls(engine.calls, "deleteSecret")).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/vault1.*refused the write to conn-1/);
   });
 });

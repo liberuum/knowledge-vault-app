@@ -393,7 +393,10 @@ async function main(): Promise<void> {
   boundControlPort = controlPort;
   void pipelines
     .followGateway()
-    .then(({ moved }) => moved.length && console.log(`[sidecar] ${moved.length} pipeline(s) now reach their model through the gateway`))
+    .then(({ moved, failed }) => {
+      if (moved.length) console.log(`[sidecar] ${moved.length} pipeline(s) now reach their model through the gateway`);
+      if (failed.length) console.warn(`[sidecar] ${failed.length} pipeline(s) could not be moved to the gateway and keep their previous settings: ${failed.join(", ")}`);
+    })
     .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`));
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
 

@@ -177,8 +177,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       const { id: workflowsDriveId } = await deps.workflowsDrive();
       const tokenRef = await createSecret(token.value, `${name} — engine token`);
       const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
+      let made: { workflowId: string; connectionId: string } | undefined;
       try {
-        const { workflowId, connectionId } = await instantiate({
+        made = await instantiate({
           origin: deps.origin,
           template: deps.template,
           vaultName: name,
@@ -190,6 +191,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
           now,
           fetchImpl: f,
         });
+        const { workflowId, connectionId } = made;
         await updateConnectionModels(connectionId, settings);
         writePipelines(deps.dataDir, {
           ...readPipelines(deps.dataDir),
@@ -207,7 +209,10 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         });
         return { state: "ready", workflowId, connectionId };
       } catch (error) {
-        // instantiatePipeline removed its documents; the two secrets are ours to remove.
+        // A failed instantiatePipeline removed its own documents. Once it has returned they are ours: the
+        // config write or the record can still fail, and nothing would ever point at them again.
+        if (made) for (const id of [made.workflowId, made.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
+        // The two secrets are ours to remove either way.
         await deleteSecret(tokenRef);
         await deleteSecret(llmRef);
         throw error;
@@ -245,32 +250,46 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   return {
     ensure,
 
-    /** At start: every pipeline's connection points at this launch's gateway, older ones get the gateway key. */
-    async followGateway(): Promise<{ moved: string[] }> {
+    /**
+     * At start: every pipeline's connection points at this launch's gateway, older ones get the gateway key.
+     * Each pipeline on its own: one that cannot be moved is left exactly as it was (record, key secret,
+     * connection) and reported in `failed`; the others still move. An older pipeline goes new-key-first —
+     * the new secret, the connection, the record — and only then loses its old secret, so a failure or a
+     * crash at any point leaves a pipeline that still works.
+     */
+    async followGateway(): Promise<{ moved: string[]; failed: string[] }> {
       const settings = deps.readSettings();
-      const records = readPipelines(deps.dataDir);
-      const moved: string[] = [];
-      for (const [vaultId, record] of Object.entries(records)) {
-        const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
-          deps.origin,
-          `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
-          { id: record.connectionId },
-          f,
-        ).catch(() => null);
-        if (!data) continue; // the connection was deleted in Studio: nothing to point anywhere
-        const current = data.document.document.state.global.config ?? {};
-        if (record.gatewayKeyed && current.llm_base_url === deps.gateway.url()) continue;
-        let ref: string | undefined;
-        if (!record.gatewayKeyed) {
-          ref = await createSecret(deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
-          await deleteSecret(record.secretRefs.llm);
-          records[vaultId] = { ...record, secretRefs: { ...record.secretRefs, llm: ref }, gatewayKeyed: true };
+      const out = { moved: [] as string[], failed: [] as string[] };
+      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
+        let created: string | undefined; // the gateway-key secret made for this pipeline, until its record holds it
+        try {
+          const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
+            deps.origin,
+            `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+            { id: record.connectionId },
+            f,
+          ).catch(() => null);
+          if (!data) continue; // the connection was deleted in Studio: nothing to point anywhere
+          const current = data.document.document.state.global.config ?? {};
+          if (record.gatewayKeyed) {
+            if (current.llm_base_url === deps.gateway.url()) continue;
+            await updateConnectionModels(record.connectionId, settings);
+          } else {
+            created = await createSecret(deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
+            await updateConnectionModels(record.connectionId, settings, created);
+            // This record now, re-read: a crash later loses nothing, and a pipeline set up meanwhile is not overwritten.
+            writePipelines(deps.dataDir, { ...readPipelines(deps.dataDir), [vaultId]: { ...record, secretRefs: { ...record.secretRefs, llm: created }, gatewayKeyed: true } });
+            created = undefined;
+            await deleteSecret(record.secretRefs.llm);
+          }
+          out.moved.push(vaultId);
+        } catch (error) {
+          if (created) await deleteSecret(created);
+          console.warn(`[pipelines] could not move the pipeline of vault ${vaultId} to the gateway: ${error instanceof Error ? error.message : String(error)}`);
+          out.failed.push(vaultId);
         }
-        await updateConnectionModels(record.connectionId, settings, ref);
-        moved.push(vaultId);
       }
-      writePipelines(deps.dataDir, records);
-      return { moved };
+      return out;
     },
 
     /**
