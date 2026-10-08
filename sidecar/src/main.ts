@@ -12,7 +12,7 @@ import { prepareDataDir } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
 import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
-import { createGateway } from "./gateway/gateway.js";
+import { createGateway, GATEWAY_PATH } from "./gateway/gateway.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
 import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion } from "./settings.js";
@@ -249,11 +249,15 @@ async function main(): Promise<void> {
   const workflowsDrive = singleFlight(() => ensureWorkflowsDrive(origin, engineFetch));
   const template = loadPipelineTemplate();
   if (!template) console.warn("[sidecar] the installed vault package ships no pipeline template — vaults will be created without a pipeline");
+  // The port the control server actually binds (it falls back upward when the configured one is busy).
+  let boundControlPort = cfg.controlPort;
+  const gatewayKey = ensureSecret(join(cfg.dataDir, "secrets", "gateway.key"));
   const pipelines = createPipelineManager({
     dataDir: cfg.dataDir,
     origin,
     fetchImpl: engineFetch,
     template,
+    gateway: { url: () => `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, key: gatewayKey },
     pieceVersion: VAULT_PACKAGE_VERSION,
     readSettings: () => readSettings(cfg.dataDir),
     readModelKey: () => readModelKey(cfg.dataDir),
@@ -275,9 +279,6 @@ async function main(): Promise<void> {
       options,
     );
 
-  // The port the control server actually binds (it falls back upward when the configured one is busy).
-  let boundControlPort = cfg.controlPort;
-  const gatewayKey = ensureSecret(join(cfg.dataDir, "secrets", "gateway.key"));
   const gateway = createGateway({ readSettings: () => readSettings(cfg.dataDir), readModelKey: () => readModelKey(cfg.dataDir) });
   const control = createControlServer({
     gateway,
@@ -390,6 +391,10 @@ async function main(): Promise<void> {
   });
   const controlPort = await control.listen(cfg.controlPort);
   boundControlPort = controlPort;
+  void pipelines
+    .followGateway()
+    .then(({ moved }) => moved.length && console.log(`[sidecar] ${moved.length} pipeline(s) now reach their model through the gateway`))
+    .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`));
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
 
   // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).

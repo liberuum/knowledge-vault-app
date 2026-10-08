@@ -29,6 +29,8 @@ export type PipelineRecord = {
   modelFromConnection?: boolean;
   /** Which template the pipeline was made from: an installed package with a newer one makes it stale (Update sets it up again). */
   templateDigest?: string;
+  /** The connection's key is the model gateway's: the pipeline reaches its model through the engine's gateway. */
+  gatewayKeyed?: true;
 };
 export type PipelineStatus =
   | { state: "unconfigured" }
@@ -72,6 +74,8 @@ export type PipelineManagerDeps = {
   identity: { status: () => Promise<{ authenticated: boolean }>; token: (expiresIn: number) => Promise<{ token: string }> };
   workflowsDrive: () => Promise<{ id: string }>;
   vaultName: (vaultId: string) => Promise<string>;
+  /** The engine's model gateway: this launch's URL (the control port moves) and the persistent key. */
+  gateway: { url: () => string; key: string };
   /** A protected engine answers only authenticated callers: its pipeline must run as the signed-in user. */
   engineProtected?: boolean;
   instantiate?: typeof instantiatePipeline;
@@ -172,7 +176,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       const name = await deps.vaultName(vaultId);
       const { id: workflowsDriveId } = await deps.workflowsDrive();
       const tokenRef = await createSecret(token.value, `${name} — engine token`);
-      const llmRef = await createSecret(key, `${name} — model key`);
+      const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
       try {
         const { workflowId, connectionId } = await instantiate({
           origin: deps.origin,
@@ -181,11 +185,12 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
           driveId: vaultId,
           workflowsDriveId,
           secretRefs: { token: tokenRef, llm: llmRef },
-          llm: { baseUrl: settings.models.endpoint, model: settings.models.model },
+          llm: { baseUrl: deps.gateway.url(), model: settings.models.model },
           pieceVersion: deps.pieceVersion,
           now,
           fetchImpl: f,
         });
+        await updateConnectionModels(connectionId, settings);
         writePipelines(deps.dataDir, {
           ...readPipelines(deps.dataDir),
           [vaultId]: {
@@ -197,6 +202,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             token: { kind: token.kind, expiresAt: token.expiresAt },
             modelFromConnection: true,
             templateDigest: templateDigest(deps.template),
+            gatewayKeyed: true,
           },
         });
         return { state: "ready", workflowId, connectionId };
@@ -209,7 +215,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   }
 
   /** Point a connection at the model settings: the config is rewritten whole, the other keys kept. */
-  async function updateConnectionModels(connectionId: string, settings: AppSettings): Promise<void> {
+  async function updateConnectionModels(connectionId: string, settings: AppSettings, llmSecretRef?: string): Promise<void> {
     const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
       deps.origin,
       `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
@@ -220,13 +226,52 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     await execute(
       deps.origin,
       connectionId,
-      toActions([{ type: "SET_CONFIG", input: { config: { ...config, llm_base_url: settings.models.endpoint, llm_default_model: settings.models.model } } }], now),
+      toActions([{
+        type: "SET_CONFIG",
+        input: {
+          config: {
+            ...config,
+            llm_base_url: deps.gateway.url(),
+            llm_default_model: settings.models.model,
+            llm_locality: settings.models.local ? "local" : "hosted",
+            ...(llmSecretRef ? { llm_api_key: llmSecretRef } : {}),
+          },
+        },
+      }], now),
       f,
     );
   }
 
   return {
     ensure,
+
+    /** At start: every pipeline's connection points at this launch's gateway, older ones get the gateway key. */
+    async followGateway(): Promise<{ moved: string[] }> {
+      const settings = deps.readSettings();
+      const records = readPipelines(deps.dataDir);
+      const moved: string[] = [];
+      for (const [vaultId, record] of Object.entries(records)) {
+        const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
+          deps.origin,
+          `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+          { id: record.connectionId },
+          f,
+        ).catch(() => null);
+        if (!data) continue; // the connection was deleted in Studio: nothing to point anywhere
+        const current = data.document.document.state.global.config ?? {};
+        if (record.gatewayKeyed && current.llm_base_url === deps.gateway.url()) continue;
+        let ref: string | undefined;
+        if (!record.gatewayKeyed) {
+          ref = await createSecret(deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
+          await deleteSecret(record.secretRefs.llm);
+          records[vaultId] = { ...record, secretRefs: { ...record.secretRefs, llm: ref }, gatewayKeyed: true };
+        }
+        await updateConnectionModels(record.connectionId, settings, ref);
+        moved.push(vaultId);
+      }
+      writePipelines(deps.dataDir, records);
+      return { moved };
+    },
 
     /**
      * Settings › Models changed: every pipeline follows. One whose steps defer to the connection gets

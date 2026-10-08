@@ -12,6 +12,7 @@ type Call = { query: string; variables: Record<string, unknown> };
 function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []) {
   const calls: Call[] = [];
   let secrets = 0;
+  const connectionConfig: Record<string, unknown> = { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "openai/gpt-6-luna", llm_api_key: "secret://v1:2" };
   const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
     const body = JSON.parse(String(init?.body)) as Call;
     calls.push(body);
@@ -20,14 +21,14 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     if (q.includes("deleteSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { deleteSecret: true } } }) };
     if (q.includes("deleteDocument")) return { ok: true, json: async () => ({ data: { deleteDocument: true } }) };
     if (q.includes("execute(")) return { ok: true, json: async () => ({ data: { execute: { id: body.variables.id } } }) };
-    if (q.includes("document { state }")) return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { config: { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "openai/gpt-6-luna", llm_api_key: "secret://v1:2" } } } } } } }) };
+    if (q.includes("document { state }")) return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { config: connectionConfig } } } } } }) };
     if (q.includes("operations(")) return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: [{ index: 0, error: null, action: { type: "SET_WORKFLOW_STATUS" } }], hasNextPage: false, cursor: null } } } } }) };
     if (q.includes("triggerStates")) {
       return { ok: true, json: async () => ({ data: { workflowRuntime: { triggerStates: triggers.map((t) => ({ ...t, lastPollAt: "2026-10-07T10:00:00.000Z", lastError: null })), runsPage: { items: [{ id: `run-${body.variables.w}`, status: "FAILED", startedAt: "2026-10-07T09:59:00.000Z", endedAt: "2026-10-07T09:59:30.000Z", error: "no model here" }] } } } }) };
     }
     throw new Error(`unexpected query: ${q}`);
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, connectionConfig };
 }
 function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; endpoint?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "kv-pipelines-"));
@@ -39,6 +40,7 @@ function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?
     origin: "http://127.0.0.1:4201",
     fetchImpl: engine.fetchImpl,
     template,
+    gateway: { url: () => "http://127.0.0.1:4202/llm/v1", key: "gw-key" },
     pieceVersion: "1.0.54-dev.23",
     readSettings: () => ({ version: 1, models: { endpoint: over.endpoint ?? "https://openrouter.ai/api/v1", model: over.model ?? "openai/gpt-6-luna", hasKey, local: (over.endpoint ?? "").startsWith("http://127.") }, conversion: { mode: "local", remoteUrl: "" } }),
     readModelKey: () => (hasKey ? "sk-or-secret" : undefined),
@@ -69,8 +71,8 @@ describe("pipeline manager — ensure", () => {
     const { manager, engine, instantiate } = deps({ hasKey: false, endpoint: "http://127.0.0.1:8080/v1", model: "lfm2.5-8b-a1b" });
     expect((await manager.ensure("vault1")).state).toBe("ready");
     const secrets = engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.v);
-    expect(secrets[1]).toBe("local");
-    expect(instantiate).toHaveBeenCalledWith(expect.objectContaining({ llm: { baseUrl: "http://127.0.0.1:8080/v1", model: "lfm2.5-8b-a1b" } }));
+    expect(secrets[1]).toBe("gw-key"); // the pipeline holds the gateway key; the gateway supplies the local placeholder
+    expect(instantiate).toHaveBeenCalledWith(expect.objectContaining({ llm: { baseUrl: "http://127.0.0.1:4202/llm/v1", model: "lfm2.5-8b-a1b" } }));
   });
   it("does nothing without a model key: unconfigured, and the engine is never asked", async () => {
     const { manager, engine, instantiate } = deps({ hasKey: false });
@@ -84,7 +86,7 @@ describe("pipeline manager — ensure", () => {
     const secrets = engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables);
     expect(secrets).toEqual([
       { v: `jwt-${90 * 86_400}`, l: "Research — engine token" },
-      { v: "sk-or-secret", l: "Research — model key" },
+      { v: "gw-key", l: "Research — model gateway key" },
     ]);
     expect(instantiate).toHaveBeenCalledWith(expect.objectContaining({
       origin: "http://127.0.0.1:4201",
@@ -92,10 +94,10 @@ describe("pipeline manager — ensure", () => {
       driveId: "vault1",
       workflowsDriveId: "wfdrive",
       secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" },
-      llm: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" },
+      llm: { baseUrl: "http://127.0.0.1:4202/llm/v1", model: "openai/gpt-6-luna" },
       pieceVersion: "1.0.54-dev.23",
     }));
-    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } , modelFromConnection: true, templateDigest: templateDigest(template) });
+    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } , modelFromConnection: true, templateDigest: templateDigest(template), gatewayKeyed: true });
   });
   it("uses a placeholder token for an open engine with nobody signed in — the engine ignores bearers there", async () => {
     const { manager, engine } = deps({ signedIn: false });
@@ -200,7 +202,7 @@ describe("pipeline manager — lifecycle (review fixes)", () => {
     await manager.ensure("vault1");
     await manager.ensure("vault2");
     await manager.disableAll("the model key was removed");
-    const disables = engine.calls.filter((c) => c.query.includes("execute(")).map((c) => (c.variables.a as Array<{ type: string; input: { status: string } }>)[0]!);
+    const disables = engine.calls.filter((c) => c.query.includes("execute(")).map((c) => (c.variables.a as Array<{ type: string; input: { status: string } }>)[0]!).filter((a) => a.type === "SET_WORKFLOW_STATUS");
     expect(disables.map((a) => [a.type, a.input.status])).toEqual([["SET_WORKFLOW_STATUS", "DISABLED"], ["SET_WORKFLOW_STATUS", "DISABLED"]]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).length).toBe(2);
     const records = readPipelines(dataDir);
@@ -221,7 +223,7 @@ describe("pipeline manager — the model settings changed", () => {
     expect(await h.manager.applyModels()).toEqual({ updated: ["vault1"], recreated: ["vault2"] });
     const setConfig = h.engine.calls.find((c) => c.query.includes("execute(") && JSON.stringify(c.variables).includes("SET_CONFIG"));
     const action = (setConfig!.variables.a as Array<{ input: unknown }>)[0]!;
-    expect(action.input).toEqual({ config: { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "anthropic/claude-sonnet-5.5", llm_api_key: "secret://v1:2" } });
+    expect(action.input).toEqual({ config: { base_url: "http://127.0.0.1:4201", llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_default_model: "anthropic/claude-sonnet-5.5", llm_locality: "hosted", llm_api_key: "secret://v1:2" } });
     const records = readPipelines(h.dataDir);
     expect(records.vault1).toMatchObject({ workflowId: "wf-1", models: { model: "anthropic/claude-sonnet-5.5" } });
     expect(h.instantiate).toHaveBeenCalledTimes(1); // only the older pipeline was set up again
@@ -247,5 +249,46 @@ describe("pipeline manager — a newer template", () => {
     expect((await h.manager.status("vault1")).state).toBe("ready");
     expect(await h.manager.status("vault2")).toMatchObject({ state: "stale", reason: "a newer version of the pipeline is available" });
     expect(await h.manager.status("vault3")).toMatchObject({ state: "stale", reason: "a newer version of the pipeline is available" });
+  });
+});
+
+describe("pipelines and the model gateway", () => {
+  const configWrites = (calls: Call[]) =>
+    calls
+      .filter((c) => c.query.includes("execute("))
+      .flatMap((c) => (c.variables.a ?? []) as Array<{ type: string; input: { config?: Record<string, unknown> } }>)
+      .filter((a) => a.type === "SET_CONFIG")
+      .map((a) => a.input.config);
+
+  it("a new pipeline's connection points at the gateway with the gateway key and says where the model runs", async () => {
+    const { manager, engine } = deps({ endpoint: "http://127.0.0.1:8084/v1" });
+    await manager.ensure("vault1");
+    const secretValues = engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.v);
+    expect(secretValues).toContain("gw-key");
+    expect(configWrites(engine.calls).at(-1)).toMatchObject({ llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_locality: "local" });
+  });
+
+  it("follows a moved gateway", async () => {
+    const { d, dataDir, engine } = deps({ gateway: { url: () => "http://127.0.0.1:4299/llm/v1", key: "gw-key" } });
+    writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x", gatewayKeyed: true } as never });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"] });
+    expect(configWrites(engine.calls).at(-1)).toMatchObject({ llm_base_url: "http://127.0.0.1:4299/llm/v1", llm_api_key: "secret://v1:2" });
+  });
+
+  it("moves an older pipeline to the gateway and deletes its old key secret", async () => {
+    const { d, dataDir, engine } = deps();
+    writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x" } as never });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: ["vault1"] });
+    expect(engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.v)).toEqual(["gw-key"]);
+    expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref)).toEqual(["secret://v1:2"]);
+    expect(configWrites(engine.calls).at(-1)).toMatchObject({ llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_api_key: expect.stringMatching(/^secret:\/\/v1:/) });
+    expect(readPipelines(dataDir).vault1).toMatchObject({ gatewayKeyed: true });
+  });
+
+  it("leaves a pipeline that already points at the gateway alone", async () => {
+    const { d, dataDir, engine } = deps();
+    engine.connectionConfig.llm_base_url = "http://127.0.0.1:4202/llm/v1";
+    writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "x", gatewayKeyed: true } as never });
+    expect(await createPipelineManager(d).followGateway()).toEqual({ moved: [] });
   });
 });
