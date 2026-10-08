@@ -69,7 +69,7 @@ describe("converter manager", () => {
     const h = harness();
     await h.manager.apply({ mode: "local", remoteUrl: "" });
     expect(h.spawns).toHaveLength(1);
-    expect(h.spawns[0]).toMatchObject({ cmd: "/usr/bin/node", args: ["--import", expect.stringMatching(/converter-hooks\.mjs$/), "/app/sidecar/converter/server.ts"] });
+    expect(h.spawns[0]).toMatchObject({ cmd: "/usr/bin/node", args: ["--import", expect.stringMatching(/^file:\/\/.*converter-hooks\.mjs$/), "/app/sidecar/converter/server.ts"] });
     expect(h.spawns[0]!.env).toMatchObject({
       PATH: "/bin",
       CONVERTER_MODULES_DIR: join(h.dataDir, "converter", "node_modules"),

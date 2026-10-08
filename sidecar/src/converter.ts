@@ -3,7 +3,6 @@ import { clearHelperPid, stopOrphanedHelper, writeHelperPid } from "./orphans.js
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { createServer } from "node:net";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
 import { installModels, modelsInstalled, removeModels, type ModelsProgress } from "./converter/models.js";
 import { platformTriple, type PlatformTriple } from "./converter/platform.js";
@@ -137,12 +136,15 @@ export function createConverterManager(deps: ConverterDeps) {
   const modulesDir = join(converterDir, "node_modules");
   const modelsDir = join(converterDir, "models");
   // Shipped beside this file (src/ in tests, dist/ when built): resolves `docling.rs` to the installed binding inside the helper.
-  const hooksPath = fileURLToPath(new URL("./converter-hooks.mjs", import.meta.url));
+  // A file URL, not a path: `--import` takes a module specifier, and on Windows a bare
+  // `C:\…` path is read as a URL with protocol `c:` and refused, so the helper never started
+  // there and the intake showed conversion as unavailable.
+  const hooksUrl = new URL("./converter-hooks.mjs", import.meta.url).href;
   const platform = deps.platform ?? platformTriple();
   const installer: Installer = deps.installer ?? {
     installBinding: (onProgress) => installBinding({ dir: converterDir, triple: platform.triple ?? "", registry: deps.registry, onProgress }),
     installModels: (onProgress) =>
-      installModels({ modelsDir, script: join(dirname(deps.entry), "fetch-models.mjs"), hooks: hooksPath, modulesDir, nodePath: deps.nodePath, env: deps.env, onProgress }),
+      installModels({ modelsDir, script: join(dirname(deps.entry), "fetch-models.mjs"), hooks: hooksUrl, modulesDir, nodePath: deps.nodePath, env: deps.env, onProgress }),
     removeBinding: () => removeBinding(converterDir),
     removeModels: () => removeModels(modelsDir),
     bindingInstalled: () => installedBinding(converterDir),
@@ -207,7 +209,7 @@ export function createConverterManager(deps: ConverterDeps) {
     }
     const url = `http://127.0.0.1:${port}`;
     mkdirSync(join(deps.dataDir, "logs"), { recursive: true });
-    const proc = spawnImpl(deps.nodePath, ["--import", hooksPath, deps.entry], {
+    const proc = spawnImpl(deps.nodePath, ["--import", hooksUrl, deps.entry], {
       env: {
         ...deps.env,
         CONVERTER_MODULES_DIR: modulesDir,
