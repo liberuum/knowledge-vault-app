@@ -119,3 +119,6 @@
 .kv-onb-actions-right { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 /* the heading takes focus for screen readers when a step opens; it is not a control, so no ring */
 .kv-onb-title:focus, .kv-onb-title:focus-visible { outline: none; }
+
+/* the overview's closing row: a reassurance left, the one action that ends the guide right */
+.kv-onb-actions-note { margin: 0 auto 0 0; max-width: 44ch; }

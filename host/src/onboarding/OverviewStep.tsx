@@ -46,7 +46,11 @@ const CARDS: ReadonlyArray<{ view: VaultView | "runs"; title: string; line: stri
  * The guide's last screen (spec §5, step 5, as the person asked): the vault fills while they learn what it does.
  * Files convert here — the vault's own intake, driven from the guide — and each card opens the vault on that view.
  */
-export function OverviewStep({ info, vaultId, onOpen, onRuns }: { info: SidecarInfo; vaultId: string; onOpen: (view?: VaultView) => void; onRuns: (workflowId: string) => void }) {
+/**
+ * The cards are excursions: they open the vault on that view and the guide stays open, reachable from the vault's
+ * top bar ("Setup guide"). Only the main button finishes it (Wayfinding: always a way back).
+ */
+export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { info: SidecarInfo; vaultId: string; onVisit: (view: VaultView) => void; onRuns: (workflowId: string) => void; onFinish: () => void }) {
   const intake = useMemo(() => vaultIntake(vaultId), [vaultId]);
   const snapshot = useSyncExternalStore(intake ? intake.subscribe : noSubscribe, intake ? intake.getSnapshot : () => NO_INTAKE);
   useEffect(() => {
@@ -110,7 +114,7 @@ export function OverviewStep({ info, vaultId, onOpen, onRuns }: { info: SidecarI
               type="button"
               className="kv-onb-card"
               disabled={c.view === "runs" && !workflowId}
-              onClick={() => (c.view === "runs" ? workflowId && onRuns(workflowId) : onOpen(c.view))}
+              onClick={() => (c.view === "runs" ? workflowId && onRuns(workflowId) : onVisit(c.view))}
             >
               <strong>{c.title}</strong>
               <span>{c.line}</span>
@@ -119,7 +123,8 @@ export function OverviewStep({ info, vaultId, onOpen, onRuns }: { info: SidecarI
         ))}
       </ul>
       <div className="kv-onb-actions kv-onb-actions-end">
-        <button type="button" className="kv-button kv-button-primary" onClick={() => onOpen()}>Open my vault</button>
+        <span className="kv-onb-actions-note kv-hint">Try any of these: the setup guide stays one click away in the vault's top bar.</span>
+        <button type="button" className="kv-button kv-button-primary" onClick={onFinish}>Finish and open my vault</button>
       </div>
     </section>
   );

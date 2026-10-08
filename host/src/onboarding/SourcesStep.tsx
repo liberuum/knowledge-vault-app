@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SidecarInfo } from "../sidecar.js";
+import { filesFromUriList } from "../api/dropped-files.js";
 import { fetchConverter, fetchVaults } from "../vaults.js";
 import { addSample, addText } from "./api.js";
 import { handFiles } from "./pending-files.js";
@@ -52,18 +53,20 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
     };
   }, [info]);
 
-  const add = (more: FileList | null | undefined) => {
+  const add = (more: FileList | readonly File[] | null | undefined) => {
     if (conversionOff || !more || more.length === 0) return;
     setFiles((current) => [...current, ...Array.from(more)]);
   };
+  /** What a drop carried when it held no files — shown, so a drag the window cannot read is not silent. */
+  const [dropNote, setDropNote] = useState<string | null>(null);
 
   // Files dropped anywhere on this screen are taken (Memory: a drop target the size of the page), and the zone
   // lights up while they are dragged. WebKit fires the drop only when dragenter and dragover are both cancelled.
   useEffect(() => {
     if (busy) return;
-    const carriesFiles = (e: globalThis.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    // Every drag is accepted here: some file managers describe a file drag only as "text/uri-list" until the drop,
+    // so the type list is not a reliable test (the drop itself says what it carries).
     const onOver = (e: globalThis.DragEvent) => {
-      if (!carriesFiles(e)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = conversionOff ? "none" : "copy";
       setOver(true);
@@ -72,10 +75,34 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
       if (e.relatedTarget === null) setOver(false); // left the window
     };
     const onDrop = (e: globalThis.DragEvent) => {
-      if (!carriesFiles(e)) return;
       e.preventDefault();
       setOver(false);
-      add(e.dataTransfer?.files);
+      const dt = e.dataTransfer;
+      const listed = Array.from(dt?.files ?? []);
+      const fromItems = listed.length
+        ? []
+        : Array.from(dt?.items ?? [])
+            .filter((item) => item.kind === "file")
+            .map((item) => item.getAsFile())
+            .filter((f): f is File => f !== null);
+      const got = listed.length ? listed : fromItems;
+      if (got.length) {
+        setDropNote(null);
+        add(got);
+        return;
+      }
+      // WebKitGTK hands over only the files' addresses: the engine reads them for us.
+      const uris = dt?.getData("text/uri-list") ?? "";
+      if (/^file:/m.test(uris)) {
+        setDropNote("Reading the dropped files…");
+        void filesFromUriList(info, uris).then(({ files: read, failed }) => {
+          add(read);
+          setDropNote(failed.length ? `Some files could not be read: ${failed.join("; ")}` : null);
+        });
+        return;
+      }
+      const types = Array.from(dt?.types ?? []);
+      setDropNote(`That drop carried no files (it offered: ${types.join(", ") || "nothing"}). Use Choose files… instead.`);
     };
     window.addEventListener("dragenter", onOver);
     window.addEventListener("dragover", onOver);
@@ -87,7 +114,7 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
       window.removeEventListener("dragleave", onLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [busy, conversionOff]);
+  }, [busy, conversionOff, info]);
 
   const own = files.length + (text.trim() ? 1 : 0);
   const withGuide = own === 0 || guideToo;
@@ -187,6 +214,7 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
           </label>
         )}
       </div>
+      {dropNote && <p role="status" className={dropNote.startsWith("Reading") ? "kv-quiet" : "kv-error"}>{dropNote}</p>}
       {!target && <p className="kv-error">Create a vault first: go back one step.</p>}
       {error && <p role="alert" className="kv-error">{error}</p>}
       <div className="kv-onb-actions">

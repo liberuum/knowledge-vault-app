@@ -359,3 +359,7 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-local-found-text { display: grid; gap: 2px; min-width: 0; }
 .kv-local-found-text strong { overflow-wrap: anywhere; }
 .kv-local-found-item .kv-button { flex: none; }
+
+/* the way back to the setup guide while it is still open for this vault (Wayfinding) */
+.kv-appbar-guide { padding: 3px 10px; border: 1px solid var(--bai-accent); border-radius: 999px; background: var(--bai-accent-soft); color: var(--bai-text); font: inherit; font-size: 13px; cursor: pointer; }
+.kv-appbar-guide:hover { background: var(--bai-accent); color: var(--bai-accent-text); }

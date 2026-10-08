@@ -32,6 +32,8 @@ export function WorkspaceScreen(props: {
   fallbackTitle?: string;
   onBack: () => void;
   onSettings?: () => void;
+  /** The setup guide is still open for this vault: a way back to it. */
+  onGuide?: () => void;
   /** A local vault's pipeline chip (spec §4.5): where to send the user for a model, and for the runs. */
   pipeline?: { info: SidecarInfo; onModels: () => void; onRuns: (workflowId?: string) => void };
   /** The local engine, for apps whose documents it can fill in (Studio's Knowledge Vault connections). */
@@ -79,7 +81,7 @@ export function WorkspaceScreen(props: {
 
   return (
     <div className="kv-vault-screen">
-      <AppBar title={title} onBack={props.onBack} onSettings={props.onSettings}>
+      <AppBar title={title} onBack={props.onBack} onSettings={props.onSettings} onGuide={props.onGuide}>
         {props.pipeline && props.appId === "knowledge-vault" && <PipelineChip info={props.pipeline.info} vaultId={props.driveId} onModels={props.pipeline.onModels} onRuns={props.pipeline.onRuns} />}
       </AppBar>
       {error && <p role="alert" className="kv-error kv-main">Could not open this {props.appId === "workflow-studio" ? "workspace" : "vault"}: {error}</p>}

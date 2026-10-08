@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { droppedFilePath, serveDroppedFile } from "./dropped-files.js";
 import { SAMPLE_SOURCE } from "./sample-source.js";
 import { titleFromText, type AddedSource, type NewSource } from "./vault-sources.js";
 import type { ModelCheck } from "./model-check.js";
@@ -431,6 +432,12 @@ export function createControlServer(deps: ControlDeps) {
       if (req.method === "POST" && url.pathname === "/shutdown") {
         deps.shutdown();
         return send(res, 202, { stopping: true }, allowed);
+      }
+      // A file dropped on the window: the page has its address only (WebKitGTK), the engine reads it.
+      if (req.method === "GET" && url.pathname === "/dropped-file") {
+        const found = droppedFilePath(url.searchParams.get("path") ?? "");
+        if ("error" in found) return send(res, found.status, { error: found.error }, allowed);
+        return serveDroppedFile(res, found.path, allowed);
       }
       if (req.method === "GET" && url.pathname === "/logs/tail") return send(res, 200, { lines: deps.logsTail() }, allowed);
       if (req.method === "POST" && url.pathname === "/debug/crash" && deps.debugRoutes === true) {

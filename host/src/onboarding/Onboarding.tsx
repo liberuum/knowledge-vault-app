@@ -20,7 +20,9 @@ type Props = {
   onStep: (step: OnboardingStep, vaultId?: string) => void;
   /** The guide is done: open this vault, on this view. */
   onFinish: (vaultId: string, view?: VaultView) => void;
-  /** Open the vault's processing, live, in Workflow Studio. */
+  /** Open the vault on a view while the guide stays open (a card on the overview). */
+  onVisit: (vaultId: string, view: VaultView) => void;
+  /** Open the vault's processing, live, in Workflow Studio — the guide stays open. */
   onRuns: (workflowId: string) => void;
   /** Skipped: back to the landing. */
   onLeave: () => void;
@@ -31,7 +33,7 @@ type Props = {
  * add — then an overview of what the vault can do while the first sources are read. A fixed rail says where you
  * are; Skip never loses anything, and the guide does not open on its own again.
  */
-export function Onboarding({ info, step, vaultId, onStep, onFinish, onRuns, onLeave }: Props) {
+export function Onboarding({ info, step, vaultId, onStep, onFinish, onVisit, onRuns, onLeave }: Props) {
   // Once skipped, an answer still in flight must not pull the person back into the guide.
   const left = useRef(false);
   const go = useCallback((next: OnboardingStep, vault?: string) => !left.current && onStep(next, vault), [onStep]);
@@ -83,7 +85,7 @@ export function Onboarding({ info, step, vaultId, onStep, onFinish, onRuns, onLe
           {step === "ai" && <AiStep info={info} onBack={() => go("welcome", vaultId)} onContinue={() => go("vault", vaultId)} />}
           {step === "vault" && <VaultStep info={info} vaultId={vaultId} onBack={() => go("ai", vaultId)} onReady={(id) => go("sources", id)} />}
           {step === "sources" && <SourcesStep info={info} vaultId={vaultId} onBack={() => go("vault", vaultId)} onStarted={(id) => go("notes", id)} />}
-          {step === "notes" && vaultId && <OverviewStep info={info} vaultId={vaultId} onOpen={(view) => finish(vaultId, view)} onRuns={(workflowId) => { finish(vaultId); onRuns(workflowId); }} />}
+          {step === "notes" && vaultId && <OverviewStep info={info} vaultId={vaultId} onVisit={(view) => onVisit(vaultId, view)} onRuns={onRuns} onFinish={() => finish(vaultId)} />}
           {step === "notes" && !vaultId && <p className="kv-error">This step needs the vault the guide made. <button type="button" className="kv-link" onClick={() => go("vault")}>Back to the vault step</button></p>}
         </div>
       </main>

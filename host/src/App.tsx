@@ -28,6 +28,7 @@ import { Onboarding } from "./onboarding/Onboarding.js";
 import type { OnboardingStep } from "./onboarding/onboarding-state.js";
 import { useOnboardingGate } from "./onboarding/use-onboarding-gate.js";
 import { setOpenView } from "./onboarding/pending-files.js";
+import { guideProgress } from "./onboarding/progress.js";
 
 /** The packages the host mounts; boot.tsx installs the reactor with their document models, once. */
 export const LIBS: readonly DocumentModelLib[] = [
@@ -115,7 +116,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   let screen;
   switch (route.name) {
     case "vault":
-      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" onBack={toVaults} onSettings={toSettings} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
+      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" onBack={toVaults} onSettings={toSettings} onGuide={guideProgress()?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
       break;
     case "workflows":
       screen = <WorkflowsScreen info={info} client={client} onBack={toVaults} onSettings={toSettings} />;
@@ -132,6 +133,10 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           onStep={toGuide}
           onFinish={(id, view) => {
             if (view) setOpenView(id, view);
+            navigate({ name: "vault", id });
+          }}
+          onVisit={(id, view) => {
+            setOpenView(id, view);
             navigate({ name: "vault", id });
           }}
           onRuns={(workflow) => navigate({ name: "workflows", workflow })}
