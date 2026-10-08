@@ -23,14 +23,14 @@ import { exportVault } from "./export.js";
 import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
 import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelines.js";
 import { fillConnection } from "./connections.js";
-import { fetchModelCatalog, validateModelEndpoint } from "./models-validate.js";
+import { fetchModelCatalog, probeLocalModels, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
 import { reapChildren } from "./child-reaper.js";
 import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
 
 /** When this engine came up: runs that began earlier belong to a previous life of it. */
 const ENGINE_STARTED_AT = new Date().toISOString();
-import { privateHostAllow } from "./egress.js";
+import { privateHostAllow, isLocalEndpoint } from "./egress.js";
 import type { PipelineTemplate } from "./templates.js";
 import { createRequire } from "node:module";
 import { createProtectionSwitch } from "./protection.js";
@@ -288,6 +288,7 @@ async function main(): Promise<void> {
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
     validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
     modelCatalog: (endpoint) => fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
+    probeModels: (endpoint) => probeLocalModels(endpoint, (e) => isLocalEndpoint(e) || privateHostAllow(e) !== null),
     // Spec §4.4: the switch writes config.json's `local` section, answers, then the engine shuts down
     // and prints a restart line — whoever spawned it (the shell, the dev loop) starts it again with
     // KV_PROTECTED/KV_ADMIN_ADDRESS read from that section. The Switchboard's auth flags are fixed at

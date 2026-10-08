@@ -45,6 +45,8 @@ export type ControlDeps = {
   repairQueue: (vaultId: string) => Promise<{ requeued: string[]; dropped: string[]; skipped?: string }>;
   /** The provider's model list with the saved key, for the picker; `endpoint` follows the form when it differs from the saved one. */
   modelCatalog: (endpoint?: string) => Promise<unknown>;
+  /** Try a local model server's address before saving it: what it serves, or why it did not answer. */
+  probeModels: (endpoint: string) => Promise<unknown>;
   /** Spec §4.5: each vault's pipeline (template instantiation, status, removal). */
   pipelines: {
     ensure: (vaultId: string) => Promise<EnsureResult>;
@@ -282,11 +284,17 @@ export function createControlServer(deps: ControlDeps) {
       }
       if (req.method === "GET" && url.pathname === "/settings") return send(res, 200, deps.readSettings(), allowed);
       if (req.method === "POST" && url.pathname === "/settings/models/validate") {
-        if (!deps.readSettings().models.hasKey) return send(res, 400, { error: "Save a key first." }, allowed);
+        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: "Save a key first." }, allowed);
         return send(res, 200, await deps.validateModels(), allowed);
       }
+      // A model server on this computer or the local network, tried before it is saved: no key is sent.
+      if (req.method === "GET" && url.pathname === "/settings/models/probe") {
+        const endpoint = url.searchParams.get("endpoint")?.trim() ?? "";
+        if (!endpoint) return send(res, 400, { error: "Give the server's address, e.g. http://127.0.0.1:8080/v1." }, allowed);
+        return send(res, 200, await deps.probeModels(endpoint), allowed);
+      }
       if (req.method === "GET" && url.pathname === "/settings/models/catalog") {
-        if (!deps.readSettings().models.hasKey) return send(res, 400, { error: "Save a key first." }, allowed);
+        if (!deps.readSettings().models.hasKey && !deps.readSettings().models.local) return send(res, 400, { error: "Save a key first." }, allowed);
         const endpoint = url.searchParams.get("endpoint")?.trim() || undefined;
         return send(res, 200, await deps.modelCatalog(endpoint), allowed);
       }

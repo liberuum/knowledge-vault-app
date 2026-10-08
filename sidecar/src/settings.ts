@@ -1,3 +1,4 @@
+import { isLocalEndpoint } from "./egress.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./process-identity.js";
@@ -7,7 +8,8 @@ import { writeFileAtomic } from "./process-identity.js";
  * model key lives in `secrets/llm.key` (0600) and is reported only as `hasKey`.
  * Other keys in config.json (the shell's `ui`, later `vaults`) are preserved.
  */
-export type ModelSettings = { endpoint: string; model: string; hasKey: boolean };
+/** `local`: the endpoint is on this computer — no key is needed (a placeholder is used). */
+export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local: boolean };
 /** Where documents convert (Plan 4): the helper on this computer, another server by URL, or nowhere. */
 export type ConversionMode = "local" | "remote" | "off";
 export type ConversionSettings = { mode: ConversionMode; remoteUrl: string };
@@ -85,6 +87,7 @@ export function readSettings(dataDir: string): AppSettings {
       endpoint: typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT,
       model: typeof models.model === "string" ? models.model : "",
       hasKey: readModelKey(dataDir) !== undefined,
+      local: isLocalEndpoint(typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT),
     },
     conversion: {
       mode: CONVERSION_MODES.includes(conversion.mode as ConversionMode) ? (conversion.mode as ConversionMode) : "local",

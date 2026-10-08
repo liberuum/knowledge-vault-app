@@ -1,6 +1,6 @@
 import type { SidecarInfo } from "../sidecar.js";
-import type { ModelCatalog } from "../vaults.js";
-import { deleteVault, fetchConverter, fetchSettings, fetchStatus, fetchVaults, installConverterComponent, removeConverterComponent, renameVault, restartConverter, saveSettings, type AppSettings, type ConverterComponent, type ConverterStatus, type DriveRef, type EngineStatus, type SettingsPatch, type VaultSummary, fetchProtection, setProtection, validateModels, fetchModelCatalog } from "../vaults.js";
+import type { LocalProbe, ModelCatalog } from "../vaults.js";
+import { deleteVault, fetchConverter, fetchSettings, fetchStatus, fetchVaults, installConverterComponent, removeConverterComponent, renameVault, restartConverter, saveSettings, type AppSettings, type ConverterComponent, type ConverterStatus, type DriveRef, type EngineStatus, type SettingsPatch, type VaultSummary, fetchProtection, setProtection, validateModels, fetchModelCatalog, probeLocalModels } from "../vaults.js";
 import { exportVault, fetchBackups, fetchLogTail, requestBackup, requestDeleteAll, requestRestore, type ActionResult, type BackupInfo, type ExportResult, type LocalProtection } from "../vaults.js";
 import { AppBar } from "../shell/AppBar.js";
 import { SETTINGS_SECTIONS, type SettingsSection } from "../shell/router.js";
@@ -25,6 +25,7 @@ export type SettingsApi = {
   setProtection: (info: SidecarInfo, wanted: boolean) => Promise<LocalProtection & { restarting: boolean }>;
   validateModels: (info: SidecarInfo) => Promise<{ ok: boolean; detail: string; warning?: string }>;
   fetchModelCatalog: (info: SidecarInfo, endpoint?: string) => Promise<ModelCatalog>;
+  probeLocalModels: (info: SidecarInfo, endpoint: string) => Promise<LocalProbe>;
   fetchConverter: (info: SidecarInfo) => Promise<ConverterStatus>;
   restartConverter: (info: SidecarInfo) => Promise<ConverterStatus>;
   installConverter: (info: SidecarInfo, component: ConverterComponent) => Promise<ConverterStatus>;
@@ -42,6 +43,7 @@ export const realSettingsApi: SettingsApi = {
   setProtection,
   validateModels,
   fetchModelCatalog,
+  probeLocalModels,
   fetchVaults,
   renameVault,
   deleteVault,

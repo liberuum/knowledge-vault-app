@@ -29,7 +29,7 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
   }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 }
-function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
+function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; endpoint?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "kv-pipelines-"));
   const engine = fakeEngine(over.triggers);
   const instantiate = vi.fn(async () => ({ workflowId: "wf-1", connectionId: "conn-1" }));
@@ -40,7 +40,7 @@ function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?
     fetchImpl: engine.fetchImpl,
     template,
     pieceVersion: "1.0.54-dev.23",
-    readSettings: () => ({ version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: over.model ?? "openai/gpt-6-luna", hasKey }, conversion: { mode: "local", remoteUrl: "" } }),
+    readSettings: () => ({ version: 1, models: { endpoint: over.endpoint ?? "https://openrouter.ai/api/v1", model: over.model ?? "openai/gpt-6-luna", hasKey, local: (over.endpoint ?? "").startsWith("http://127.") }, conversion: { mode: "local", remoteUrl: "" } }),
     readModelKey: () => (hasKey ? "sk-or-secret" : undefined),
     identity: {
       status: async () => ({ authenticated: over.signedIn ?? true }),
@@ -65,6 +65,13 @@ describe("pipeline records", () => {
 });
 
 describe("pipeline manager — ensure", () => {
+  it("sets up a pipeline for a model on this computer without a key — its connection gets a placeholder the server ignores", async () => {
+    const { manager, engine, instantiate } = deps({ hasKey: false, endpoint: "http://127.0.0.1:8080/v1", model: "lfm2.5-8b-a1b" });
+    expect((await manager.ensure("vault1")).state).toBe("ready");
+    const secrets = engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.v);
+    expect(secrets[1]).toBe("local");
+    expect(instantiate).toHaveBeenCalledWith(expect.objectContaining({ llm: { baseUrl: "http://127.0.0.1:8080/v1", model: "lfm2.5-8b-a1b" } }));
+  });
   it("does nothing without a model key: unconfigured, and the engine is never asked", async () => {
     const { manager, engine, instantiate } = deps({ hasKey: false });
     expect(await manager.ensure("vault1")).toEqual({ state: "unconfigured" });

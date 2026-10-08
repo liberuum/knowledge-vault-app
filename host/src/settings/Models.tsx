@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ModelPicker } from "./ModelPicker.js";
+import { LocalModel } from "./LocalModel.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { AppSettings } from "../vaults.js";
@@ -52,6 +53,20 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
       setBusy(false);
     }
   }
+  async function useLocal(localEndpoint: string, localModel: string) {
+    setError(null);
+    setSaved(false);
+    try {
+      const next = await api.saveSettings(info, { models: { endpoint: localEndpoint, model: localModel } });
+      setSettings(next);
+      setEndpoint(next.models.endpoint);
+      setModel(next.models.model);
+      setSaved(true);
+    } catch (err) {
+      setError(`Could not save: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+  }
   async function validate() {
     setBusy(true);
     setVerdict(null);
@@ -80,11 +95,18 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
       <p className="kv-settings-lead">Any OpenAI-compatible provider: OpenRouter, OpenAI, or a local server such as Ollama or LM Studio. The chat and the processing pipeline use it; a vault created after this is set up processes its sources on its own.</p>
       {settings === null && !error && <p className="kv-quiet" role="status">Loading…</p>}
       {settings && (
+        <>
+        <LocalModel
+          current={{ local: settings.models.local === true, endpoint: settings.models.endpoint, model: settings.models.model }}
+          probe={(e) => api.probeLocalModels(info, e)}
+          use={useLocal}
+          disabled={busy}
+        />
         <form className="kv-form" onSubmit={(e) => void submit(e)}>
           <label htmlFor="models-endpoint">Endpoint</label>
           <input id="models-endpoint" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://openrouter.ai/api/v1" disabled={busy} />
           <label htmlFor="models-model">Model (required for processing)</label>
-          <ModelPicker id="models-model" value={model} onChange={setModel} placeholder="openai/gpt-6-luna" disabled={busy} hasKey={settings.models.hasKey} load={loadCatalog} reloadKey={endpoint} />
+          <ModelPicker id="models-model" value={model} onChange={setModel} placeholder="openai/gpt-6-luna" disabled={busy} hasKey={settings.models.hasKey || settings.models.local === true} load={loadCatalog} reloadKey={endpoint} />
           <label htmlFor="models-key">API key</label>
           <div className="kv-form-inline">
             <input id="models-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={settings.models.hasKey ? "A key is stored — enter a new one to replace it" : "sk-…"} autoComplete="off" disabled={busy} />
@@ -92,10 +114,10 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
               <button type="button" className="kv-button kv-button-danger-quiet" onClick={() => void removeKey()} disabled={busy}>Remove key</button>
             )}
           </div>
-          <p className="kv-hint">The key is stored by the engine on this computer (file mode 0600) and is never shown again.</p>
+          <p className="kv-hint">{settings.models.local ? "Not needed for a model on this computer." : "The key is stored by the engine on this computer (file mode 0600) and is never shown again."}</p>
           <div className="kv-form-actions">
             <button type="submit" className="kv-button kv-button-primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-            {settings.models.hasKey && (
+            {(settings.models.hasKey || settings.models.local) && (
               <button type="button" className="kv-button" disabled={busy} onClick={() => void validate()}>Validate</button>
             )}
             {saved && <span className="kv-form-saved" role="status">Saved</span>}
@@ -104,6 +126,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
           {verdict?.warning && <p className="kv-hint">{verdict.warning}</p>}
           {error && <p role="alert" className="kv-error">{error}</p>}
         </form>
+        </>
       )}
     </div>
   );

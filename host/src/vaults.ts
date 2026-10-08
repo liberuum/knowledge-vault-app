@@ -49,7 +49,8 @@ export async function deleteVault(info: SidecarInfo, id: string, fetchImpl: type
 export async function fetchWorkflowsDrive(info: SidecarInfo, fetchImpl: typeof fetch = fetch): Promise<DriveRef> {
   return (await control<{ drive: DriveRef }>(info, "/workflows", { method: "GET" }, fetchImpl)).drive;
 }
-export type ModelSettings = { endpoint: string; model: string; hasKey: boolean };
+/** `local`: the endpoint is on this computer — no key is needed. */
+export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local?: boolean };
 /** Where documents convert (Plan 4): the helper on this computer, another server by URL, or nowhere. */
 export type ConversionMode = "local" | "remote" | "off";
 export type ConversionSettings = { mode: ConversionMode; remoteUrl: string };
@@ -131,6 +132,11 @@ export async function setupPipeline(info: SidecarInfo, vaultId: string, fetchImp
 export type ModelVerdict = { ok: boolean; detail: string; warning?: string };
 export async function validateModels(info: SidecarInfo, fetchImpl: typeof fetch = fetch): Promise<ModelVerdict> {
   return control<ModelVerdict>(info, "/settings/models/validate", { method: "POST" }, fetchImpl);
+}
+/** A model server on this computer (or the local network), tried before it is saved: what it serves, or why it did not answer. */
+export type LocalProbe = { ok: true; endpoint: string; models: string[] } | { ok: false; endpoint: string; detail: string };
+export async function probeLocalModels(info: SidecarInfo, endpoint: string, fetchImpl: typeof fetch = fetch): Promise<LocalProbe> {
+  return control<LocalProbe>(info, `/settings/models/probe?endpoint=${encodeURIComponent(endpoint)}`, { method: "GET" }, fetchImpl);
 }
 /** The provider's model list with the saved key, for the picker (the engine asks; the page never holds the key). */
 export type ModelCatalog = { ok: true; models: import("./settings/model-picker.js").CatalogModel[] } | { ok: false; detail: string };

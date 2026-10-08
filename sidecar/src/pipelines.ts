@@ -76,6 +76,8 @@ export type PipelineManagerDeps = {
 };
 
 /** The bearer the piece uses lasts long enough to be forgotten about; re-creating the pipeline mints a new one. */
+/** What a local model server is sent as its "key": llama.cpp, Ollama and LM Studio ignore it. */
+export const LOCAL_PLACEHOLDER_KEY = "local";
 const ENGINE_TOKEN_SECONDS = 90 * 86_400;
 /** A token this close to its end reads as stale, so the user updates before runs start failing. */
 const TOKEN_RENEW_BEFORE_MS = 7 * 86_400_000;
@@ -123,7 +125,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     for (const ref of [record.secretRefs.token, record.secretRefs.llm]) await deleteSecret(ref);
   }
   const engineToken = () => mintEngineToken(deps.identity, deps.engineProtected === true, now);
-  const modelsConfigured = (settings: AppSettings) => settings.models.hasKey && settings.models.model.trim().length > 0;
+  // A model on this computer needs no key; its connection gets a placeholder the server ignores.
+  const modelsConfigured = (settings: AppSettings) => (settings.models.hasKey || settings.models.local) && settings.models.model.trim().length > 0;
+  const keyFor = (settings: AppSettings) => deps.readModelKey() ?? (settings.models.local ? LOCAL_PLACEHOLDER_KEY : undefined);
 
   /** Why a recorded pipeline no longer fits: disabled, other model settings, an "open" bearer on a protected engine, a token near its end. */
   function staleReason(record: PipelineRecord, settings: AppSettings): string | undefined {
@@ -142,7 +146,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   /** Create (or re-create) this vault's pipeline. Nothing happens without a model key and a model. */
   async function ensure(vaultId: string): Promise<EnsureResult> {
       const settings = deps.readSettings();
-      const key = deps.readModelKey();
+      const key = keyFor(settings);
       if (!modelsConfigured(settings) || !key) return { state: "unconfigured" };
       if (!deps.template) throw new Error("The installed vault package ships no pipeline template (pieces/knowledge-vault/templates/pipeline.json).");
       const token = await engineToken(); // before anything is created: a refusal costs nothing

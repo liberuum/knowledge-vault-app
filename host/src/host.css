@@ -319,3 +319,12 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-picker-badge { padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .kv-picker-badge[data-kind="ok"] { color: var(--bai-status-canonical); background: color-mix(in srgb, var(--bai-status-canonical) 14%, transparent); }
 .kv-picker-badge[data-kind="warn"] { color: var(--bai-status-draft); background: color-mix(in srgb, var(--bai-status-draft) 14%, transparent); }
+
+/* ---- Settings › Models: a model on this computer ---- */
+.kv-local-model { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-surface); }
+.kv-local-model label { font-weight: 500; font-size: 14px; }
+.kv-local-model input, .kv-local-model select { padding: 9px 12px; border: 1px solid var(--bai-border); border-radius: 6px; background: var(--bai-deep); color: var(--bai-text); font: inherit; }
+.kv-local-model-title { margin: 0; }
+.kv-local-model-title code, .kv-local-model .kv-hint code { font-size: 12px; }
+.kv-local-model-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 18px; }
+

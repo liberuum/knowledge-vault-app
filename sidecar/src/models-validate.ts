@@ -11,7 +11,7 @@ export async function validateModelEndpoint(endpoint: string, key: string, fetch
   const url = `${endpoint.replace(/\/+$/, "")}/models`;
   let res: Response;
   try {
-    res = await fetchImpl(url, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
+    res = await fetchImpl(url, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(10_000) });
   } catch (error) {
     return { ok: false, detail: `Could not reach ${endpoint}: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -110,7 +110,7 @@ export async function fetchModelCatalog(endpoint: string, key: string, fetchImpl
   const url = `${endpoint.replace(/\/+$/, "")}/models`;
   let res: Response;
   try {
-    res = await fetchImpl(url, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    res = await fetchImpl(url, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(15_000) });
   } catch (error) {
     return { ok: false, detail: `Could not reach ${endpoint}: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -121,4 +121,25 @@ export async function fetchModelCatalog(endpoint: string, key: string, fetchImpl
   }
   const data = body && typeof body === "object" ? (body as { data?: unknown }).data : undefined;
   return { ok: true, models: normaliseCatalog(data) };
+}
+
+export type LocalProbe = { ok: true; endpoint: string; models: string[] } | { ok: false; endpoint: string; detail: string };
+
+/**
+ * Settings › Models › Use a local model: is a server answering at this address, and what does it
+ * serve? Only addresses on this computer or the local network are tried, and no key is sent.
+ * The address is normalised the way Settings stores it (a trailing /chat/completions is dropped).
+ */
+export async function probeLocalModels(raw: string, isAllowed: (endpoint: string) => boolean, fetchImpl: typeof fetch = fetch): Promise<LocalProbe> {
+  const endpoint = raw.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+  try {
+    new URL(endpoint);
+  } catch {
+    return { ok: false, endpoint, detail: "That is not a URL. Try http://127.0.0.1:8080/v1." };
+  }
+  if (!isAllowed(endpoint)) return { ok: false, endpoint, detail: "Only a server on this computer or your local network can be used here." };
+  const catalog = await fetchModelCatalog(endpoint, "", fetchImpl);
+  if (!catalog.ok) return { ok: false, endpoint, detail: catalog.detail };
+  if (catalog.models.length === 0) return { ok: false, endpoint, detail: "The server answered, but serves no model." };
+  return { ok: true, endpoint, models: catalog.models.map((m) => m.id) };
 }

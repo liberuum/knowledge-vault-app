@@ -11,7 +11,7 @@ let close: (() => Promise<void>) | undefined;
 let deleted: string[] = [];
 let signedIn = false;
 let remotes: RemoteVault[] = [];
-let settings: AppSettings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } };
+let settings: AppSettings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } };
 let applied: AppSettings["conversion"][] = [];
 let restarted = 0;
 const converterStatus = { mode: "local" as const, state: "ready" as const, url: "http://127.0.0.1:5999", localUrl: "http://127.0.0.1:5999", pid: 4242, exitCode: null, restarts: 0, logPath: "/data/vault/logs/converter.log", health: { ok: true, binding: false }, error: null, installed: { binding: { installed: false, version: null, supported: true, platform: "linux-x64-gnu" as const, reason: null }, models: { installed: false } }, job: null };
@@ -26,7 +26,7 @@ let modelsApplied = 0;
 let scheduled: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -58,6 +58,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       remove: (id) => { remotes = remotes.filter((v) => v.id !== id); },
     },
     validateModels: async () => ({ ok: true, detail: "3 models available" }),
+    probeModels: async (endpoint: string) => (endpoint.includes("127.0.0.1") ? { ok: true, endpoint, models: ["lfm2.5-8b-a1b"] } : { ok: false, endpoint, detail: "Only a server on this computer or your local network can be used here." }),
     repairQueue: async (vaultId: string) => (vaultId === "v1" ? { requeued: ["Foreword"], dropped: ["Old"] } : { requeued: [], dropped: [], skipped: "no pipeline" }),
     modelCatalog: async (endpoint?: string) => ({ ok: true, models: [{ id: "a", name: "A", free: false }], endpoint: endpoint ?? "saved" }),
     fillConnection: async (id, opts) => {
@@ -171,7 +172,7 @@ describe("control API", () => {
     const saved = await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { model: "gpt-4o-mini", apiKey: "sk-x" } }) });
     expect(saved.status).toBe(200);
     const body = (await saved.json()) as AppSettings;
-    expect(body.models).toEqual({ endpoint: "https://openrouter.ai/api/v1", model: "gpt-4o-mini", hasKey: true });
+    expect(body.models).toEqual({ endpoint: "https://openrouter.ai/api/v1", model: "gpt-4o-mini", hasKey: true, local: false });
     expect(JSON.stringify(body)).not.toContain("sk-x");
     expect((await fetch(`${base}/settings`, { method: "PUT", headers: h, body: JSON.stringify({ models: { apiKey: 42 } }) })).status).toBe(400);
   });
@@ -341,6 +342,21 @@ describe("model validation over the control API", () => {
     expect(await saved.json()).toMatchObject({ ok: true, endpoint: "saved", models: [{ id: "a" }] });
     const typed = await fetch(`${base}/settings/models/catalog?endpoint=${encodeURIComponent("http://127.0.0.1:11434/v1")}`, { headers: h });
     expect(await typed.json()).toMatchObject({ endpoint: "http://127.0.0.1:11434/v1" });
+  });
+});
+
+describe("a local model server", () => {
+  const h = { authorization: "Bearer secret", "content-type": "application/json" };
+  it("is probed by address before it is saved, and needs no key to be validated or listed", async () => {
+    const base = await start();
+    const probe = await fetch(`${base}/settings/models/probe?endpoint=${encodeURIComponent("http://127.0.0.1:8080/v1")}`, { headers: h });
+    expect(await probe.json()).toEqual({ ok: true, endpoint: "http://127.0.0.1:8080/v1", models: ["lfm2.5-8b-a1b"] });
+    expect((await fetch(`${base}/settings/models/probe`, { headers: h })).status).toBe(400);
+    // without a key, a remote endpoint cannot be listed; a local one can
+    expect((await fetch(`${base}/settings/models/catalog`, { headers: h })).status).toBe(400);
+    settings = { ...settings, models: { ...settings.models, endpoint: "http://127.0.0.1:8080/v1", local: true } };
+    expect((await fetch(`${base}/settings/models/catalog`, { headers: h })).status).toBe(200);
+    expect((await fetch(`${base}/settings/models/validate`, { method: "POST", headers: h })).status).toBe(200);
   });
 });
 

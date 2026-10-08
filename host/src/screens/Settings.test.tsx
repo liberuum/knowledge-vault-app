@@ -38,6 +38,7 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: (patch.models?.endpoint ?? "https://openrouter.ai/api/v1").replace(/\/chat\/completions$/, ""), model: patch.models?.model ?? "", hasKey: !!patch.models?.apiKey }, conversion: { mode: patch.conversion?.mode ?? ("local" as const), remoteUrl: patch.conversion?.remoteUrl ?? "" } })),
     fetchStatus: vi.fn(async () => ({ ok: true as const, port: 4301, controlPort: 4302, appVersion: "0.1.0", protected: false, dataDir: "/home/u/.local/share/kv/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" })),
     fetchProtection: vi.fn(async () => ({ protected: false, adminAddress: null })),
+    probeLocalModels: vi.fn(async (_i, endpoint: string) => (endpoint.includes("8080") ? { ok: true as const, endpoint, models: ["lfm2.5-8b-a1b", "qwen3.8-flash-next"] } : { ok: false as const, endpoint, detail: "Could not reach " + endpoint + ": fetch failed" })),
     fetchModelCatalog: vi.fn(async () => ({
       ok: true as const,
       models: [
@@ -165,6 +166,36 @@ describe("Settings", () => {
     // a model the list does not know can still be typed and saved
     fireEvent.change(screen.getByLabelText("Model (required for processing)"), { target: { value: "my/custom-model" } });
     expect(await screen.findByText(/No model matches/)).toBeTruthy();
+  });
+
+  it("plugs in a model running on this computer: connect, see what it serves, use it — no key", async () => {
+    let saved: { version: 1; models: { endpoint: string; model: string; hasKey: boolean; local?: boolean }; conversion: { mode: "off"; remoteUrl: string } } = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false }, conversion: { mode: "off", remoteUrl: "" } };
+    const a = api({
+      fetchSettings: vi.fn(async () => saved),
+      saveSettings: vi.fn(async (_i, patch: SettingsPatch) => {
+        saved = { ...saved, models: { ...saved.models, ...patch.models, hasKey: false, local: (patch.models?.endpoint ?? "").startsWith("http://127.") } as typeof saved.models };
+        return saved;
+      }),
+    });
+    render(<Harness api={a} start="models" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use a local model…" }));
+    // a server that is not running says so
+    fireEvent.change(screen.getByLabelText("Local server address"), { target: { value: "http://127.0.0.1:9999/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText(/Could not connect: Could not reach/)).toBeTruthy();
+    // the real one: connected, what it serves, choose, use
+    fireEvent.change(screen.getByLabelText("Local server address"), { target: { value: "http://127.0.0.1:8080/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Connected to http://127.0.0.1:8080/v1 — serving lfm2.5-8b-a1b, qwen3.8-flash-next")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "qwen3.8-flash-next" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use qwen3.8-flash-next" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { endpoint: "http://127.0.0.1:8080/v1", model: "qwen3.8-flash-next" } }));
+    // now running on it: the state, a connection check, and no key needed
+    expect(await screen.findByText(/Using a model on this computer:/)).toBeTruthy();
+    expect(screen.getByText("Not needed for a model on this computer.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+    expect(await screen.findByText("Connected to http://127.0.0.1:8080/v1 — serving lfm2.5-8b-a1b, qwen3.8-flash-next")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Validate" })).toBeTruthy();
   });
 
   it("asks nothing of the provider without a saved key and says why", async () => {

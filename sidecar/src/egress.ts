@@ -26,3 +26,15 @@ export function privateHostAllow(endpoint: string): string | null {
   }
   return null;
 }
+
+/** A model server on this computer (loopback): it needs no API key, and the engine may always reach it. */
+export function isLocalEndpoint(endpoint: string): boolean {
+  let host: string;
+  try {
+    host = new URL(endpoint).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "::1") return true;
+  return isIP(host) === 4 && host.startsWith("127.");
+}

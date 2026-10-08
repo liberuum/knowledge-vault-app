@@ -10,7 +10,7 @@ describe("settings", () => {
   it("starts from defaults and never reports a key it does not have", () => {
     expect(readSettings(dir())).toEqual({
       version: 1,
-      models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false },
+      models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false },
       conversion: { mode: "local", remoteUrl: "" },
       ui: { closeToTray: true },
     });
@@ -25,7 +25,7 @@ describe("settings", () => {
   it("persists endpoint and model in config.json, the key in secrets/ with mode 0600, and reports only hasKey", () => {
     const d = dir();
     const out = writeSettings(d, { models: { endpoint: "http://127.0.0.1:11434/v1", model: "llama3", apiKey: "sk-secret" } });
-    expect(out.models).toEqual({ endpoint: "http://127.0.0.1:11434/v1", model: "llama3", hasKey: true });
+    expect(out.models).toEqual({ endpoint: "http://127.0.0.1:11434/v1", model: "llama3", hasKey: true, local: true });
     expect(JSON.stringify(readFileSync(join(d, "config.json"), "utf8"))).not.toContain("sk-secret");
     if (process.platform !== "win32") expect(statSync(join(d, "secrets", "llm.key")).mode & 0o777).toBe(0o600);
     expect(readModelKey(d)).toBe("sk-secret");
