@@ -10,6 +10,8 @@ describe("releaseNotes", () => {
     expect(notes).toContain("Node **24.21.0**");
     expect(notes).toMatch(/not notarised/i);
     expect(notes).toMatch(/Open Anyway/);
+    expect(notes).toMatch(/\*\*Done\*\* — not \*Move to Bin\*/);
+    expect(notes).toContain('xattr -dr com.apple.quarantine "/Applications/Knowledge Vault.app"');
     expect(notes).toMatch(/13\.5/);
   });
   it("formats an installer's size in MB", () => {
