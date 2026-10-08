@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
 import { SettingsError, type AppSettings } from "./settings.js";
 import { instantiatePipeline, type PipelineTemplate } from "./templates.js";
+import { classifyRunError, type RunProblem } from "./run-problems.js";
 
 /**
  * Spec §4.5: every local vault gets the pipeline — the shipped template
@@ -35,7 +36,7 @@ export type PipelineStatus =
       workflowId: string;
       connectionId: string;
       trigger?: { status: string; lastPollAt: string | null; lastError: string | null };
-      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null };
+      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; /** What the error means, when the engine can tell (run-problems.ts). */ problem?: RunProblem };
     };
 export type EnsureResult = { state: "unconfigured" } | { state: "ready"; workflowId: string; connectionId: string };
 
@@ -280,7 +281,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         workflowId: record.workflowId,
         connectionId: record.connectionId,
         ...(trigger ? { trigger: { status: trigger.status, lastPollAt: trigger.lastPollAt, lastError: trigger.lastError } } : {}),
-        ...(run ? { lastRun: { id: run.id, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, error: run.error } } : {}),
+        ...(run ? { lastRun: { id: run.id, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, error: run.error, problem: classifyRunError(run.error) ?? undefined } } : {}),
       };
     },
 

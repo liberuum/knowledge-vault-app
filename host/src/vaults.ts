@@ -108,6 +108,7 @@ export async function removeConverterComponent(info: SidecarInfo, component: Con
 }
 
 /** Spec §4.5: a vault's pipeline as the engine reports it (sidecar/src/pipelines.ts). */
+export type RunProblem = { kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused"; message: string; model?: string };
 export type PipelineStatus =
   | { state: "unconfigured" }
   | { state: "missing" }
@@ -117,7 +118,7 @@ export type PipelineStatus =
       workflowId: string;
       connectionId: string;
       trigger?: { status: string; lastPollAt: string | null; lastError: string | null };
-      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null };
+      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; problem?: RunProblem };
     };
 export async function fetchPipeline(info: SidecarInfo, vaultId: string, fetchImpl: typeof fetch = fetch): Promise<PipelineStatus> {
   return (await control<{ pipeline: PipelineStatus }>(info, `/vaults/${encodeURIComponent(vaultId)}/pipeline`, { method: "GET" }, fetchImpl)).pipeline;

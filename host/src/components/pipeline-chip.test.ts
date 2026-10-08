@@ -15,4 +15,14 @@ describe("describePipeline — the user's word is processing", () => {
     expect(describePipeline(ready({ trigger: { status: "DISABLED", lastPollAt: null, lastError: null } }))).toEqual({ label: "Processing paused", tone: "quiet", action: "runs", actionLabel: "See runs" });
     expect(describePipeline(ready({ trigger: { status: "ENABLED", lastPollAt: null, lastError: "poll failed" } }))).toEqual({ label: "Processing: trigger error", tone: "warn", action: "runs", actionLabel: "See runs" });
   });
+
+  it("names what a failed run's error means, in plain words", () => {
+    const failed = (problem?: { kind: "no-funds" | "bad-key" | "slow-model" | "rate-limited" | "model-refused" | "model-missing"; message: string }) =>
+      ({ state: "ready", workflowId: "wf", connectionId: "c", trigger: { status: "ENABLED", lastPollAt: null, lastError: null }, lastRun: { id: "r", status: "FAILED", startedAt: null, endedAt: null, error: "x", problem } }) as const;
+    expect(describePipeline(failed({ kind: "no-funds", message: "out of credit" }))).toEqual({ label: "Processing stopped: your model provider account is out of credit", tone: "warn", action: "runs", actionLabel: "See runs" });
+    expect(describePipeline(failed({ kind: "bad-key", message: "refused" })).label).toBe("Processing stopped: your model provider refused the API key");
+    expect(describePipeline(failed({ kind: "slow-model", message: "slow" })).label).toBe("Processing stopped: the model did not answer in time");
+    expect(describePipeline(failed({ kind: "rate-limited", message: "429" })).action).toBe("runs");
+    expect(describePipeline(failed())).toEqual({ label: "Last processing run failed", tone: "warn", action: "runs", actionLabel: "See runs" });
+  });
 });
