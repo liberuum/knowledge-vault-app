@@ -57,6 +57,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       remove: (id) => { remotes = remotes.filter((v) => v.id !== id); },
     },
     validateModels: async () => ({ ok: true, detail: "3 models available" }),
+    modelCatalog: async (endpoint?: string) => ({ ok: true, models: [{ id: "a", name: "A", free: false }], endpoint: endpoint ?? "saved" }),
     fillConnection: async (id, opts) => {
       if (id !== "c1") throw new ConnectionError("Only a Knowledge Vault connection can be filled from this app.");
       if (opts.token && !signedIn) throw new SettingsError("Sign in first — on a protected engine the pipeline runs as you.");
@@ -327,6 +328,16 @@ describe("model validation over the control API", () => {
     const ok = await fetch(`${base}/settings/models/validate`, { method: "POST", headers: h });
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ ok: true, detail: "3 models available" });
+  });
+  it("lists the provider's models for the picker with the saved key, following the form's endpoint when given", async () => {
+    const base = await start();
+    const none = await fetch(`${base}/settings/models/catalog`, { headers: h });
+    expect(none.status).toBe(400);
+    settings = { ...settings, models: { ...settings.models, hasKey: true } };
+    const saved = await fetch(`${base}/settings/models/catalog`, { headers: h });
+    expect(await saved.json()).toMatchObject({ ok: true, endpoint: "saved", models: [{ id: "a" }] });
+    const typed = await fetch(`${base}/settings/models/catalog?endpoint=${encodeURIComponent("http://127.0.0.1:11434/v1")}`, { headers: h });
+    expect(await typed.json()).toMatchObject({ endpoint: "http://127.0.0.1:11434/v1" });
   });
 });
 

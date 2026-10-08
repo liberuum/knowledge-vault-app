@@ -131,6 +131,12 @@ export type ModelVerdict = { ok: boolean; detail: string; warning?: string };
 export async function validateModels(info: SidecarInfo, fetchImpl: typeof fetch = fetch): Promise<ModelVerdict> {
   return control<ModelVerdict>(info, "/settings/models/validate", { method: "POST" }, fetchImpl);
 }
+/** The provider's model list with the saved key, for the picker (the engine asks; the page never holds the key). */
+export type ModelCatalog = { ok: true; models: import("./settings/model-picker.js").CatalogModel[] } | { ok: false; detail: string };
+export async function fetchModelCatalog(info: SidecarInfo, endpoint?: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
+  const q = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : "";
+  return control<ModelCatalog>(info, `/settings/models/catalog${q}`, { method: "GET" }, fetchImpl);
+}
 
 // ---- Plan 5: maintenance. Backups, restores and the delete-all run at the engine's next start (spec §9).
 export type BackupInfo = { name: string; path: string; bytes: number; stackVersion: string; createdAt: string };

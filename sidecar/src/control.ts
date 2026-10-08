@@ -41,6 +41,8 @@ export type ControlDeps = {
   fillConnection: (connectionId: string, options: { token: boolean }) => Promise<FillResult>;
   /** Settings › Models › Validate: the saved endpoint and key against the provider. */
   validateModels: () => Promise<{ ok: boolean; detail: string }>;
+  /** The provider's model list with the saved key, for the picker; `endpoint` follows the form when it differs from the saved one. */
+  modelCatalog: (endpoint?: string) => Promise<unknown>;
   /** Spec §4.5: each vault's pipeline (template instantiation, status, removal). */
   pipelines: {
     ensure: (vaultId: string) => Promise<EnsureResult>;
@@ -276,6 +278,11 @@ export function createControlServer(deps: ControlDeps) {
       if (req.method === "POST" && url.pathname === "/settings/models/validate") {
         if (!deps.readSettings().models.hasKey) return send(res, 400, { error: "Save a key first." }, allowed);
         return send(res, 200, await deps.validateModels(), allowed);
+      }
+      if (req.method === "GET" && url.pathname === "/settings/models/catalog") {
+        if (!deps.readSettings().models.hasKey) return send(res, 400, { error: "Save a key first." }, allowed);
+        const endpoint = url.searchParams.get("endpoint")?.trim() || undefined;
+        return send(res, 200, await deps.modelCatalog(endpoint), allowed);
       }
       if (req.method === "PUT" && url.pathname === "/settings") {
         const patch = settingsPatch(await readJson(req));

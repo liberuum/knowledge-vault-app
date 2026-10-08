@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SettingsApi } from "./Settings.js";
 import { Settings } from "./Settings.js";
@@ -38,6 +38,15 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: (patch.models?.endpoint ?? "https://openrouter.ai/api/v1").replace(/\/chat\/completions$/, ""), model: patch.models?.model ?? "", hasKey: !!patch.models?.apiKey }, conversion: { mode: patch.conversion?.mode ?? ("local" as const), remoteUrl: patch.conversion?.remoteUrl ?? "" } })),
     fetchStatus: vi.fn(async () => ({ ok: true as const, port: 4301, controlPort: 4302, appVersion: "0.1.0", protected: false, dataDir: "/home/u/.local/share/kv/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" })),
     fetchProtection: vi.fn(async () => ({ protected: false, adminAddress: null })),
+    fetchModelCatalog: vi.fn(async () => ({
+      ok: true as const,
+      models: [
+        { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna", contextLength: 400_000, promptPrice: 1.25, completionPrice: 10, free: false, jsonOutput: true, textOutput: true, maxOutput: 128_000, quality: 38 },
+        { id: "google/gemini-3-flash", name: "Google: Gemini 3 Flash", contextLength: 1_000_000, promptPrice: 0.3, completionPrice: 2.5, free: false, jsonOutput: true, textOutput: true, maxOutput: 65_000, quality: 42 },
+        { id: "meta/llama-5-8b:free", name: "Meta: Llama 5 8B (free)", contextLength: 128_000, promptPrice: 0, completionPrice: 0, free: true, jsonOutput: false, textOutput: true },
+        { id: "stability/sd4", name: "Stability: SD4", contextLength: 8_000, promptPrice: 0.1, completionPrice: 0.1, free: false, jsonOutput: true, textOutput: false, quality: 10 },
+      ],
+    })),
     validateModels: vi.fn(async () => ({ ok: false, detail: "The provider refused the key: Invalid API key", warning: "This server is on your local network; restart the app after saving so the engine may reach it." })),
     setProtection: vi.fn(async (_i, wanted: boolean) => ({ restarting: true, protected: wanted, adminAddress: "0xabc" })),
     fetchConverter: vi.fn(async () => converterReady),
@@ -106,6 +115,51 @@ describe("Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     fireEvent.click(screen.getByLabelText(/^Light/));
     expect(theme.setTheme).toHaveBeenCalledWith("light");
+  });
+
+  it("offers the provider's models in a searchable list once a key is saved, recommended ones first, and keeps free text", async () => {
+    const a = api({
+      fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: true }, conversion: { mode: "off" as const, remoteUrl: "" } })),
+      // the engine keeps the stored key across a save that does not mention one
+      saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: patch.models?.endpoint ?? "https://openrouter.ai/api/v1", model: patch.models?.model ?? "", hasKey: true }, conversion: { mode: "off" as const, remoteUrl: "" } })),
+    });
+    render(<Harness api={a} start="models" />);
+    const field = await screen.findByLabelText("Model (required for processing)");
+    await waitFor(() => expect(a.fetchModelCatalog).toHaveBeenCalledWith(info, "https://openrouter.ai/api/v1"));
+    expect(await screen.findByText(/4 models available — type to search/)).toBeTruthy();
+    fireEvent.focus(field);
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    // best-scored capable model first; the free one under Free; the image model only under All models
+    const groups = within(list).getAllByRole("group").map((g) => g.getAttribute("aria-label"));
+    expect(groups).toEqual(["Recommended for processing", "Free", "All models"]);
+    const recommended = within(within(list).getByRole("group", { name: "Recommended for processing" })).getAllByRole("option").map((o) => o.textContent);
+    expect(recommended[0]).toContain("google/gemini-3-flash");
+    expect(recommended[0]).toContain("1M context");
+    expect(recommended[0]).toContain("$0.3 / $2.5 per M tokens");
+    expect(recommended[1]).toContain("openai/gpt-6-luna");
+    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("free");
+    // typing searches every group
+    fireEvent.change(field, { target: { value: "luna" } });
+    expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option")).toHaveLength(1);
+    // choosing fills the field and saving sends the id
+    fireEvent.click(screen.getByRole("option", { name: /openai\/gpt-6-luna/ }));
+    expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("openai/gpt-6-luna");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByText(/OpenAI: GPT-6 Luna · 400k context · \$1.25 \/ \$10 per M tokens/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" } }));
+    expect(await screen.findByText("Saved")).toBeTruthy();
+    // a model the list does not know can still be typed and saved
+    fireEvent.change(screen.getByLabelText("Model (required for processing)"), { target: { value: "my/custom-model" } });
+    expect(await screen.findByText(/No model matches/)).toBeTruthy();
+  });
+
+  it("asks nothing of the provider without a saved key and says why", async () => {
+    const a = api();
+    render(<Harness api={a} start="models" />);
+    await screen.findByLabelText("Model (required for processing)");
+    expect(screen.getByText("Save your API key to pick from the models it gives you.")).toBeTruthy();
+    expect(a.fetchModelCatalog).not.toHaveBeenCalled();
   });
 
   it("shows diagnostics with the copy blocks for the CLI and MCP, and the versions in About", async () => {

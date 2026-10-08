@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { ModelPicker } from "./ModelPicker.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { AppSettings } from "../vaults.js";
@@ -29,6 +30,8 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
       alive = false;
     };
   }, [api, info]);
+
+  const loadCatalog = useCallback(() => api.fetchModelCatalog(info, endpoint || undefined), [api, info, endpoint]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -81,7 +84,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
           <label htmlFor="models-endpoint">Endpoint</label>
           <input id="models-endpoint" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://openrouter.ai/api/v1" disabled={busy} />
           <label htmlFor="models-model">Model (required for processing)</label>
-          <input id="models-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="anthropic/claude-sonnet-4" disabled={busy} />
+          <ModelPicker id="models-model" value={model} onChange={setModel} placeholder="openai/gpt-6-luna" disabled={busy} hasKey={settings.models.hasKey} load={loadCatalog} reloadKey={endpoint} />
           <label htmlFor="models-key">API key</label>
           <div className="kv-form-inline">
             <input id="models-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={settings.models.hasKey ? "A key is stored — enter a new one to replace it" : "sk-…"} autoComplete="off" disabled={busy} />
