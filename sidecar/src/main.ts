@@ -28,6 +28,15 @@ import { watchParent } from "./parent-watch.js";
 import { reapChildren } from "./child-reaper.js";
 import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
 
+/**
+ * Stop this engine gracefully: run the SIGINT listeners (the Switchboard saves both PGlite stores, then
+ * exits) without sending a real signal. On Windows, process.kill(self, "SIGINT") is not a signal but an
+ * immediate termination — the store was never saved and the next start found stale lockfiles.
+ */
+function requestStop(): void {
+  process.emit("SIGINT");
+}
+
 /** When this engine came up: runs that began earlier belong to a previous life of it. */
 const ENGINE_STARTED_AT = new Date().toISOString();
 import { privateHostAllow, isLocalEndpoint } from "./egress.js";
@@ -203,7 +212,7 @@ async function main(): Promise<void> {
   const requestRestart = (reason: string): void => {
     setTimeout(() => {
       process.stdout.write(restartLine(reason) + "\n");
-      process.kill(process.pid, "SIGINT");
+      requestStop();
     }, 200).unref();
   };
   // A protected engine answers only authenticated callers; our own management calls carry the
@@ -319,7 +328,7 @@ async function main(): Promise<void> {
     shutdown: () => {
       setTimeout(() => {
         process.stdout.write(shutdownLine() + "\n");
-        process.kill(process.pid, "SIGINT");
+        requestStop();
       }, 200).unref();
     },
     logsTail: () => tailLines(join(cfg.dataDir, "logs", "sidecar.log"), 200),
@@ -376,9 +385,9 @@ async function main(): Promise<void> {
   // flag stdin is ignored, so a launch with a closed stdin keeps running.
   if (process.env.KV_STDIN_STOP === "1") {
     process.stdin.resume();
-    process.stdin.on("end", () => process.kill(process.pid, "SIGINT"));
+    process.stdin.on("end", () => requestStop());
     process.stdin.on("data", (chunk) => {
-      if (String(chunk).trim() === "stop") process.kill(process.pid, "SIGINT");
+      if (String(chunk).trim() === "stop") requestStop();
     });
   }
   // And if whoever spawned us dies without closing the pipe, stop all the same (parent-watch.ts).
@@ -387,7 +396,7 @@ async function main(): Promise<void> {
       getPpid: () => process.ppid,
       onGone: () => {
         console.error("[sidecar] the shell is gone; stopping");
-        process.kill(process.pid, "SIGINT");
+        requestStop();
       },
     });
   }

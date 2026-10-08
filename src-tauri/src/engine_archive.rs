@@ -14,33 +14,47 @@ pub fn archived_engine(resource_dir: &Path) -> Option<PathBuf> {
 }
 
 /// Unpack `archive` under `base` once per app version and archive, and return the engine's root
-/// (`…/sidecar`). An unpack is made in `<key>.partial` and renamed when complete, so an interrupted one is
-/// redone, never used half-made. Other versions' folders are removed afterwards.
+/// (`…/sidecar`). The unpack goes straight into its final folder and the `.complete` marker is written
+/// last, so a half-made one is never used: a folder without the marker is removed and redone.
+///
+/// No folder rename: on Windows, real-time antivirus is still scanning the ~37 000 files it has just
+/// seen written and holds them open, so renaming their folder fails with "access denied" — the first
+/// start after every update did, and a restart (scan finished) worked. Removals are retried for the
+/// same reason. Other versions' folders are removed afterwards, best effort.
 pub fn unpack(archive: &Path, base: &Path, version: &str) -> io::Result<PathBuf> {
     let key = format!("{version}-{}", fs::metadata(archive)?.len());
     let dest = base.join(&key);
     let root = dest.join("sidecar");
     if !dest.join(".complete").is_file() {
-        let partial = base.join(format!("{key}.partial"));
-        if partial.exists() {
-            fs::remove_dir_all(&partial)?;
-        }
-        fs::create_dir_all(&partial)?;
-        tar::Archive::new(fs::File::open(archive)?).unpack(&partial)?;
-        fs::write(partial.join(".complete"), &key)?;
         if dest.exists() {
-            fs::remove_dir_all(&dest)?;
+            remove_dir_all_retrying(&dest)?;
         }
-        fs::rename(&partial, &dest)?;
+        fs::create_dir_all(&dest)?;
+        tar::Archive::new(fs::File::open(archive)?).unpack(&dest)?;
+        fs::write(dest.join(".complete"), &key)?;
     }
     if let Ok(entries) = fs::read_dir(base) {
         for entry in entries.flatten() {
             if entry.file_name() != key.as_str() {
-                let _ = fs::remove_dir_all(entry.path());
+                let _ = remove_dir_all_retrying(&entry.path());
             }
         }
     }
     Ok(root)
+}
+
+/// `remove_dir_all`, retried for up to ~10 s: a file antivirus is scanning cannot be deleted yet.
+fn remove_dir_all_retrying(path: &Path) -> io::Result<()> {
+    let mut last = None;
+    for attempt in 0..20 {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100 + 25 * attempt));
+    }
+    Err(last.unwrap_or_else(|| io::Error::other("could not remove the folder")))
 }
 
 #[cfg(test)]
@@ -102,10 +116,17 @@ mod tests {
         let (archive, _) = archive_with_deep_path(&dir);
         let base = dir.join("engine");
         let key = format!("0.2.0-{}", fs::metadata(&archive).unwrap().len());
+        // a folder left by an interrupted unpack (no .complete marker), an old `.partial` from the
+        // previous scheme, and another version's folder
+        fs::create_dir_all(base.join(&key).join("sidecar").join("half")).unwrap();
         fs::create_dir_all(base.join(format!("{key}.partial")).join("sidecar")).unwrap();
         fs::create_dir_all(base.join("0.1.0-123").join("sidecar")).unwrap();
         let root = unpack(&archive, &base, "0.2.0").unwrap();
         assert!(root.join("dist/main.js").is_file());
+        assert!(
+            !root.join("half").exists(),
+            "the interrupted unpack was redone, not reused"
+        );
         let left: Vec<String> = fs::read_dir(&base)
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
