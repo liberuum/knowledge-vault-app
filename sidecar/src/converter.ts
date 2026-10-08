@@ -350,6 +350,8 @@ export function createConverterManager(deps: ConverterDeps) {
   }
 
   const jobActive = (): boolean => job !== null && job.phase !== "done" && job.phase !== "failed";
+  /** The install in progress, to wait on: the automatic installs run one after the other. */
+  let running: Promise<void> = Promise.resolve();
   const mb = (bytes: number): string => (bytes / 1_048_576).toFixed(bytes > 100 * 1_048_576 ? 0 : 1);
 
   /** Start installing a component; the job runs on, `status()` reports it. */
@@ -371,7 +373,7 @@ export function createConverterManager(deps: ConverterDeps) {
       finishedAt: null,
     };
     job = started;
-    void runInstall(started);
+    running = runInstall(started);
     return status();
   }
 
@@ -435,6 +437,36 @@ export function createConverterManager(deps: ConverterDeps) {
     return status();
   }
 
+  /**
+   * Install what is missing on its own: the binding, then the models (they need it), so a new
+   * vault reads PDFs and Office files without a trip to Settings. Skips a component the user
+   * removed, one this machine cannot install, and everything unless conversion runs on this
+   * computer. A failure is logged and left for Settings, where Install says why.
+   */
+  async function autoInstall(removed: ReadonlyArray<"binding" | "models"> = []): Promise<Array<"binding" | "models">> {
+    const done: Array<"binding" | "models"> = [];
+    if (mode !== "local") return done;
+    const attempt = async (component: "binding" | "models"): Promise<void> => {
+      if (removed.includes(component)) return;
+      if (component === "binding" ? installer.bindingInstalled() !== null : installer.modelsInstalled()) return;
+      if (component === "binding" && !platform.triple) return;
+      if (component === "models" && (installer.bindingInstalled() === null || !modelsSupport().supported)) return;
+      await running; // never two jobs at once
+      if (jobActive()) return;
+      log(`installing the ${component} on its own (first use)`);
+      await install(component);
+      await running;
+      if (job?.component === component && job.phase === "done") done.push(component);
+    };
+    try {
+      await attempt("binding");
+      await attempt("models");
+    } catch (error) {
+      log(`automatic install stopped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return done;
+  }
+
   async function status(): Promise<ConverterStatus> {
     const url = mode === "local" ? localUrl : mode === "remote" ? remoteUrl || null : null;
     let health: Record<string, unknown> | null = null;
@@ -466,7 +498,7 @@ export function createConverterManager(deps: ConverterDeps) {
     };
   }
 
-  return { apply, start, stop, restart, status, install, remove };
+  return { apply, start, stop, restart, status, install, remove, autoInstall };
 }
 
 export type ConverterManager = ReturnType<typeof createConverterManager>;

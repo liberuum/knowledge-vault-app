@@ -377,3 +377,51 @@ describe("converterEnvironment", () => {
     expect(env).toEqual({ PATH: "/bin", HOME: "/home/u", DISPLAY: ":0" });
   });
 });
+
+describe("converter manager — installing on its own", () => {
+  it("installs the binding, then the models, when conversion runs on this computer", async () => {
+    const { installer, state } = fakeInstaller();
+    const h = harness({ installer, platform: linux });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await h.manager.autoInstall()).toEqual(["binding", "models"]);
+    expect(state.binding).not.toBeNull();
+    expect(state.models).toBe(true);
+    expect(await h.manager.autoInstall()).toEqual([]); // nothing left to do
+  });
+
+  it("leaves a component the user removed alone", async () => {
+    const { installer, state } = fakeInstaller();
+    const h = harness({ installer, platform: linux });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await h.manager.autoInstall(["models"])).toEqual(["binding"]);
+    expect(state.models).toBe(false);
+    state.binding = null;
+    expect(await h.manager.autoInstall(["binding"])).toEqual([]); // and the models need the binding
+  });
+
+  it("does nothing unless conversion runs here, on a platform without a binding, or where the models cannot install", async () => {
+    const off = harness({ installer: fakeInstaller().installer, platform: linux });
+    await off.manager.apply({ mode: "off", remoteUrl: "" });
+    expect(await off.manager.autoInstall()).toEqual([]);
+    const mac = harness({ installer: fakeInstaller().installer, platform: { triple: null, reason: "coming" } });
+    await mac.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await mac.manager.autoInstall()).toEqual([]);
+    const noCurl = harness({ installer: fakeInstaller().installer, platform: linux, toolsMissing: () => ["curl"] });
+    await noCurl.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await noCurl.manager.autoInstall()).toEqual(["binding"]);
+  });
+
+  it("logs a failed download and stops there, without throwing", async () => {
+    const { installer, state } = fakeInstaller();
+    installer.installBinding = async () => {
+      throw new Error("offline");
+    };
+    const lines: string[] = [];
+    const h = harness({ installer, platform: linux, log: (l: string) => lines.push(l) });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await h.manager.autoInstall()).toEqual([]);
+    expect(state.models).toBe(false);
+    expect(lines.some((l) => l.includes("install binding failed: offline"))).toBe(true);
+  });
+});
+

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readLocalProtection, readModelKey, readSettings, SettingsError, writeLocalProtection, writeSettings } from "./settings.js";
+import { readLocalProtection, readModelKey, readSettings, setComponentRemoved, SettingsError, writeLocalProtection, writeSettings } from "./settings.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "kv-settings-"));
 
@@ -11,7 +11,7 @@ describe("settings", () => {
     expect(readSettings(dir())).toEqual({
       version: 1,
       models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false },
-      conversion: { mode: "local", remoteUrl: "" },
+      conversion: { mode: "local", remoteUrl: "", removed: [] },
       ui: { closeToTray: true },
     });
   });
@@ -47,8 +47,8 @@ describe("settings", () => {
   it("persists the conversion mode and server, trimming a trailing slash", () => {
     const d = dir();
     const out = writeSettings(d, { conversion: { mode: "remote", remoteUrl: "http://127.0.0.1:5011/" } });
-    expect(out.conversion).toEqual({ mode: "remote", remoteUrl: "http://127.0.0.1:5011" });
-    expect(writeSettings(d, { conversion: { mode: "off" } }).conversion).toEqual({ mode: "off", remoteUrl: "http://127.0.0.1:5011" });
+    expect(out.conversion).toEqual({ mode: "remote", remoteUrl: "http://127.0.0.1:5011", removed: [] });
+    expect(writeSettings(d, { conversion: { mode: "off" } }).conversion).toEqual({ mode: "off", remoteUrl: "http://127.0.0.1:5011", removed: [] });
     expect(readSettings(d).conversion.mode).toBe("off");
   });
   it("refuses another server without a URL, a URL that is not http(s), and an unknown mode", () => {
@@ -96,3 +96,22 @@ describe("model endpoint normalisation (Review Focus #1: a pasted chat-completio
     expect(writeSettings(d, { models: { endpoint: "http://127.0.0.1:8080" } }).models.endpoint).toBe("http://127.0.0.1:8080");
   });
 });
+
+describe("removed converter components", () => {
+  it("remembers a removal, forgets it on install, and keeps the rest of the conversion section", () => {
+    const d = dir();
+    writeSettings(d, { conversion: { mode: "remote", remoteUrl: "https://convert.example" } });
+    setComponentRemoved(d, "models", true);
+    setComponentRemoved(d, "models", true);
+    expect(readSettings(d).conversion).toEqual({ mode: "remote", remoteUrl: "https://convert.example", removed: ["models"] });
+    setComponentRemoved(d, "binding", true);
+    setComponentRemoved(d, "models", false);
+    expect(readSettings(d).conversion.removed).toEqual(["binding"]);
+  });
+  it("ignores anything but the two components", () => {
+    const d = dir();
+    writeFileSync(join(d, "config.json"), JSON.stringify({ version: 1, conversion: { mode: "local", removed: ["models", "docker", 3] } }));
+    expect(readSettings(d).conversion.removed).toEqual(["models"]);
+  });
+});
+

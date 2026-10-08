@@ -12,7 +12,8 @@ import { writeFileAtomic } from "./process-identity.js";
 export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local: boolean };
 /** Where documents convert (Plan 4): the helper on this computer, another server by URL, or nowhere. */
 export type ConversionMode = "local" | "remote" | "off";
-export type ConversionSettings = { mode: ConversionMode; remoteUrl: string };
+/** `removed`: components the user removed in Settings — not installed again on their own. */
+export type ConversionSettings = { mode: ConversionMode; remoteUrl: string; removed?: Array<"binding" | "models"> };
 export const CONVERSION_MODES: readonly ConversionMode[] = ["local", "remote", "off"];
 /** Plan 5: the shell's window behaviour — closing the window keeps the engine serving tools from the tray. */
 export type UiSettings = { closeToTray: boolean };
@@ -92,6 +93,7 @@ export function readSettings(dataDir: string): AppSettings {
     conversion: {
       mode: CONVERSION_MODES.includes(conversion.mode as ConversionMode) ? (conversion.mode as ConversionMode) : "local",
       remoteUrl: typeof conversion.remoteUrl === "string" ? conversion.remoteUrl : "",
+      removed: Array.isArray(conversion.removed) ? (conversion.removed as unknown[]).filter((c): c is "binding" | "models" => c === "binding" || c === "models") : [],
     },
     ui: { closeToTray: ui.closeToTray !== false },
   };
@@ -173,4 +175,14 @@ export function readStackVersion(dataDir: string): string | undefined {
 }
 export function writeStackVersion(dataDir: string, stackVersion: string): void {
   writeConfig(dataDir, { ...readRaw(dataDir), stackVersion });
+}
+
+/** Remember (or forget) that the user removed a converter component: removed ones are not installed again on their own. */
+export function setComponentRemoved(dataDir: string, component: "binding" | "models", removed: boolean): void {
+  const raw = readRaw(dataDir);
+  const conversion = (raw.conversion && typeof raw.conversion === "object" ? raw.conversion : {}) as Record<string, unknown>;
+  const list = new Set(Array.isArray(conversion.removed) ? (conversion.removed as unknown[]).filter((c): c is string => typeof c === "string") : []);
+  if (removed) list.add(component);
+  else list.delete(component);
+  writeConfig(dataDir, { ...raw, conversion: { ...conversion, removed: [...list] } });
 }

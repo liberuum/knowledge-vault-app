@@ -14,7 +14,7 @@ import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
-import { readModelKey, readSettings, readStackVersion, writeSettings, writeStackVersion } from "./settings.js";
+import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion } from "./settings.js";
 import { acquireEngineLockWaiting, StoreInUseError } from "./engine-lock.js";
 import { readLastAction, runPendingAction, takePending, writeLastAction, writePending } from "./pending.js";
 import { cleanPartialBackups, listBackups, recoverInterruptedRestore } from "./backups.js";
@@ -233,8 +233,15 @@ async function main(): Promise<void> {
     env: converterEnvironment(process.env),
     setEngineUrl: (url) => convertRegistry?.setServiceUrl(url),
   });
+  // Install what is missing on its own (binding, then models), so a new vault reads PDFs and Office
+  // files without a trip to Settings; a component the user removed stays removed.
+  const autoInstallConverter = () =>
+    void converter
+      .autoInstall(readSettings(cfg.dataDir).conversion.removed)
+      .catch((error: unknown) => console.error(`[converter] ${error instanceof Error ? error.message : String(error)}`));
   void converter
     .apply(readSettings(cfg.dataDir).conversion)
+    .then(autoInstallConverter)
     .catch((error: unknown) => console.error(`[converter] ${error instanceof Error ? error.message : String(error)}`));
 
   // One create at a time: a React dev double-effect must not make two Workflows drives.
@@ -336,10 +343,21 @@ async function main(): Promise<void> {
     converter: {
       status: () => converter.status(),
       restart: () => converter.restart(),
-      install: (component) => converter.install(component),
-      remove: (component) => converter.remove(component),
+      install: async (component) => {
+        const status = await converter.install(component);
+        if (component === "binding" || component === "models") setComponentRemoved(cfg.dataDir, component, false);
+        return status;
+      },
+      remove: async (component) => {
+        const status = await converter.remove(component);
+        if (component === "binding" || component === "models") setComponentRemoved(cfg.dataDir, component, true);
+        return status;
+      },
     },
-    applyConversion: (settings) => converter.apply(settings),
+    applyConversion: async (settings) => {
+      await converter.apply(settings);
+      if (settings.mode === "local") autoInstallConverter();
+    },
     auth: {
       status: () => identity.status(),
       startLogin: () => identity.startLogin(),
