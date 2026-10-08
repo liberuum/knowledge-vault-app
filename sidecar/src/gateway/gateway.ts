@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PROVIDER_LABELS, type AppSettings } from "../settings.js";
+import { anthropicJson as defaultAnthropicJson } from "./anthropic.js";
 import { openAiError, providerMessage } from "./errors.js";
 import { createQueue } from "./queue.js";
 
@@ -26,6 +27,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, cors: Reco
 export function createGateway(deps: GatewayDeps) {
   const f = deps.fetchImpl ?? fetch;
   const queue = createQueue();
+  const anthropicJson = deps.anthropicJson ?? defaultAnthropicJson;
 
   async function handle(req: IncomingMessage, res: ServerResponse, body: Buffer, cors: Record<string, string>): Promise<void> {
     const path = new URL(req.url ?? "/", "http://gateway").pathname.slice(GATEWAY_PATH.length);
@@ -64,9 +66,9 @@ export function createGateway(deps: GatewayDeps) {
           return sendJson(res, 400, openAiError(400, "The request body must be a JSON object."), cors);
         }
         if (typeof payload.model !== "string" || !payload.model.trim()) payload.model = settings.models.model;
-        if (settings.models.provider === "anthropic" && payload.response_format && deps.anthropicJson && key) {
+        if (settings.models.provider === "anthropic" && payload.response_format && key) {
           try {
-            const answer = await deps.anthropicJson({ endpoint, key, body: payload, fetchImpl: f, signal: controller.signal });
+            const answer = await anthropicJson({ endpoint, key, body: payload, fetchImpl: f, signal: controller.signal });
             return sendJson(res, answer.status, answer.json, cors);
           } catch (error) {
             return sendJson(res, 502, openAiError(502, `Could not reach Anthropic: ${error instanceof Error ? error.message : String(error)}`, "provider_unreachable"), cors);
