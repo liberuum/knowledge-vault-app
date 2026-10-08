@@ -49,12 +49,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `assets` names the files on the release page by operating system, so people pick the right one:
+          # Knowledge-Vault_0.1.1_Linux_x86-64.AppImage / .deb, …_macOS_Apple-silicon.dmg, …_Windows_x64-setup.exe
           - runner: ubuntu-22.04 # the oldest glibc the AppImage supports
             target: x86_64-unknown-linux-gnu
+            assets: Knowledge-Vault_[version]_Linux_x86-64[ext]
           - runner: macos-14
             target: aarch64-apple-darwin
+            assets: Knowledge-Vault_[version]_macOS_Apple-silicon[ext]
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
+            assets: Knowledge-Vault_[version]_Windows_x64[setup][ext]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
@@ -113,6 +118,7 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true # public only after every target passed (publish job)
           prerelease: true # until the builds are signed
+          assetNamePattern: ${{ matrix.assets }}
       - name: Retry the macOS bundle once (verbose, so a second failure says why)
         if: runner.os == 'macOS' && steps.bundle.outcome == 'failure'
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
@@ -125,6 +131,7 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true # public only after every target passed (publish job)
           prerelease: true # until the builds are signed
+          assetNamePattern: ${{ matrix.assets }}
           args: --verbose
       - name: The .deb installs nothing into /usr/bin but the app's own binaries
         if: runner.os == 'Linux'

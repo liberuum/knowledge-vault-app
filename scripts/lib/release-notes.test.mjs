@@ -15,20 +15,20 @@ describe("releaseNotes", () => {
     expect(notes).toMatch(/13\.5/);
   });
   it("formats an installer's size in MB", () => {
-    expect(sizeLine("Knowledge Vault_0.2.0_amd64.AppImage", 231_456_789)).toBe("| Knowledge Vault_0.2.0_amd64.AppImage | 231 MB |");
+    expect(sizeLine("Knowledge-Vault_0.2.0_Linux_x86-64.AppImage", 231_456_789)).toBe("| Knowledge-Vault_0.2.0_Linux_x86-64.AppImage | 231 MB |");
   });
 });
 describe("withSizes", () => {
   it("adds one table of the installers, replacing any previous one — a re-run never appends a second", () => {
     const assets = [
-      { name: "Knowledge.Vault_0.2.0_amd64.AppImage", size: 317_000_000 },
-      { name: "Knowledge.Vault_0.2.0_amd64.deb", size: 271_000_000 },
-      { name: "Knowledge.Vault_0.2.0_aarch64.dmg", size: 190_000_000 },
+      { name: "Knowledge-Vault_0.2.0_Linux_x86-64.AppImage", size: 317_000_000 },
+      { name: "Knowledge-Vault_0.2.0_Linux_x86-64.deb", size: 271_000_000 },
+      { name: "Knowledge-Vault_0.2.0_macOS_Apple-silicon.dmg", size: 190_000_000 },
       { name: "latest.json", size: 900 },
     ];
     const once = withSizes("Notes body.", assets);
     expect(once).toContain("### Installers");
-    expect(once).toContain("| Knowledge.Vault_0.2.0_amd64.AppImage | 317 MB |");
+    expect(once).toContain("| Knowledge-Vault_0.2.0_Linux_x86-64.AppImage | 317 MB |");
     expect(once).not.toContain("latest.json");
     const twice = withSizes(once, assets);
     expect(twice).toBe(once);

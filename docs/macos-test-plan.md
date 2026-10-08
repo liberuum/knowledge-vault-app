@@ -15,7 +15,7 @@ the macOS builds **without publishing anything**, run the same workflow by hand:
    jobs also run the smoke test (`node scripts/smoke-app.mjs`): the built app must start its engine, serve its page
    and stop cleanly.
 3. The installers are attached to a **draft** release (Releases page, visible only to maintainers): download the
-   `.dmg` (`aarch64`, Apple silicon) and install it as in step 3 below.
+   `Knowledge-Vault_<version>_macOS_Apple-silicon.dmg` and install it as in step 3 below.
 
 A manual run with Publish unticked never makes the release public; delete the draft afterwards. A real release is
 `git tag v0.1.0 && git push origin v0.1.0` once everything here passes.

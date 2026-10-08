@@ -9,8 +9,10 @@ export function releaseNotes({ app, stack, vaultPackage, node }) {
     `- Node **${node}** (bundled)`,
     "",
     "### Installing",
-    "- **Linux** (glibc 2.34+: Ubuntu 22.04, Debian 12, Fedora, RHEL 9 and newer): the `.AppImage` runs as is (`chmod +x`, then open it); the `.deb` installs with `sudo apt install ./<file>.deb`.",
-    "- **macOS 13.5+ (Apple silicon):** these builds are ad-hoc signed, not notarised, so macOS blocks the first launch. Open the `.dmg` and drag the app to Applications, then open it. When macOS says it *could not verify* the app, choose **Done** — not *Move to Bin*, which deletes it. Then open **System Settings › Privacy & Security**, scroll to *Security*, choose **Open Anyway** next to Knowledge Vault and confirm with your password. From then on it opens normally. (Or, in Terminal: `xattr -dr com.apple.quarantine \"/Applications/Knowledge Vault.app\"`.)",
+    "Pick the file named for your system: `…_Linux_x86-64`, `…_macOS_Apple-silicon` or `…_Windows_x64-setup`.",
+    "- **Linux** (glibc 2.34+: Ubuntu 22.04, Debian 12, Fedora, RHEL 9 and newer): the `_Linux_x86-64.AppImage` runs as is (`chmod +x`, then open it); the `_Linux_x86-64.deb` installs with `sudo apt install ./<file>.deb`.",
+    "- **Windows 10/11 (64-bit):** run the `_Windows_x64-setup.exe`. It is not signed yet: if SmartScreen warns you, choose **More info › Run anyway**.",
+    "- **macOS 13.5+ (Apple silicon):** these builds are ad-hoc signed, not notarised, so macOS blocks the first launch. Open the `_macOS_Apple-silicon.dmg` and drag the app to Applications, then open it. When macOS says it *could not verify* the app, choose **Done** — not *Move to Bin*, which deletes it. Then open **System Settings › Privacy & Security**, scroll to *Security*, choose **Open Anyway** next to Knowledge Vault and confirm with your password. From then on it opens normally. (Or, in Terminal: `xattr -dr com.apple.quarantine \"/Applications/Knowledge Vault.app\"`.)",
     "",
     "Your vaults live in the app's data folder and are kept across updates; a backup is made before a new version opens them.",
   ].join("\n");
