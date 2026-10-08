@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createPipelineManager, readPipelines, writePipelines, type PipelineManagerDeps } from "./pipelines.js";
+import { createPipelineManager, readPipelines, templateDigest, writePipelines, type PipelineManagerDeps } from "./pipelines.js";
 import type { PipelineTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
@@ -95,7 +95,7 @@ describe("pipeline manager — ensure", () => {
       llm: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" },
       pieceVersion: "1.0.54-dev.23",
     }));
-    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } , modelFromConnection: true });
+    expect(readPipelines(dataDir).vault1).toEqual({ workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } , modelFromConnection: true, templateDigest: templateDigest(template) });
   });
   it("uses a placeholder token for an open engine with nobody signed in — the engine ignores bearers there", async () => {
     const { manager, engine } = deps({ signedIn: false });
@@ -123,8 +123,8 @@ describe("pipeline manager — status and removal", () => {
     const models = { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" };
     const token = { kind: "minted" as const, expiresAt: "2027-01-05T10:00:00.000Z" };
     writePipelines(two.dataDir, {
-      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "s1", llm: "s2" }, createdAt: "x", models, token },
-      vault2: { workflowId: "wf-other", connectionId: "conn-2", secretRefs: { token: "s3", llm: "s4" }, createdAt: "x", models, token },
+      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "s1", llm: "s2" }, createdAt: "x", models, token, templateDigest: templateDigest(template) },
+      vault2: { workflowId: "wf-other", connectionId: "conn-2", secretRefs: { token: "s3", llm: "s4" }, createdAt: "x", models, token, templateDigest: templateDigest(template) },
     });
     expect(await two.manager.status("vault1")).toEqual({
       state: "ready",
@@ -214,7 +214,7 @@ describe("pipeline manager — the model settings changed", () => {
   it("rewrites the connection of a pipeline whose steps defer to it, keeping the other config keys, and sets an older one up again", async () => {
     const h = deps({ model: "anthropic/claude-sonnet-5.5" });
     writePipelines(h.dataDir, {
-      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, modelFromConnection: true },
+      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, modelFromConnection: true, templateDigest: templateDigest(template) },
       vault2: { workflowId: "wf-old", connectionId: "conn-old", secretRefs: { token: "secret://v1:3", llm: "secret://v1:4" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" } },
       vault3: { workflowId: "wf-3", connectionId: "conn-3", secretRefs: { token: "secret://v1:5", llm: "secret://v1:6" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, disabled: "the model key was removed" },
     });
@@ -236,5 +236,16 @@ describe("pipeline manager — the model settings changed", () => {
     writePipelines(h.dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "a", llm: "b" }, createdAt: "x", models: { endpoint: "e", model: "m" }, token: { kind: "open", expiresAt: null }, modelFromConnection: true } });
     expect(await h.manager.applyModels()).toEqual({ updated: [], recreated: [] });
     expect(h.engine.calls).toEqual([]);
+  });
+});
+
+describe("pipeline manager — a newer template", () => {
+  it("marks a pipeline made from another template (or before templates were recorded) as needing an update", async () => {
+    const h = deps();
+    const base = { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "a", llm: "b" }, createdAt: "2026-10-07T10:00:00.000Z", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted" as const, expiresAt: "2027-01-05T10:00:00.000Z" }, modelFromConnection: true };
+    writePipelines(h.dataDir, { vault1: { ...base, templateDigest: templateDigest(template) }, vault2: { ...base }, vault3: { ...base, templateDigest: "0000000000000000" } });
+    expect((await h.manager.status("vault1")).state).toBe("ready");
+    expect(await h.manager.status("vault2")).toMatchObject({ state: "stale", reason: "a newer version of the pipeline is available" });
+    expect(await h.manager.status("vault3")).toMatchObject({ state: "stale", reason: "a newer version of the pipeline is available" });
   });
 });

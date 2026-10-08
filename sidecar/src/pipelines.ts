@@ -1,4 +1,5 @@
 import type { EngineToken } from "./connections.js";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
@@ -26,6 +27,8 @@ export type PipelineRecord = {
   disabled?: string;
   /** The steps leave their model empty and the connection's default applies: a model change is a config write. Older records baked the model into the steps. */
   modelFromConnection?: boolean;
+  /** Which template the pipeline was made from: an installed package with a newer one makes it stale (Update sets it up again). */
+  templateDigest?: string;
 };
 export type PipelineStatus =
   | { state: "unconfigured" }
@@ -78,6 +81,11 @@ export type PipelineManagerDeps = {
 /** The bearer the piece uses lasts long enough to be forgotten about; re-creating the pipeline mints a new one. */
 /** What a local model server is sent as its "key": llama.cpp, Ollama and LM Studio ignore it. */
 export const LOCAL_PLACEHOLDER_KEY = "local";
+/** A short fingerprint of a pipeline template: what a recorded pipeline was made from. */
+export function templateDigest(template: PipelineTemplate | undefined): string | undefined {
+  return template ? createHash("sha256").update(JSON.stringify(template)).digest("hex").slice(0, 16) : undefined;
+}
+
 const ENGINE_TOKEN_SECONDS = 90 * 86_400;
 /** A token this close to its end reads as stale, so the user updates before runs start failing. */
 const TOKEN_RENEW_BEFORE_MS = 7 * 86_400_000;
@@ -135,6 +143,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     // Records written before these fields existed carry neither; they are judged on what they have.
     if (record.models && (record.models.endpoint !== settings.models.endpoint || record.models.model !== settings.models.model)) return "the model settings changed";
     if (deps.engineProtected && record.token?.kind === "open") return "the engine is now protected; the pipeline was set up while it was open";
+    // The installed package ships a newer pipeline (longer limits, new steps): Update sets this one up again.
+    const digest = templateDigest(deps.template);
+    if (digest && record.templateDigest !== digest) return "a newer version of the pipeline is available";
     if (record.token?.expiresAt) {
       const left = Date.parse(record.token.expiresAt) - Date.parse(now());
       if (left <= 0) return "the engine token expired";
@@ -185,6 +196,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             models: { endpoint: settings.models.endpoint, model: settings.models.model },
             token: { kind: token.kind, expiresAt: token.expiresAt },
             modelFromConnection: true,
+            templateDigest: templateDigest(deps.template),
           },
         });
         return { state: "ready", workflowId, connectionId };
@@ -228,7 +240,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
         if (record.disabled) continue;
         if (record.models && record.models.endpoint === settings.models.endpoint && record.models.model === settings.models.model) continue;
-        if (record.modelFromConnection) {
+        if (record.modelFromConnection && record.templateDigest === templateDigest(deps.template)) {
           await updateConnectionModels(record.connectionId, settings);
           const records = readPipelines(deps.dataDir);
           const current = records[vaultId];
