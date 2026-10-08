@@ -292,10 +292,10 @@ describe("Settings", () => {
     expect(await screen.findByText("Another server · Ready")).toBeTruthy();
     expect(screen.queryByText("Stopped")).toBeNull();
     cleanup();
-    const windows: ConverterStatus = { ...converterReady, installed: { binding: { installed: true, version: "1.58.0", supported: true, platform: "win32-x64-msvc", reason: null }, models: { installed: false, supported: false, reason: "The PDF models need a Unix shell to install; Windows support arrives with its converter binding." } } };
+    const windows: ConverterStatus = { ...converterReady, installed: { binding: { installed: true, version: "1.58.0", supported: true, platform: "win32-x64-msvc", reason: null }, models: { installed: false, supported: false, reason: "Installing the PDF models needs curl on this computer." } } };
     const b = api({ fetchConverter: vi.fn(async () => windows) });
     render(<Harness api={b} start="conversion" />);
-    expect(await screen.findByText(/need a Unix shell/)).toBeTruthy();
+    expect(await screen.findByText(/needs curl on this computer/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Install models" })).toBeNull();
   });
 

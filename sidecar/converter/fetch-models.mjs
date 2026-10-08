@@ -93,15 +93,28 @@ async function fetchScript() {
   return { dir, path };
 }
 
+/**
+ * Windows has no `sh` (and the upstream script has no Windows branch): the download runs in Node
+ * there (fetch-node.mjs). Elsewhere the pinned script runs, unless DOCLING_FETCH_NODE=1 asks for the
+ * Node path. DOCLING_FETCH_ONLY=pdfium fetches just pdfium (a quick check of the platform's library).
+ */
+const IN_NODE = process.platform === "win32" || process.env.DOCLING_FETCH_NODE === "1";
+
 async function main() {
   console.log(`models directory: ${home}   (DOCLING_RS_HOME)\n`);
 
-  const script = await fetchScript();
-  try {
-    console.log(`\n→ running: sh download_dependencies.sh ${SCRIPT_ARGS.join(" ")}\n`);
-    await run("sh", [script.path, ...SCRIPT_ARGS], { cwd: home });
-  } finally {
-    await rm(script.dir, { recursive: true, force: true });
+  if (IN_NODE) {
+    const { fetchModelsInNode } = await import("./fetch-node.mjs");
+    await fetchModelsInNode({ home, only: process.env.DOCLING_FETCH_ONLY });
+    if (process.env.DOCLING_FETCH_ONLY) return;
+  } else {
+    const script = await fetchScript();
+    try {
+      console.log(`\n→ running: sh download_dependencies.sh ${SCRIPT_ARGS.join(" ")}\n`);
+      await run("sh", [script.path, ...SCRIPT_ARGS], { cwd: home });
+    } finally {
+      await rm(script.dir, { recursive: true, force: true });
+    }
   }
 
   // Verify with the binding itself rather than trusting the script's exit code.

@@ -154,9 +154,12 @@ export function createConverterManager(deps: ConverterDeps) {
   let starting: Promise<void> | null = null;
   const platformName = deps.platformName ?? process.platform;
   const toolsMissing = deps.toolsMissing ?? ((names: string[]) => missingOnPath(names));
-  /** The models fetch runs upstream's shell script: a Unix shell and its tools, which Windows gets with its binding (Plan 6). */
+  /**
+   * Linux and macOS run upstream's pinned shell script, which needs `sh`, `curl` and `tar`; Windows
+   * downloads in Node (converter/fetch-node.mjs) and needs nothing else.
+   */
   const modelsSupport = (): { supported: boolean; reason: string | null } => {
-    if (platformName === "win32") return { supported: false, reason: "The PDF models need a Unix shell to install; Windows support arrives with its converter binding." };
+    if (platformName === "win32") return { supported: true, reason: null };
     const missing = toolsMissing(["sh", "curl", "tar"]);
     return missing.length ? { supported: false, reason: `Installing the PDF models needs ${missing.join(", ")} on this computer.` } : { supported: true, reason: null };
   };

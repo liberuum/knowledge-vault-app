@@ -6,7 +6,8 @@ import { join } from "node:path";
  * The PDF models (~700 MB): the vendored `fetch-models.mjs` run as a child with
  * `DOCLING_RS_HOME` in app-data. It fetches upstream's download script and
  * runs it; the sidecar pins the script's sha256 so a changed upstream fails
- * closed instead of running unseen. The script needs `curl`, `sh` and `tar`.
+ * closed instead of running unseen. The script needs `curl`, `sh` and `tar`; on Windows the fetcher
+ * downloads in Node instead (converter/fetch-node.mjs) and needs none of them.
  * Its final step imports `docling.rs` to verify the models — hence the hook
  * and the binding first.
  */

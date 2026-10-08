@@ -87,6 +87,16 @@ jobs:
         run: node scripts/ensure-bundle-inputs.mjs
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
+      - name: The PDF models download on Windows (Node, no Unix shell) — pdfium lands where the converter looks
+        shell: pwsh
+        env:
+          DOCLING_RS_HOME: ${{ runner.temp }}\docling-models
+          DOCLING_FETCH_ONLY: pdfium
+        run: |
+          node sidecar/converter/fetch-models.mjs
+          $dll = Join-Path $env:DOCLING_RS_HOME '.pdfium\lib\pdfium.dll'
+          if (-not (Test-Path $dll)) { throw "pdfium.dll was not placed at $dll" }
+          "pdfium.dll: $([math]::Round((Get-Item $dll).Length / 1MB, 1)) MB"
 
   # macOS: the shell compiles with its SIGTERM handling, and the engine's and the shell's process-tree
   # cleanup is exercised on real processes with macOS's own ps and kill.

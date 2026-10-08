@@ -348,14 +348,10 @@ describe("converter manager — starting and stopping do not race", () => {
 });
 
 describe("converter manager — where the models can be installed", () => {
-  it("Windows is told why not, and a missing tool is named", async () => {
+  it("Windows installs them with no Unix tools (the download runs in Node); elsewhere a missing tool is named", async () => {
     const { installer } = fakeInstaller();
-    const win = harness({ installer, platform: linux, platformName: "win32" });
-    expect((await win.manager.status()).installed.models).toMatchObject({ supported: false, reason: expect.stringMatching(/Windows/) });
-    await win.manager.apply({ mode: "local", remoteUrl: "" });
-    await win.manager.install("binding");
-    await tick();
-    await expect(win.manager.install("models")).rejects.toThrow(/Windows/);
+    const win = harness({ installer, platform: linux, platformName: "win32", toolsMissing: () => ["sh", "curl", "tar"] });
+    expect((await win.manager.status()).installed.models).toMatchObject({ supported: true, reason: null });
     const noCurl = harness({ installer: fakeInstaller().installer, platform: linux, toolsMissing: () => ["curl"] });
     expect((await noCurl.manager.status()).installed.models.reason).toMatch(/needs curl/);
   });
