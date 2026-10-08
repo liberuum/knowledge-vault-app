@@ -316,3 +316,6 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-picker-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--bai-text); }
 .kv-picker-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--bai-text-tertiary); }
 .kv-picker-empty { margin: 8px 10px; font-size: 13px; color: var(--bai-text-tertiary); }
+.kv-picker-badge { padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.kv-picker-badge[data-kind="ok"] { color: var(--bai-status-canonical); background: color-mix(in srgb, var(--bai-status-canonical) 14%, transparent); }
+.kv-picker-badge[data-kind="warn"] { color: var(--bai-status-draft); background: color-mix(in srgb, var(--bai-status-draft) 14%, transparent); }

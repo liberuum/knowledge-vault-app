@@ -172,6 +172,8 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
                       {m.name !== m.id && <span>{m.name}</span>}
                       {ctx && <span>{ctx}</span>}
                       {price && <span>{price}</span>}
+                      {m.jsonOutput === true && <span className="kv-picker-badge" data-kind="ok" title="Accepts response_format, which processing needs">JSON output</span>}
+                      {m.jsonOutput === false && <span className="kv-picker-badge" data-kind="warn" title="No response_format: processing would fail with this model">no JSON output</span>}
                     </span>
                   </div>
                 );

@@ -138,6 +138,9 @@ describe("Settings", () => {
     expect(recommended[0]).toContain("$0.3 / $2.5 per M tokens");
     expect(recommended[1]).toContain("openai/gpt-6-luna");
     expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("free");
+    // each entry says whether the model can answer in JSON, which processing needs
+    expect(recommended[0]).toContain("JSON output");
+    expect(within(within(list).getByRole("group", { name: "Free" })).getByRole("option").textContent).toContain("no JSON output");
     // typing searches every group
     fireEvent.change(field, { target: { value: "luna" } });
     expect(within(screen.getByRole("listbox", { name: "Models" })).getAllByRole("option")).toHaveLength(1);
