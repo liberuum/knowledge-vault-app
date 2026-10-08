@@ -19,6 +19,16 @@ published package `@powerhousedao/knowledge-note`, pinned in `host/package.json`
 resolved from the Powerhouse registry (`bunfig.toml` and `.npmrc` route the `@powerhousedao` scope to
 `https://registry.vetra.io`). Updating it is a version bump plus `bun install`.
 
+### Rules that tests enforce
+
+- **The engine never opens a browser; the window does.** Signing in with Renown works the same on every
+  platform: the app opens the system browser, the user signs in, and the result comes back to the app
+  (the engine polls the Renown session and stores the credential). The engine only builds the sign-in
+  link and reports it; the window opens it through Tauri's opener, which hands the whole link to the
+  operating system. Opening it from the engine went through `cmd /c start` on Windows, which cuts a
+  link at its first `&`, so Renown received it without the app's identity ("missing the CLI identity").
+  Pinned by `sidecar/src/identity.rule.test.ts` and `host/src/state/use-identity.test.tsx`.
+
 ## Requirements
 
 - [Bun](https://bun.sh) 1.3 or later (the package manager and script runner)

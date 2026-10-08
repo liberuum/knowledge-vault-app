@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelLogin, fetchAuthStatus, logout, startLogin, type IdentityStatus } from "../api/identity.js";
 import type { SidecarInfo } from "../sidecar.js";
+import { openInBrowser } from "../api/oauth.js";
 
 export type IdentityApi = {
   fetchAuthStatus: (info: SidecarInfo) => Promise<IdentityStatus>;
   startLogin: (info: SidecarInfo) => Promise<{ url?: string; alreadyAuthenticated: boolean }>;
   cancelLogin: (info: SidecarInfo) => Promise<unknown>;
   logout: (info: SidecarInfo) => Promise<unknown>;
+  /** Opens the sign-in link in the system browser; the engine never opens a browser itself. */
+  openUrl?: (url: string) => Promise<void>;
 };
-export const realIdentityApi: IdentityApi = { fetchAuthStatus, startLogin, cancelLogin, logout };
+export const realIdentityApi: IdentityApi = { fetchAuthStatus, startLogin, cancelLogin, logout, openUrl: openInBrowser };
 
 const POLL_MS = 2000;
 
@@ -52,7 +55,8 @@ export function useIdentity(info: SidecarInfo | undefined, api: IdentityApi = re
     if (!info) return;
     setError(null);
     try {
-      await api.startLogin(info);
+      const started = await api.startLogin(info);
+      if (started.url && api.openUrl) await api.openUrl(started.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

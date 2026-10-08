@@ -9,7 +9,8 @@ type Deps = {
 };
 const DEADLINE_MS = 10 * 60_000;
 
-async function openInBrowser(url: string): Promise<void> {
+/** The system browser: Tauri's opener under the shell, a new tab in a plain browser. */
+export async function openInBrowser(url: string): Promise<void> {
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);

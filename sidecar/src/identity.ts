@@ -1,10 +1,11 @@
 import { chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { renownLogin } from "./renown-login.js";
 
 /**
  * The user's identity, held by the engine (spec §4.4, §5.4): a Renown session
- * bound to a keypair under secrets/. Sign-in runs the SDK's browser flow — the
- * system browser opens, the user signs with their wallet, the SDK polls — and
+ * bound to a keypair under secrets/. Sign-in runs Renown's browser flow — the engine builds
+ * the link and polls, the window opens it in the system browser, the user signs with their wallet — and
  * bearer tokens for remote vaults are minted locally from that keypair, the way
  * `ph access-token` does. The webview never holds a key.
  */
@@ -63,7 +64,9 @@ export async function defaultIdentityDeps(secretsDir: string, renownUrl: string)
         // Offline-first: no network on startup; the Switchboard verifies the credential on every request anyway.
         revalidate: "never",
       }).build()) as unknown as RenownLike,
-    browserLogin: (renown, options) => sdk.browserLogin(renown as never, options),
+    // Not the SDK's browserLogin: that opens the browser from the engine, and on Windows the link
+    // loses its parameters on the way (renown-login.ts). The window opens the reported link instead.
+    browserLogin: (renown, options) => renownLogin(renown as never, options),
     getAuthStatus: (renown) => sdk.getAuthStatus(renown as never),
     generateAccessToken: (renown, options) => sdk.generateAccessToken(renown as never, options),
   };
