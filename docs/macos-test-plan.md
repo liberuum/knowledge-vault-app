@@ -98,8 +98,9 @@ Tick each one, and note what you saw when it fails.
       file lands where you chose; the notice names the folder.
 - [ ] **Choose files** in a vault's source intake opens the macOS file picker.
 - [ ] **Text, Markdown and image originals** show inline in the viewer.
-- [ ] **Settings › Conversion** says honestly what is available. The extra converter (Word, scanned PDFs) has no
-      macOS build yet: the page should offer a conversion server instead, not an install button that fails.
+- [ ] **Settings › Conversion › Converter binding › Install** downloads the macOS binding (this project builds it:
+      docling.rs publishes none for macOS — see `.github/workflows/converter-binding.yml`), then **PDF models**.
+      A Word file, a spreadsheet and a scanned PDF added as sources convert, with their tables and figures.
 
 ### Identity and remote vaults
 

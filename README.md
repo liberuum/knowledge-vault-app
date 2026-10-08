@@ -162,8 +162,8 @@ local model it works entirely offline.
 
 **What file types can it read?** Text, Markdown, web pages and PDFs with a text layer work out of the box. Word,
 PowerPoint, Excel, scanned PDFs and images can be enabled in **Settings › Conversion**, which installs the extra
-components on request (on Linux and Windows for now; on macOS, use a conversion server — the same settings page
-explains how).
+components on request — on Linux, Windows and Apple silicon Macs. (Intel Macs can use a conversion server instead;
+the same settings page explains how.)
 
 **How much does the AI cost?** It depends on your provider and model. Processing a typical article costs a fraction
 of a cent with an efficient model; each run in Workflow Studio shows its cost.

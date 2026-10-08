@@ -34,7 +34,8 @@ export type SelfBuiltPackage = { url: string; integrity: string };
 export const SELF_BUILT: Record<string, SelfBuiltPackage> = {
   "docling.rs-darwin-arm64@1.58.0": {
     url: "https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v1.58.0/docling.rs-darwin-arm64-1.58.0.tgz",
-    integrity: "",
+    // Published by the converter-binding workflow (run 37761132274, Xcode 15.4), recorded 2026-10-08.
+    integrity: "sha512-iMpG0OcQ/jX1kIfmWmolx8ZtQQWCOYymuhSHMcEVdbiLfaJQ8wpqDRTQrv68TWF9ksOeyQT7iamMZM0lONg2oA==",
   },
 };
 
