@@ -34,8 +34,8 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 24 }]),
     renameVault: vi.fn(async (_i, id: string, name: string) => ({ id, slug: "a", name })),
     deleteVault: vi.fn(async () => {}),
-    fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local" as const, remoteUrl: "" } })),
-    saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: (patch.models?.endpoint ?? "https://openrouter.ai/api/v1").replace(/\/chat\/completions$/, ""), model: patch.models?.model ?? "", hasKey: !!patch.models?.apiKey }, conversion: { mode: patch.conversion?.mode ?? ("local" as const), remoteUrl: patch.conversion?.remoteUrl ?? "" } })),
+    fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, provider: "openrouter" as const }, conversion: { mode: "local" as const, remoteUrl: "" } })),
+    saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: (patch.models?.endpoint ?? "https://openrouter.ai/api/v1").replace(/\/chat\/completions$/, ""), model: patch.models?.model ?? "", hasKey: !!patch.models?.apiKey, provider: "openrouter" as const }, conversion: { mode: patch.conversion?.mode ?? ("local" as const), remoteUrl: patch.conversion?.remoteUrl ?? "" } })),
     fetchStatus: vi.fn(async () => ({ ok: true as const, port: 4301, controlPort: 4302, appVersion: "0.1.0", protected: false, dataDir: "/home/u/.local/share/kv/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" })),
     fetchProtection: vi.fn(async () => ({ protected: false, adminAddress: null })),
     probeLocalModels: vi.fn(async (_i, endpoint: string) => (endpoint.includes("8080") ? { ok: true as const, endpoint, models: ["lfm2.5-8b-a1b", "qwen3.8-flash-next"] } : { ok: false as const, endpoint, detail: "Could not reach " + endpoint + ": fetch failed" })),
@@ -121,9 +121,9 @@ describe("Settings", () => {
 
   it("offers the provider's models in a searchable list once a key is saved, recommended ones first, and keeps free text", async () => {
     const a = api({
-      fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: true }, conversion: { mode: "off" as const, remoteUrl: "" } })),
+      fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: true, provider: "openrouter" as const }, conversion: { mode: "off" as const, remoteUrl: "" } })),
       // the engine keeps the stored key across a save that does not mention one
-      saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: patch.models?.endpoint ?? "https://openrouter.ai/api/v1", model: patch.models?.model ?? "", hasKey: true }, conversion: { mode: "off" as const, remoteUrl: "" } })),
+      saveSettings: vi.fn(async (_i, patch: SettingsPatch) => ({ version: 1 as const, models: { endpoint: patch.models?.endpoint ?? "https://openrouter.ai/api/v1", model: patch.models?.model ?? "", hasKey: true, provider: "openrouter" as const }, conversion: { mode: "off" as const, remoteUrl: "" } })),
     });
     render(<Harness api={a} start="models" />);
     const field = await screen.findByLabelText("Model (required for processing)");
@@ -169,7 +169,7 @@ describe("Settings", () => {
   });
 
   it("plugs in a model running on this computer: connect, see what it serves, use it — no key", async () => {
-    let saved: { version: 1; models: { endpoint: string; model: string; hasKey: boolean; local?: boolean }; conversion: { mode: "off"; remoteUrl: string } } = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false }, conversion: { mode: "off", remoteUrl: "" } };
+    let saved: { version: 1; models: { endpoint: string; model: string; hasKey: boolean; local?: boolean; provider: "local" | "openrouter" | "openai" | "anthropic" | "gemini" | "xai" | "custom" }; conversion: { mode: "off"; remoteUrl: string } } = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "off", remoteUrl: "" } };
     const a = api({
       fetchSettings: vi.fn(async () => saved),
       saveSettings: vi.fn(async (_i, patch: SettingsPatch) => {
@@ -286,7 +286,7 @@ describe("Settings", () => {
     const remote: ConverterStatus = { ...converterReady, mode: "remote", state: "off", url: "http://10.0.0.5:5011", localUrl: null, pid: null, health: { ok: true, backend: "docling.rs", binding: true, ready: true, formats: ["pdf", "docx"] } };
     const a = api({
       fetchConverter: vi.fn(async () => remote),
-      fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "remote" as const, remoteUrl: "http://10.0.0.5:5011" } })),
+      fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, provider: "openrouter" as const }, conversion: { mode: "remote" as const, remoteUrl: "http://10.0.0.5:5011" } })),
     });
     render(<Harness api={a} start="conversion" />);
     expect(await screen.findByText("Another server · Ready")).toBeTruthy();
@@ -355,7 +355,7 @@ describe("Settings", () => {
     expect(await screen.findByText("Update checks are off until the app has a release feed.")).toBeTruthy();
   });
   it("keeps the engine running when the window closes, unless switched off in Appearance", async () => {
-    const a = api({ fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false }, conversion: { mode: "local" as const, remoteUrl: "" }, ui: { closeToTray: true } })) });
+    const a = api({ fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, provider: "openrouter" as const }, conversion: { mode: "local" as const, remoteUrl: "" }, ui: { closeToTray: true } })) });
     render(<Harness api={a} start="appearance" />);
     const box = (await screen.findByLabelText("Keep the engine running when the window closes")) as HTMLInputElement;
     await waitFor(() => expect(box.checked).toBe(true));

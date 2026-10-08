@@ -8,8 +8,33 @@ import { writeFileAtomic } from "./process-identity.js";
  * model key lives in `secrets/llm.key` (0600) and is reported only as `hasKey`.
  * Other keys in config.json (the shell's `ui`, later `vaults`) are preserved.
  */
+export type ModelProvider = "local" | "openrouter" | "openai" | "anthropic" | "gemini" | "xai" | "custom";
+/** The services with a fixed address; "local" and "custom" are whatever the user points at. */
+export const PROVIDER_ENDPOINTS = {
+  openrouter: "https://openrouter.ai/api/v1",
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+  xai: "https://api.x.ai/v1",
+} as const;
+export const PROVIDER_LABELS: Record<ModelProvider, string> = {
+  local: "this computer",
+  openrouter: "OpenRouter",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  gemini: "Google Gemini",
+  xai: "xAI",
+  custom: "your model server",
+};
+/** Which provider an endpoint is: a known service by its exact address, else local or custom. */
+export function inferProvider(endpoint: string, local: boolean): ModelProvider {
+  if (local) return "local";
+  const norm = endpoint.trim().replace(/\/+$/, "");
+  for (const [provider, address] of Object.entries(PROVIDER_ENDPOINTS)) if (norm === address) return provider as ModelProvider;
+  return "custom";
+}
 /** `local`: the endpoint is on this computer — no key is needed (a placeholder is used). */
-export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local: boolean };
+export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local: boolean; provider: ModelProvider };
 /** Where documents convert (Plan 4): the helper on this computer, another server by URL, or nowhere. */
 export type ConversionMode = "local" | "remote" | "off";
 /** `removed`: components the user removed in Settings — not installed again on their own. */
@@ -19,7 +44,7 @@ export const CONVERSION_MODES: readonly ConversionMode[] = ["local", "remote", "
 export type UiSettings = { closeToTray: boolean };
 export type AppSettings = { version: 1; models: ModelSettings; conversion: ConversionSettings; ui: UiSettings };
 export type SettingsPatch = {
-  models?: { endpoint?: string; model?: string; apiKey?: string | null };
+  models?: { endpoint?: string; model?: string; apiKey?: string | null; provider?: keyof typeof PROVIDER_ENDPOINTS };
   conversion?: { mode?: ConversionMode; remoteUrl?: string };
   ui?: { closeToTray?: boolean };
 };
@@ -82,13 +107,16 @@ export function readSettings(dataDir: string): AppSettings {
   const models = (raw.models && typeof raw.models === "object" ? raw.models : {}) as Record<string, unknown>;
   const conversion = (raw.conversion && typeof raw.conversion === "object" ? raw.conversion : {}) as Record<string, unknown>;
   const ui = (raw.ui && typeof raw.ui === "object" ? raw.ui : {}) as Record<string, unknown>;
+  const endpoint = typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT;
+  const local = isLocalEndpoint(endpoint);
   return {
     version: 1,
     models: {
-      endpoint: typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT,
+      endpoint,
       model: typeof models.model === "string" ? models.model : "",
       hasKey: readModelKey(dataDir) !== undefined,
-      local: isLocalEndpoint(typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT),
+      local,
+      provider: inferProvider(endpoint, local),
     },
     conversion: {
       mode: CONVERSION_MODES.includes(conversion.mode as ConversionMode) ? (conversion.mode as ConversionMode) : "local",
@@ -104,6 +132,11 @@ export function writeSettings(dataDir: string, patch: SettingsPatch): AppSetting
   const current = readSettings(dataDir);
   const models = { endpoint: current.models.endpoint, model: current.models.model };
   if (patch.models) {
+    if (patch.models.provider && typeof patch.models.endpoint !== "string") {
+      const address = PROVIDER_ENDPOINTS[patch.models.provider];
+      if (!address) throw new SettingsError("Unknown model provider.");
+      models.endpoint = address;
+    }
     if (typeof patch.models.endpoint === "string") {
       const endpoint = patch.models.endpoint.trim() || DEFAULT_ENDPOINT;
       if (!/^https?:\/\//.test(endpoint)) throw new SettingsError("The model endpoint must be an http(s) URL.");

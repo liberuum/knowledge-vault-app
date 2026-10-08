@@ -50,13 +50,13 @@ export async function fetchWorkflowsDrive(info: SidecarInfo, fetchImpl: typeof f
   return (await control<{ drive: DriveRef }>(info, "/workflows", { method: "GET" }, fetchImpl)).drive;
 }
 /** `local`: the endpoint is on this computer — no key is needed. */
-export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local?: boolean };
+export type ModelSettings = { endpoint: string; model: string; hasKey: boolean; local?: boolean; provider: "local" | "openrouter" | "openai" | "anthropic" | "gemini" | "xai" | "custom" };
 /** Where documents convert (Plan 4): the helper on this computer, another server by URL, or nowhere. */
 export type ConversionMode = "local" | "remote" | "off";
 export type ConversionSettings = { mode: ConversionMode; remoteUrl: string };
 export type AppSettings = { version: 1; models: ModelSettings; conversion: ConversionSettings; ui?: { closeToTray: boolean } };
 export type SettingsPatch = {
-  models?: { endpoint?: string; model?: string; apiKey?: string | null };
+  models?: { endpoint?: string; model?: string; apiKey?: string | null; provider?: "openrouter" | "openai" | "anthropic" | "gemini" | "xai" };
   conversion?: { mode?: ConversionMode; remoteUrl?: string };
   ui?: { closeToTray?: boolean };
 };

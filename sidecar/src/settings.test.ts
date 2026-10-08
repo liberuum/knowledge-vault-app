@@ -10,7 +10,7 @@ describe("settings", () => {
   it("starts from defaults and never reports a key it does not have", () => {
     expect(readSettings(dir())).toEqual({
       version: 1,
-      models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false },
+      models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" },
       conversion: { mode: "local", remoteUrl: "", removed: [] },
       ui: { closeToTray: true },
     });
@@ -25,7 +25,7 @@ describe("settings", () => {
   it("persists endpoint and model in config.json, the key in secrets/ with mode 0600, and reports only hasKey", () => {
     const d = dir();
     const out = writeSettings(d, { models: { endpoint: "http://127.0.0.1:11434/v1", model: "llama3", apiKey: "sk-secret" } });
-    expect(out.models).toEqual({ endpoint: "http://127.0.0.1:11434/v1", model: "llama3", hasKey: true, local: true });
+    expect(out.models).toEqual({ endpoint: "http://127.0.0.1:11434/v1", model: "llama3", hasKey: true, local: true, provider: "local" });
     expect(JSON.stringify(readFileSync(join(d, "config.json"), "utf8"))).not.toContain("sk-secret");
     if (process.platform !== "win32") expect(statSync(join(d, "secrets", "llm.key")).mode & 0o777).toBe(0o600);
     expect(readModelKey(d)).toBe("sk-secret");
@@ -115,3 +115,18 @@ describe("removed converter components", () => {
   });
 });
 
+describe("the model's provider", () => {
+  it("is named from the endpoint", () => {
+    const d = dir();
+    expect(writeSettings(d, { models: { endpoint: "https://api.anthropic.com/v1/" } }).models.provider).toBe("anthropic");
+    expect(writeSettings(d, { models: { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/" } }).models.provider).toBe("gemini");
+    expect(writeSettings(d, { models: { endpoint: "http://127.0.0.1:8084/v1" } }).models.provider).toBe("local");
+    expect(writeSettings(d, { models: { endpoint: "https://llm.example.com/v1" } }).models.provider).toBe("custom");
+  });
+  it("a chosen provider without an endpoint takes the provider's address", () => {
+    expect(writeSettings(dir(), { models: { provider: "xai" } }).models.endpoint).toBe("https://api.x.ai/v1");
+  });
+  it("an endpoint given with the provider wins", () => {
+    expect(writeSettings(dir(), { models: { provider: "openai", endpoint: "https://proxy.example.com/v1" } }).models).toMatchObject({ endpoint: "https://proxy.example.com/v1", provider: "custom" });
+  });
+});
