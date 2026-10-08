@@ -23,7 +23,7 @@ function jsonIn(content: string): unknown {
   }
 }
 
-export async function checkModel(opts: { gatewayUrl: string; gatewayKey: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number }): Promise<ModelCheck> {
+export async function checkModel(opts: { gatewayUrl: string; gatewayKey: string; provider?: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number }): Promise<ModelCheck> {
   const f = opts.fetchImpl ?? fetch;
   const now = opts.now ?? (() => Date.now());
   const timeoutMs = opts.timeoutMs ?? 180_000;
@@ -33,7 +33,8 @@ export async function checkModel(opts: { gatewayUrl: string; gatewayKey: string;
     res = await f(`${opts.gatewayUrl}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${opts.gatewayKey}`, "x-kv-priority": "interactive" },
-      body: JSON.stringify({ messages: [{ role: "user", content: PROMPT }], response_format: { type: "json_object" }, max_tokens: 400, stream: false }),
+      // Room for a reasoning model to think first (review I2); OpenRouter alone takes a reasoning effort, others would refuse the field.
+      body: JSON.stringify({ messages: [{ role: "user", content: PROMPT }], response_format: { type: "json_object" }, max_tokens: 4000, stream: false, ...(opts.provider === "openrouter" ? { reasoning: { effort: "low" } } : {}) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
@@ -43,7 +44,7 @@ export async function checkModel(opts: { gatewayUrl: string; gatewayKey: string;
     return { ok: false, detail: `Could not reach the model: ${error instanceof Error ? error.message : String(error)}` };
   }
   const text = await res.text();
-  let body: { error?: { message?: string }; model?: string; choices?: Array<{ message?: { content?: string | null } }> } = {};
+  let body: { error?: { message?: string }; model?: string; choices?: Array<{ finish_reason?: string; message?: { content?: string | null } }> } = {};
   try {
     body = JSON.parse(text) as typeof body;
   } catch {
@@ -51,6 +52,9 @@ export async function checkModel(opts: { gatewayUrl: string; gatewayKey: string;
   }
   if (!res.ok) return { ok: false, detail: body.error?.message ?? `The model answered HTTP ${res.status}.` };
   const content = body.choices?.[0]?.message?.content ?? "";
+  if (!content.trim() && body.choices?.[0]?.finish_reason === "length") {
+    return { ok: false, detail: "The model spent its whole answer thinking and gave none. Reasoning models can do the same while processing: try again, or choose a model that answers directly." };
+  }
   const parsed = jsonIn(content);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, detail: "The model answered, but not with the JSON that processing needs. Choose another model." };

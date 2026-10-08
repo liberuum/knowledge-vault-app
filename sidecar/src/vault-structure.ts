@@ -30,7 +30,7 @@ export const VAULT_SINGLETONS: ReadonlyArray<{ name: string; documentType: strin
 
 type DriveNode = { id: string; kind: string; name: string; parentFolder?: string | null; documentType?: string };
 
-async function readNodes(origin: string, driveId: string, f: typeof fetch): Promise<DriveNode[]> {
+export async function readNodes(origin: string, driveId: string, f: typeof fetch): Promise<DriveNode[]> {
   const data = await gql<{ document: { document: { state: { global?: { nodes?: DriveNode[] }; nodes?: DriveNode[] } | null } } }>(
     origin,
     `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,

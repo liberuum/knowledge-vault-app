@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { initVaultStructure } from "./vault-structure.js";
-import { addVaultSource } from "./vault-sources.js";
+import { addVaultSource, findSourceByTitle } from "./vault-sources.js";
 import { checkModel } from "./model-check.js";
 import { register } from "node:module";
 import { join, resolve } from "node:path";
@@ -284,6 +284,8 @@ async function main(): Promise<void> {
       options,
     );
 
+  /** The saved key, for a hosted service only: never sent to a model server here or on the network. */
+  const hostedKey = () => (readSettings(cfg.dataDir).models.local ? "" : (readModelKey(cfg.dataDir) ?? ""));
   const gateway = createGateway({ readSettings: () => readSettings(cfg.dataDir), readModelKey: () => readModelKey(cfg.dataDir) });
   const control = createControlServer({
     gateway,
@@ -311,8 +313,16 @@ async function main(): Promise<void> {
       );
       return vault;
     },
-    addSource: (vaultId, source) => addVaultSource(origin, vaultId, source, engineFetch),
-    checkModel: () => checkModel({ gatewayUrl: `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, gatewayKey }),
+    addSource: async (vaultId, source, options) => {
+      // Idempotent: a vault made before this release, or one whose set-up failed, gets its folders first.
+      await initVaultStructure(origin, vaultId, engineFetch);
+      if (options?.once) {
+        const existing = await findSourceByTitle(origin, vaultId, source.title, engineFetch);
+        if (existing) return { id: existing, title: source.title, queued: false, existing: true };
+      }
+      return addVaultSource(origin, vaultId, source, engineFetch);
+    },
+    checkModel: () => checkModel({ gatewayUrl: `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, gatewayKey, provider: readSettings(cfg.dataDir).models.provider }),
     renameVault: (id, name) => renameVaultDrive(origin, id, name, engineFetch),
     deleteVault: (id) => deleteVaultDrive(origin, id, engineFetch),
     workflowsDrive,
@@ -324,8 +334,8 @@ async function main(): Promise<void> {
     },
     readSettings: () => readSettings(cfg.dataDir),
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
-    validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
-    modelCatalog: (endpoint) => fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, readModelKey(cfg.dataDir) ?? ""),
+    validateModels: () => validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, hostedKey()),
+    modelCatalog: (endpoint) => fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, hostedKey()),
     probeModels: (endpoint) => probeLocalModels(endpoint, (e) => isLocalEndpoint(e) || privateHostAllow(e) !== null),
     discoverModels: async () => {
       const [gpu, servers] = await Promise.all([

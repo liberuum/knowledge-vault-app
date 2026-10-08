@@ -139,7 +139,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   const engineToken = () => mintEngineToken(deps.identity, deps.engineProtected === true, now);
   // A model on this computer needs no key; its connection gets a placeholder the server ignores.
   const modelsConfigured = (settings: AppSettings) => (settings.models.hasKey || settings.models.local) && settings.models.model.trim().length > 0;
-  const keyFor = (settings: AppSettings) => deps.readModelKey() ?? (settings.models.local ? LOCAL_PLACEHOLDER_KEY : undefined);
+  const keyFor = (settings: AppSettings) => (settings.models.local ? LOCAL_PLACEHOLDER_KEY : deps.readModelKey());
 
   /** Why a recorded pipeline no longer fits: disabled, other model settings, an "open" bearer on a protected engine, a token near its end. */
   function staleReason(record: PipelineRecord, settings: AppSettings): string | undefined {

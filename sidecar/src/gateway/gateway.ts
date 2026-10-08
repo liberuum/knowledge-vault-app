@@ -51,7 +51,8 @@ export function createGateway(deps: GatewayDeps) {
       // Read here, not on arrival: a request that waited goes to the provider set up now (Review Focus 2).
       const settings = deps.readSettings();
       queue.setLimit(limitFor(settings));
-      const key = deps.readModelKey();
+      // A key saved for a hosted service never goes to a model server here or on the network (review I1).
+      const key = settings.models.local ? undefined : deps.readModelKey();
       const endpoint = settings.models.endpoint.replace(/\/+$/, "");
       const headers: Record<string, string> = { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
       let payload: Record<string, unknown> = {};

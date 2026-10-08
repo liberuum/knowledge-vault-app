@@ -1,4 +1,4 @@
-import { isLocalEndpoint } from "./egress.js";
+import { isLocalEndpoint, privateHostAllow } from "./egress.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./process-identity.js";
@@ -110,7 +110,8 @@ export function readSettings(dataDir: string): AppSettings {
   const conversion = (raw.conversion && typeof raw.conversion === "object" ? raw.conversion : {}) as Record<string, unknown>;
   const ui = (raw.ui && typeof raw.ui === "object" ? raw.ui : {}) as Record<string, unknown>;
   const endpoint = typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT;
-  const local = isLocalEndpoint(endpoint);
+  // This computer or the local network: needs no key, takes one source at a time (review I1).
+  const local = isLocalEndpoint(endpoint) || privateHostAllow(endpoint) !== null;
   return {
     version: 1,
     models: {

@@ -42,7 +42,7 @@ export type ControlDeps = {
   listVaults: () => Promise<VaultSummary[]>;
   createVault: (name: string) => Promise<VaultSummary>;
   /** Phase D: file a source in a vault and queue it (the onboarding's sample or pasted text). */
-  addSource?: (vaultId: string, source: NewSource) => Promise<AddedSource>;
+  addSource?: (vaultId: string, source: NewSource, options?: { once?: boolean }) => Promise<AddedSource>;
   renameVault: (id: string, name: string) => Promise<DriveRef>;
   deleteVault: (id: string) => Promise<void>;
   workflowsDrive: () => Promise<DriveRef>;
@@ -284,7 +284,8 @@ export function createControlServer(deps: ControlDeps) {
       if (sourcesOf && req.method === "POST" && deps.addSource) {
         const body = await readJson(req);
         const vaultId = decodePart(sourcesOf[1]!);
-        if (body.sample === true) return send(res, 201, { source: await deps.addSource(vaultId, SAMPLE_SOURCE) }, allowed);
+        // The guide goes in once per vault: a retry or a second visit to the step finds it there.
+        if (body.sample === true) return send(res, 201, { source: await deps.addSource(vaultId, SAMPLE_SOURCE, { once: true }) }, allowed);
         const content = typeof body.content === "string" ? body.content.trim() : "";
         if (!content) return send(res, 400, { error: "Add some text first." }, allowed);
         const title = typeof body.title === "string" && body.title.trim() ? body.title.trim() : titleFromText(content);

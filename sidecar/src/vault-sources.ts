@@ -3,10 +3,13 @@
  * in /sources, ingests it and queues it for processing in one call, with the vault's checks. Needs the vault's
  * folders and processing queue, which the engine creates with every vault (vault-structure.ts).
  */
+import { readNodes } from "./vault-structure.js";
+
 const SOURCES_PATH = "/api/@powerhousedao/knowledge-note/sources";
 
 export type NewSource = { title: string; content: string; sourceType: "DOCUMENTATION" | "MANUAL_ENTRY" };
-export type AddedSource = { id: string; title: string; queued: boolean };
+/** `existing`: the source was already in the vault (the guide is added once). */
+export type AddedSource = { id: string; title: string; queued: boolean; existing?: boolean };
 
 /** A title for pasted text: its first line, without Markdown marks, cut at a word near 80 characters. */
 export function titleFromText(text: string): string {
@@ -22,7 +25,8 @@ export async function addVaultSource(origin: string, driveId: string, source: Ne
   const res = await fetchImpl(`${origin}${SOURCES_PATH}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ drive: driveId, title: source.title, content: source.content, sourceType: source.sourceType, queue: true }),
+    // Pasted text may hold a literal backslash-n (a Windows path, code, LaTeX): it is the user's text, kept as is.
+    body: JSON.stringify({ drive: driveId, title: source.title, content: source.content, sourceType: source.sourceType, queue: true, allowLiteralEscapes: true }),
   });
   const text = await res.text();
   let body: { id?: string; status?: string; error?: unknown } = {};
@@ -36,4 +40,10 @@ export async function addVaultSource(origin: string, driveId: string, source: Ne
     throw new Error(`Could not add the source: ${error}`);
   }
   return { id: body.id, title: source.title, queued: body.status === "EXTRACTING" };
+}
+
+/** A source already in the vault with this title (the REST API names a source document after its title), or null. */
+export async function findSourceByTitle(origin: string, driveId: string, title: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+  const nodes = await readNodes(origin, driveId, fetchImpl);
+  return nodes.find((n) => n.kind === "file" && n.documentType === "bai/source" && n.name === title)?.id ?? null;
 }
