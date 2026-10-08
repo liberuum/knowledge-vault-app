@@ -12,7 +12,7 @@
     "@fontsource-variable/inter": "5.3.0",
     "@fontsource-variable/source-serif-4": "5.3.0",
     "@powerhousedao/design-system": "6.2.3-dev.44",
-    "@powerhousedao/knowledge-note": "1.0.54-dev.25",
+    "@powerhousedao/knowledge-note": "1.0.54-dev.27",
     "@powerhousedao/reactor-browser": "6.2.3-dev.44",
     "@powerhousedao/workflow": "6.2.3-dev.44",
     "@tauri-apps/api": "^2.9.0",

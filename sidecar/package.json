@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.15",
-    "@powerhousedao/knowledge-note": "1.0.54-dev.25",
+    "@powerhousedao/knowledge-note": "1.0.54-dev.27",
     "@powerhousedao/switchboard": "6.2.3-dev.44",
     "@powerhousedao/workflow": "6.2.3-dev.44",
     "@renown/sdk": "6.2.3-dev.44",
