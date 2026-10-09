@@ -31,6 +31,12 @@ export const realChatGptApi: ChatGptApi = {
 };
 
 const POLL_MS = 2000;
+/**
+ * A sign-in started in this window is watched until it ends, by whichever card is on screen: choosing the ChatGPT
+ * card as the sign-in starts puts a new card in place of the one clicked, and that one must keep watching too.
+ */
+let watchingUntil = 0;
+const WATCH_MS = 5 * 60_000;
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The ChatGPT mark, from OpenAI's sign-in button assets (developers.openai.com/assets/siwc/sign-in-buttons/), in the text colour. */
@@ -115,6 +121,7 @@ export function ChatGptConnect({
       if (!alive.current) return;
       const before = previous.current;
       previous.current = next;
+      if (!next.pending && next.signedIn) watchingUntil = 0; // the sign-in ended: nothing left to watch
       if (startedHere.current && before?.pending && !next.pending) {
         startedHere.current = false;
         // Only the sign-in that registered the app for this account: OpenAI asks for it once, not at every sign-in.
@@ -132,12 +139,25 @@ export function ChatGptConnect({
     void refresh();
   }, [refresh]);
 
-  // While the browser sign-in is pending, ask again every couple of seconds.
+  // While a sign-in is pending, or one started here has not ended yet, ask again every couple of seconds.
+  const watching = !!status?.pending || Date.now() < watchingUntil;
   useEffect(() => {
-    if (!status?.pending) return;
+    if (!watching) return;
     const handle = setInterval(() => void refresh(), pollMs);
     return () => clearInterval(handle);
-  }, [status?.pending, refresh, pollMs]);
+  }, [watching, refresh, pollMs]);
+  // Back from the browser: ask at once, so the card shows the result without waiting for the next check.
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.visibilityState === "visible" && (Date.now() < watchingUntil || previous.current?.pending)) void refresh();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [refresh]);
 
   const signIn = useCallback(
     async (options: { newAccount?: boolean; allowPlanUsage?: boolean } = {}) => {
@@ -147,6 +167,7 @@ export function ChatGptConnect({
       try {
         const { url } = await api.start(info, options);
         startedHere.current = true;
+        watchingUntil = Date.now() + WATCH_MS;
         await api.open(url);
       } catch (e) {
         setError(messageOf(e));
@@ -159,6 +180,7 @@ export function ChatGptConnect({
   );
   const cancel = useCallback(async () => {
     startedHere.current = false;
+    watchingUntil = 0;
     await api.cancel(info).catch(() => {});
     await refresh();
   }, [api, info, refresh]);
