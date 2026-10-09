@@ -77,6 +77,9 @@ export function GettingStarted({ info, vaults, modelReady, storage, onModels, on
     <button type="button" className={id === next ? "kv-button kv-button-primary" : "kv-button"} onClick={onClick}>{label}</button>
   );
   const needsVault = <span className="kv-hint">Create a vault first.</span>;
+  // Reading notes, the chat, the graph and search all work on notes: until a source is processed they wait.
+  const hasNotes = vaults.some((v) => v.noteCount > 0);
+  const afterProcessing = <span className="kv-hint">Available once a source is processed.</span>;
   const visit = (view: VaultView, explored?: keyof NonNullable<Remembered["explored"]>) =>
     withNotes && onOpenView
       ? () => {
@@ -95,19 +98,22 @@ export function GettingStarted({ info, vaults, modelReady, storage, onModels, on
       case "source":
         return latest && onOpenView ? button(id, "Add sources", () => onOpenView(latest, "sources")) : needsVault;
       case "notes": {
-        if (!vaults.some((v) => v.noteCount > 0)) return <span className="kv-hint">They appear once a source is processed.</span>;
+        if (!hasNotes) return afterProcessing;
         const go = visit("notes");
         return go ? button(id, "Open notes", go) : needsVault;
       }
       case "chat": {
+        if (!hasNotes) return afterProcessing;
         const go = visit("chat");
         return go ? button(id, "Ask a question", go) : needsVault;
       }
       case "graph": {
+        if (!hasNotes) return afterProcessing;
         const go = visit("graph", "graph");
         return go ? button(id, "Open the graph", go) : needsVault;
       }
       case "search": {
+        if (!hasNotes) return afterProcessing;
         const go = visit("search", "search");
         return go ? button(id, "Search", go) : needsVault;
       }
