@@ -95,10 +95,11 @@ test("pipeline: template instantiated per vault, a queued source runs, a failed 
     // The chip names the problem when it can ("the model refused the request"), else "Last processing run failed".
     await expect(page.getByText(/^(Processing stopped: |Last processing run failed)/)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: "See runs" }).click();
-    // "See runs" leads to Workflow Studio on the Workflows drive, where this vault's workflow is listed by name.
+    // "See runs" opens Workflow Studio on this vault's own pipeline: the address is the workflow's id, and its runs show.
+    const workflowId = String(pipeline.pipeline.workflowId);
     try {
-      await expect(page).toHaveURL(/#\/workflows/, { timeout: 10_000 });
-      await expect(page.getByText("Pipeline vault — Vault pipeline").first()).toBeVisible({ timeout: 90_000 });
+      await expect(page).toHaveURL(new RegExp(`#${workflowId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 10_000 });
+      await expect(page.getByRole("heading", { name: "Pipeline vault — Vault pipeline" })).toBeVisible({ timeout: 90_000 });
     } catch (error) {
       const text = (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 700);
       throw new Error(`${String(error).split("\n")[0]}\n  url: ${page.url()}\n  page: ${text}`);
