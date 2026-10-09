@@ -34,7 +34,7 @@ test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sec
   await expect(protect).toBeDisabled();
   await expect(page.getByText(/Sign in first/)).toBeVisible();
   await page.getByRole("button", { name: "Models" }).click();
-  await expect(page.getByLabel("Endpoint")).toBeVisible();
+  await expect(page.getByRole("radiogroup", { name: "AI model provider" })).toBeVisible();
   await page.getByRole("button", { name: "Diagnostics" }).click();
   await expect(page.getByText(/Ready on port 4201/)).toBeVisible();
   await expect(page.getByText("http://127.0.0.1:4201/mcp")).toBeVisible();

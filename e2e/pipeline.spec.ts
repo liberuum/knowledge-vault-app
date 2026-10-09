@@ -41,7 +41,7 @@ test("pipeline: template instantiated per vault, a queued source runs, a failed 
     expect(saved.ok()).toBe(true);
     expect((await saved.json()).models.endpoint).toBe(`http://127.0.0.1:${port}/v1`); // a pasted completions URL is normalised to the API root
     await page.goto("/#/settings/models");
-    await expect(page.getByLabel("Endpoint")).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByRole("radiogroup", { name: "AI model provider" })).toBeVisible({ timeout: 120_000 });
     await page.getByRole("button", { name: "Validate" }).click();
     await expect(page.getByText("1 models available")).toBeVisible({ timeout: 30_000 });
 
