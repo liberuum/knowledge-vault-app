@@ -208,7 +208,7 @@ function KeyField({ apiKey, onApiKey, hasKey, looksLike, disabled, onRemoveKey }
           <button type="button" className="kv-button kv-button-danger-quiet" onClick={onRemoveKey} disabled={disabled}>Remove key</button>
         )}
       </div>
-      <p id="models-key-hint" className="kv-hint">The key is stored by the engine on this computer (file mode 0600) and is never shown again.</p>
+      <p id="models-key-hint" className="kv-hint">Your key stays on this computer and is never shown again.</p>
     </>
   );
 }

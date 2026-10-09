@@ -346,7 +346,8 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-provider-body .kv-form-inline select { flex: 1; min-width: 0; }
 .kv-provider-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .kv-provider-or { color: var(--bai-text-tertiary); font-size: 14px; }
-.kv-provider-keylink { flex: none; color: var(--bai-accent); text-decoration: underline; text-underline-offset: 2px; }
+.kv-provider-keylink { flex: none; color: var(--bai-accent); font-size: 14px; text-decoration: none; }
+.kv-provider-keylink:hover { text-decoration: underline; text-underline-offset: 2px; }
 .kv-provider-keylink:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 2px; border-radius: 2px; }
 /* The local block is its own card elsewhere; inside a provider card it is just the card's content. */
 .kv-provider-body .kv-local-model, .kv-provider-body .kv-local-model-start { margin: 0; padding: 0; border: 0; background: none; }
@@ -419,3 +420,40 @@ body, #root { margin: 0; min-height: 100vh; }
 
 /* Provider choice: below the cards, the providers' own sign-in buttons (ChatGPT not chosen yet: its button alone) */
 .kv-provider-plain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0 2px; }
+
+/* Fields inside the provider cards (Settings › Models and the setup guide alike): the app's own field look,
+   drawn by the app rather than the system, so a key box or the service menu never falls back to the platform's. */
+.kv-provider-body input:not([type="checkbox"]):not([type="radio"]),
+.kv-provider-body select {
+  box-sizing: border-box;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--bai-border);
+  border-radius: 8px;
+  background-color: var(--bai-deep);
+  color: var(--bai-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.kv-provider-body input::placeholder { color: var(--bai-text-tertiary); }
+.kv-provider-body input:hover:not(:disabled):not(:focus),
+.kv-provider-body select:hover:not(:disabled):not(:focus) { border-color: var(--bai-text-tertiary); }
+.kv-provider-body input:focus,
+.kv-provider-body select:focus { outline: none; border-color: var(--bai-accent); box-shadow: 0 0 0 3px var(--bai-accent-soft); }
+.kv-provider-body input:disabled,
+.kv-provider-body select:disabled { opacity: 0.6; }
+.kv-provider-body select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%239ca3af' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px 14px;
+}
+.kv-provider-body .kv-form-inline input { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .kv-provider-body input, .kv-provider-body select { transition: none; } }
+
