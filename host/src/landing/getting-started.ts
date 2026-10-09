@@ -1,11 +1,10 @@
 import type { VaultSummary } from "../vaults.js";
 
-export type StepId = "model" | "vault" | "source" | "notes" | "chat" | "remote" | "tools";
+export type StepId = "model" | "vault" | "source" | "notes" | "chat" | "tools";
 export type Step = { id: StepId; done: boolean; optional: boolean };
 export type Facts = {
   modelReady: boolean;
   vaults: readonly VaultSummary[];
-  remotes: number;
   asked: boolean;
   readNotes: boolean;
   toolsCopied: boolean;
@@ -16,10 +15,10 @@ export function gettingStartedSteps(f: Facts): Step[] {
   return [
     { id: "model", done: f.modelReady, optional: false },
     { id: "vault", done: f.vaults.length > 0, optional: false },
-    { id: "source", done: f.vaults.some((v) => (v.sourceCount ?? 0) > 0), optional: false },
+    // Any source in a vault; notes count too (they only come from sources, and older engines report no source count).
+    { id: "source", done: f.vaults.some((v) => (v.sourceCount ?? 0) > 0 || v.noteCount > 0), optional: false },
     { id: "notes", done: f.readNotes, optional: false },
     { id: "chat", done: f.asked, optional: false },
-    { id: "remote", done: f.remotes > 0, optional: true },
     { id: "tools", done: f.toolsCopied, optional: true },
   ];
 }

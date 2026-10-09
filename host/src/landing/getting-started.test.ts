@@ -8,12 +8,15 @@ function storage(entries: Record<string, string> = {}): Storage {
 
 describe("getting started", () => {
   it("ticks each step from what was done, optional ones apart", () => {
-    const none = gettingStartedSteps({ modelReady: false, vaults: [], remotes: 0, asked: false, readNotes: false, toolsCopied: false });
+    const none = gettingStartedSteps({ modelReady: false, vaults: [], asked: false, readNotes: false, toolsCopied: false });
     expect(none.filter((s) => s.done)).toEqual([]);
-    expect(none.filter((s) => s.optional).map((s) => s.id)).toEqual(["remote", "tools"]);
+    expect(none.filter((s) => s.optional).map((s) => s.id)).toEqual(["tools"]);
     const vault = { id: "v", slug: "v", name: "V", noteCount: 0, sourceCount: 2 };
-    const some = gettingStartedSteps({ modelReady: true, vaults: [vault], remotes: 1, asked: false, readNotes: false, toolsCopied: false });
-    expect(some.filter((s) => s.done).map((s) => s.id)).toEqual(["model", "vault", "source", "remote"]);
+    const some = gettingStartedSteps({ modelReady: true, vaults: [vault], asked: false, readNotes: false, toolsCopied: false });
+    expect(some.filter((s) => s.done).map((s) => s.id)).toEqual(["model", "vault", "source"]);
+    // A vault with notes but no source count (an older engine) has had a source.
+    const older = gettingStartedSteps({ modelReady: true, vaults: [{ id: "o", slug: "o", name: "O", noteCount: 4 }], asked: false, readNotes: false, toolsCopied: false });
+    expect(older.find((s) => s.id === "source")?.done).toBe(true);
   });
   it("reads a question asked in the chat, and remembers what only this window knows", () => {
     expect(askedAQuestion(storage({ "bai-chat:v1:v": JSON.stringify([{ messages: [{ role: "assistant", content: "Hi" }] }]) }))).toBe(false);

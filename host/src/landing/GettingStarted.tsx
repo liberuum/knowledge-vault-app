@@ -12,7 +12,6 @@ const TEXT: Record<StepId, { title: string; line: string }> = {
   source: { title: "Add a source", line: "A PDF, a web page, a document or pasted text." },
   notes: { title: "Read your first notes", line: "One idea each, linked to the notes it relates to." },
   chat: { title: "Ask your vault a question", line: "The chat answers from your notes and names the ones it used." },
-  remote: { title: "Connect a shared vault", line: "Sign in with Renown to open a vault on a server you have access to." },
   tools: { title: "Use your vault from Claude Code, Codex or Gemini CLI", line: "One command connects the tool to this vault's search and notes." },
 };
 
@@ -20,15 +19,11 @@ type Props = {
   info: SidecarInfo;
   /** Local vaults, most recently opened first. */
   vaults: readonly VaultSummary[];
-  remotes: number;
-  signedIn: boolean;
   modelReady: boolean;
   storage?: Storage;
   onModels?: () => void;
   onNewVault: () => void;
   onOpenView?: (vault: VaultSummary, view: VaultView) => void;
-  onIdentity?: () => void;
-  onConnect: () => void;
   onGuide?: () => void;
 };
 
@@ -36,14 +31,14 @@ type Props = {
  * The getting-started checklist on the landing (design §5): the steps that make the app useful, ticked from what
  * was actually done, the next one's action highlighted. It folds away, and once every step is done it can go.
  */
-export function GettingStarted({ info, vaults, remotes, signedIn, modelReady, storage, onModels, onNewVault, onOpenView, onIdentity, onConnect, onGuide }: Props) {
+export function GettingStarted({ info, vaults, modelReady, storage, onModels, onNewVault, onOpenView, onGuide }: Props) {
   const [saved, setSaved] = useState<Remembered>(() => readRemembered(storage));
   const [showTools, setShowTools] = useState(false);
   const headingId = useId();
   const keep = (patch: Remembered) => setSaved(remember(storage, patch));
 
   if (saved.hidden) return null;
-  const steps = gettingStartedSteps({ modelReady, vaults, remotes, asked: askedAQuestion(storage), readNotes: saved.readNotes === true, toolsCopied: saved.tools === true });
+  const steps = gettingStartedSteps({ modelReady, vaults, asked: askedAQuestion(storage), readNotes: saved.readNotes === true, toolsCopied: saved.tools === true });
   const required = steps.filter((s) => !s.optional);
   const doneCount = required.filter((s) => s.done).length;
   const allDone = doneCount === required.length;
@@ -76,12 +71,6 @@ export function GettingStarted({ info, vaults, remotes, signedIn, modelReady, st
         const target = withNotes ?? latest;
         return target && onOpenView ? button(id, "Ask a question", () => onOpenView(target, "chat")) : <span className="kv-hint">Create a vault first.</span>;
       }
-      case "remote":
-        return signedIn ? (
-          <button type="button" className="kv-link" onClick={onConnect}>Connect a vault</button>
-        ) : onIdentity ? (
-          <button type="button" className="kv-link" onClick={onIdentity}>Sign in</button>
-        ) : null;
       case "tools":
         return (
           <button type="button" className="kv-link" aria-expanded={showTools} onClick={() => setShowTools((s) => !s)}>

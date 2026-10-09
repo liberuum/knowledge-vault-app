@@ -38,14 +38,14 @@ afterEach(() => {
 });
 
 describe("Landing", () => {
-  it("first run, signed out: the checklist's 'Sign in' (for a shared vault) does what the header's Sign in does", async () => {
+  it("first run, signed out: 'Sign in' in the hint does what the header's Sign in does", async () => {
     const onIdentity = vi.fn();
     render(<Landing engine={{ state: "ready" }} info={info} api={api()} onIdentity={onIdentity} storage={memoryStorage()} />);
     expect(await screen.findByText("Create your first vault")).toBeTruthy();
-    const checklist = await screen.findByRole("region", { name: "Getting started" });
-    expect(within(checklist).getByText("0 of 5 done")).toBeTruthy();
-    const shared = within(checklist).getByText("Connect a shared vault").closest("li")!;
-    fireEvent.click(within(shared as HTMLElement).getByRole("button", { name: "Sign in" }));
+    expect(within(await screen.findByRole("region", { name: "Getting started" })).getByText("0 of 5 done")).toBeTruthy();
+    const hint = screen.getByText(/Already have a vault on a server/);
+    expect(hint.textContent).toBe("Already have a vault on a server? Sign in, then connect it from here.");
+    fireEvent.click(within(hint).getByRole("button", { name: "Sign in" }));
     expect(onIdentity).toHaveBeenCalledTimes(1);
   });
   it("first run: the create form is the single target and Enter creates and opens the vault", async () => {

@@ -317,22 +317,37 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           !ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>
         )}
         {error && !showForm && !firstRun && <p role="alert" className="kv-error">{error}</p>}
-        {firstRun && <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />}
+        {firstRun && (
+          <>
+            <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
+            <p className="kv-hint">
+              Already have a vault on a server?{" "}
+              {signedIn ? (
+                <button type="button" className="kv-link" onClick={() => setConnecting(true)}>Connect a remote vault</button>
+              ) : (
+                <>
+                  {onIdentity ? (
+                    <button type="button" className="kv-link" onClick={onIdentity}>Sign in</button>
+                  ) : (
+                    "Sign in"
+                  )}
+                  , then connect it from here.
+                </>
+              )}
+            </p>
+          </>
+        )}
         {ready && !firstRun && showForm && <NewVaultForm firstRun={false} busy={busy} error={error} onCreate={(n) => void create(n)} onCancel={closeForm} />}
         {ready && info && vaults !== null && remotes !== null && modelReady !== null && (
-          // Replaces the first-run hints (design §5): the setup guide, signing in for a shared vault, the next step.
+          // The steps that make the app useful (design §5), with the setup guide one click away.
           <GettingStarted
             info={info}
             vaults={ordered.filter((v): v is { kind: "local" } & VaultSummary => v.kind === "local")}
-            remotes={remotes.length}
-            signedIn={signedIn}
             modelReady={modelReady}
             storage={store}
             onModels={onModels}
             onNewVault={() => setShowForm(true)}
             onOpenView={onOpenView ? openView : undefined}
-            onIdentity={onIdentity}
-            onConnect={() => setConnecting(true)}
             onGuide={onGuide}
           />
         )}
