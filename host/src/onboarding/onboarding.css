@@ -130,7 +130,9 @@
 .kv-onb-files li .kv-hint, .kv-onb-filelist li .kv-hint, .kv-onb-files li .kv-link { flex: none; white-space: nowrap; }
 
 /* the overview, before the first notes: what the vault shows meanwhile (an explanation, not a warning) */
-.kv-onb-callout { margin: 14px 0 0; padding: 12px 14px; display: grid; gap: 4px; border: 1px solid var(--bai-border); border-left: 3px solid var(--bai-accent); border-radius: 10px; background: var(--bai-deep); }
+.kv-onb-callout { margin: 14px 0 0; padding: 12px 14px; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; align-items: start; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-deep); }
+.kv-onb-callout-icon { color: var(--bai-accent); margin-top: 1px; }
+.kv-onb-callout-body { display: grid; gap: 4px; }
 .kv-onb-callout strong { color: var(--bai-text); font-weight: 600; }
 .kv-onb-callout span { color: var(--bai-text-secondary); font-size: 14px; }
 /* a card's title with its "After processing" tag; overrides the card's secondary span style for the title row */

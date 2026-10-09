@@ -109,11 +109,18 @@ export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { inf
       </div>
       {notes === 0 && (
         <aside className="kv-onb-callout" aria-label="Before the first notes">
-          <strong>Notes appear after processing</strong>
-          <span>
-            Until a source has been processed, your vault shows it only under Sources: no notes, links, maps or chat answers yet. Each source
-            takes a few minutes, and its notes appear as soon as it is done.
-          </span>
+          <svg className="kv-onb-callout-icon" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18">
+            <circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M10 9v5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            <circle cx="10" cy="6.2" r="1.05" fill="currentColor" />
+          </svg>
+          <div className="kv-onb-callout-body">
+            <strong>Notes appear after processing</strong>
+            <span>
+              Until a source has been processed, your vault shows it only under Sources: no notes, links, maps or chat answers yet. Each
+              source takes a few minutes, and its notes appear as soon as it is done.
+            </span>
+          </div>
         </aside>
       )}
       <h3 className="kv-onb-subtitle">What you can do</h3>

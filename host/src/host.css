@@ -383,7 +383,7 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-chatgpt-manage:hover { text-decoration: underline; }
 
 /* Settings › Models: the one-time offer of the chat's OpenRouter key */
-.kv-offer { margin: 0 0 16px; padding: 14px 16px; display: grid; gap: 10px; border: 1px solid var(--bai-border); border-left: 3px solid var(--bai-accent); border-radius: 10px; background: var(--bai-deep); }
+.kv-offer { margin: 0 0 16px; padding: 14px 16px; display: grid; gap: 10px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-deep); }
 .kv-offer p { margin: 0; color: var(--bai-text-secondary); font-size: 14px; }
 .kv-offer strong { color: var(--bai-text); font-weight: 600; }
 .kv-offer .kv-form-actions { margin: 0; }
