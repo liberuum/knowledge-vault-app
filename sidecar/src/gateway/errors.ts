@@ -1,4 +1,5 @@
 import { PROVIDER_LABELS, type ModelProvider } from "../settings.js";
+import { refusesKey } from "../provider-auth.js";
 
 export function openAiError(status: number, message: string, code?: string) {
   return { error: { message, type: status >= 500 ? "server_error" : "invalid_request_error", ...(code ? { code } : {}) } };
@@ -20,7 +21,7 @@ export function providerMessage(provider: ModelProvider, status: number, bodyTex
   const who = provider === "local" ? "The model server on this computer" : PROVIDER_LABELS[provider];
   const detail = detailOf(bodyText);
   const tail = detail ? `: ${detail}` : ".";
-  if (status === 401 || status === 403) return { message: `${who} refused the API key${tail}`, code: "provider_auth" };
+  if (refusesKey(status, detail)) return { message: `${who} refused the API key${tail}`, code: "provider_auth" };
   if (status === 402) return { message: `${who} says the account is out of credit${tail}`, code: "provider_credit" };
   if (status === 429) return { message: `${who} is rate-limiting requests${tail}`, code: "provider_rate_limit" };
   if (status === 404) return { message: `${who} does not have this model${tail}`, code: "provider_model" };

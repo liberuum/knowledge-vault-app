@@ -4,6 +4,7 @@ import { anthropicJson as defaultAnthropicJson } from "./anthropic.js";
 import type { ChatGptBridge } from "./chatgpt.js";
 import { openAiError, providerMessage } from "./errors.js";
 import { createQueue } from "./queue.js";
+import { providerHeaders } from "../provider-auth.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -57,7 +58,7 @@ export function createGateway(deps: GatewayDeps) {
       // A key saved for a hosted service never goes to a model server here or on the network (review I1).
       const key = settings.models.local ? undefined : deps.readModelKey();
       const endpoint = settings.models.endpoint.replace(/\/+$/, "");
-      const headers: Record<string, string> = { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) };
+      const headers: Record<string, string> = { "content-type": "application/json", ...providerHeaders(endpoint, key) };
       let payload: Record<string, unknown> = {};
       if (isChat) {
         if (!settings.models.model.trim()) return sendJson(res, 409, openAiError(409, NO_MODEL, "no_model"), cors);

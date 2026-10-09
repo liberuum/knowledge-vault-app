@@ -1,5 +1,6 @@
 import { openAiError, providerMessage } from "./errors.js";
 import type { AnthropicJson } from "./gateway.js";
+import { providerHeaders } from "../provider-auth.js";
 
 type Message = { role: string; content: unknown };
 const textOf = (content: unknown): string =>
@@ -19,7 +20,7 @@ export const anthropicJson: AnthropicJson = async ({ endpoint, key, body, fetchI
   const response = await fetchImpl(`${endpoint.replace(/\/+$/, "")}/messages`, {
     method: "POST",
     signal,
-    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    headers: { ...providerHeaders(endpoint, key), "content-type": "application/json" },
     body: JSON.stringify({
       model: body.model,
       max_tokens: maxTokens,
