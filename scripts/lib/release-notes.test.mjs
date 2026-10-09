@@ -47,4 +47,10 @@ describe("debBinaries", () => {
     // tar -t of a Tauri deb: no leading ./, and bin/ folders deep in node_modules are not /usr/bin
     expect(debBinaries("usr/bin\nusr/bin/knowledge-vault-app\nusr/bin/kv-node\nusr/lib/Knowledge Vault/sidecar/node_modules/x/bin/x.js")).toEqual(["knowledge-vault-app", "kv-node"]);
   });
+  it("puts the release's own notes first when it has them", () => {
+    const body = releaseNotes({ app: "0.2.0", stack: "6.2.3-dev.44", vaultPackage: "1.0.54-dev.30", node: "24.21.0", whatsNew: "### What's new\n\n- A setup guide.\n" });
+    expect(body.indexOf("### What's new")).toBeGreaterThan(0);
+    expect(body.indexOf("### What's new")).toBeLessThan(body.indexOf("### Built from"));
+    expect(releaseNotes({ app: "0.2.0", stack: "s", vaultPackage: "v", node: "n" })).not.toContain("What's new");
+  });
 });

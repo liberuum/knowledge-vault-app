@@ -1,8 +1,10 @@
 /** The release body (spec §11): what the build contains, from the manifests it was built from. */
-export function releaseNotes({ app, stack, vaultPackage, node }) {
+export function releaseNotes({ app, stack, vaultPackage, node, whatsNew }) {
   return [
     `Knowledge Vault ${app} — the Powerhouse Knowledge Vault on your own computer.`,
     "",
+    // What changed, in the users' words (docs/releases/<version>.md), when the release has one.
+    ...(whatsNew?.trim() ? [whatsNew.trim(), ""] : []),
     "### Built from",
     `- Powerhouse stack **${stack}**`,
     `- @powerhousedao/knowledge-note **${vaultPackage}**`,
