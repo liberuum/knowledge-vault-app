@@ -72,7 +72,23 @@ const STYLE = `
 `;
 
 /** The engine's ChatGPT sign-in, polled while a browser sign-in is pending. */
-export function ChatGptConnect({ info, api = realChatGptApi, pollMs = POLL_MS, onStatus, compact = false }: { info: SidecarInfo; api?: ChatGptApi; pollMs?: number; onStatus?: (status: ChatGptStatus) => void; /** In a provider card not chosen yet: the button alone (or one line), nothing else. */ compact?: boolean }) {
+export function ChatGptConnect({
+  info,
+  api = realChatGptApi,
+  pollMs = POLL_MS,
+  onStatus,
+  compact = false,
+  onUse,
+}: {
+  info: SidecarInfo;
+  api?: ChatGptApi;
+  pollMs?: number;
+  onStatus?: (status: ChatGptStatus) => void;
+  /** Not chosen yet: the button alone (or one line), nothing else. */
+  compact?: boolean;
+  /** Compact and already signed in with plan use: the button chooses ChatGPT, with no new sign-in. */
+  onUse?: () => void;
+}) {
   const [status, setStatus] = useState<ChatGptStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -182,6 +198,7 @@ export function ChatGptConnect({ info, api = realChatGptApi, pollMs = POLL_MS, o
   if (!status) return frame(compact ? <ContinueWithChatGpt onClick={() => void signIn()} disabled /> : <p className="kv-quiet" role="status">{error ? "" : "…"}</p>);
   if (compact && status.pending) return frame(<p role="status" className="kv-identity-waiting">Waiting for the browser…</p>);
   if (compact && status.signedIn && status.planUsage) {
+    if (onUse) return frame(<ContinueWithChatGpt onClick={onUse} disabled={busy} />);
     const who = status.account?.email ?? status.account?.name;
     return frame(<p className="kv-hint">Signed in{who ? ` as ${who}` : ""}. Choose this card to use your plan.</p>);
   }

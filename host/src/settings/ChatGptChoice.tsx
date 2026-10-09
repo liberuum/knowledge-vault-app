@@ -86,6 +86,7 @@ export function ChatGptChoice({
       <ChatGptConnect
         info={info}
         compact={!active}
+        onUse={() => activate.current?.()}
         onStatus={(s) => {
           setStatus(s);
           if (s.pending && !active) activate.current?.(); // the compact button started a sign-in: this card is chosen

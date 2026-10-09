@@ -5,9 +5,11 @@ export type ApiService = "openai" | "anthropic" | "gemini" | "xai" | "custom";
 
 const CHOICES: ReadonlyArray<{ id: Choice; title: string; line: string }> = [
   { id: "local", title: "On this computer", line: "A model running here: free, private, no key." },
-  { id: "chatgpt", title: "ChatGPT", line: "Use your ChatGPT Plus or Pro plan: just sign in, no key." },
   { id: "openrouter", title: "OpenRouter", line: "One account, hundreds of models, pay as you go." },
   { id: "apikey", title: "API key", line: "OpenAI, Anthropic, Google Gemini, xAI or another service." },
+  // Sign-in with a person's own AI plan comes last: a row of the providers' buttons (more to come), and the card
+  // of the one chosen.
+  { id: "chatgpt", title: "ChatGPT", line: "Use your ChatGPT Plus or Pro plan: just sign in, no key." },
 ];
 
 /** The services behind the "API key" card: where each one's keys come from, and what its keys look like. */
@@ -63,7 +65,10 @@ type Props = {
 export function ProviderChoice(props: Props) {
   const { choice, onChoice } = props;
   const cards = useRef<Array<HTMLButtonElement | null>>([]);
-  const offered = CHOICES.filter((c) => c.id !== "chatgpt" || props.chatgptBlock !== undefined);
+  // ChatGPT is a card only once chosen. Until then it is one button, "Continue with ChatGPT": the button says what it
+  // is, and signing in (or, already signed in, pressing it) chooses it. So the arrow keys move between the cards only.
+  const chatgptAsButton = props.chatgptBlock !== undefined && choice !== "chatgpt";
+  const offered = CHOICES.filter((c) => c.id !== "chatgpt" || (props.chatgptBlock !== undefined && !chatgptAsButton));
 
   function onKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
     const to = cardAfterKey(e.key, index, offered.length);
@@ -76,7 +81,9 @@ export function ProviderChoice(props: Props) {
 
   return (
     <div className="kv-providers" role="radiogroup" aria-label="AI model provider">
-      {offered.map((c, index) => {
+      {CHOICES.map((c) => {
+        const index = offered.indexOf(c);
+        if (index === -1) return null;
         const checked = c.id === choice;
         return (
           <div key={c.id} className="kv-provider" data-selected={checked}>
@@ -98,8 +105,8 @@ export function ProviderChoice(props: Props) {
               <span className="kv-provider-title">{c.title}</span>{" "}
               <span className="kv-provider-line">{c.line}</span>
             </button>
-            {(checked || (c.id === "chatgpt" && props.chatgptBlock !== undefined)) && (
-              <div className="kv-provider-body" data-compact={!checked}>
+            {checked && (
+              <div className="kv-provider-body">
                 {c.id === "local" && props.localBlock}
                 {c.id === "chatgpt" && props.chatgptBlock}
                 {c.id === "openrouter" && <OpenRouterCard {...props} />}
@@ -109,6 +116,10 @@ export function ProviderChoice(props: Props) {
           </div>
         );
       })}
+      {chatgptAsButton && (
+        // The providers' own sign-in buttons, side by side (ChatGPT for now).
+        <div className="kv-provider-plain">{props.chatgptBlock}</div>
+      )}
     </div>
   );
 }

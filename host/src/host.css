@@ -416,3 +416,6 @@ body, #root { margin: 0; min-height: 100vh; }
   .kv-gs-tools { padding-left: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .kv-gs-bar > span { transition: none; } }
+
+/* Provider choice: below the cards, the providers' own sign-in buttons (ChatGPT not chosen yet: its button alone) */
+.kv-provider-plain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0 2px; }
