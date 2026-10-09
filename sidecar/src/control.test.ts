@@ -439,7 +439,8 @@ describe("settings changes reach the pipelines", () => {
     const held = await new Promise<number>((resolve) => holder.listen(0, "127.0.0.1", () => resolve((holder.address() as { port: number }).port)));
     const server = createControlServer({ ...(await harnessDeps()) });
     const port = await server.listen(held);
-    expect(port).toBe(held + 1);
+    // Upward from the busy port; the very next one may itself be taken by something else on this machine.
+    expect(port).toBeGreaterThan(held);
     expect((await fetch(`http://127.0.0.1:${port}/status`, { headers: { authorization: "Bearer secret" } })).status).toBe(200);
     await server.close();
     await new Promise((r) => holder.close(r));
