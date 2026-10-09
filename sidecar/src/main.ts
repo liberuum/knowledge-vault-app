@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, readFileSync } from "node:fs";
+import { ensureStoreId } from "./store-id.js";
 import { initVaultStructure } from "./vault-structure.js";
 import { addVaultSource, findSourceByTitle } from "./vault-sources.js";
 import { checkModel } from "./model-check.js";
@@ -261,6 +262,7 @@ async function main(): Promise<void> {
   let boundControlPort = cfg.controlPort;
   const gatewayKey = ensureSecret(join(cfg.dataDir, "secrets", "gateway.key"));
   // Sign in with ChatGPT (chatgpt/session.ts): the user's ChatGPT plan as the model; its tokens stay in the engine.
+  const storeId = ensureStoreId(cfg.dataDir);
   const chatgpt = createChatGpt({ dataDir: cfg.dataDir, log: (line) => console.log(`[chatgpt] ${line}`) });
   /**
    * The pipelines' "is a model usable?" — pipelines.ts only checks that a key exists (their connection holds the
@@ -318,6 +320,7 @@ async function main(): Promise<void> {
       dataDir: cfg.dataDir,
       stackVersion: STACK_VERSION,
       vaultPackageVersion: VAULT_PACKAGE_VERSION,
+      storeId,
     }),
     listVaults: () => listVaultDrives(origin, engineFetch),
     createVault: async (name) => {

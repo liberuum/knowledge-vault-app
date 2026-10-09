@@ -1,4 +1,5 @@
 import { initTheme, useTheme, type GraphQLReactorClient } from "@powerhousedao/reactor-browser";
+import { adoptStore } from "./state/window-state.js";
 import { filesFromDrop } from "./api/dropped-files.js";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { declareDesktopHost, setDroppedFileReader, setExternalSignIn, setHostModel } from "./bootstrap.js";
@@ -36,6 +37,8 @@ let loading: Promise<LoadedApp> | undefined;
 export const loadApp: AppLoader = (info) => {
   loading ??= (async () => {
     const [status, settings] = await Promise.all([fetchStatus(info).catch(() => undefined), fetchSettings(info).catch(() => undefined)]);
+    // A new store (a fresh install, "Delete all local data"): the window forgets what it kept for the old one first.
+    adoptStore(typeof localStorage === "undefined" ? undefined : localStorage, status?.storeId);
     const extras = localHostExtras(status?.protected === true, info);
     // The vault chat's OpenRouter sign-in returns through the engine, not to this window (api/oauth.ts).
     setExternalSignIn((buildUrl) => externalSignIn(info, buildUrl));
