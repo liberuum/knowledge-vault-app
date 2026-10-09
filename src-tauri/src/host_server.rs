@@ -140,8 +140,14 @@ mod tests {
     #[test]
     fn binds_the_remembered_port_then_the_default_then_any() {
         let (a, pa) = bind(None, 0).unwrap(); // any free port
-        let (b, pb) = bind(Some(pa + 1), pa).unwrap(); // remembered one free → it
-        assert_eq!(pb, pa + 1);
+        // A remembered port that is free: one the system just handed out and released (the next port up may be taken).
+        let free = {
+            let (probe, p) = bind(None, 0).unwrap();
+            drop(probe);
+            p
+        };
+        let (b, pb) = bind(Some(free), pa).unwrap(); // remembered one free → it
+        assert_eq!(pb, free);
         drop(b);
         let (_c, pc) = bind(Some(pa), pa).unwrap(); // remembered busy (a holds it) → the default range
         assert_ne!(pc, pa);
