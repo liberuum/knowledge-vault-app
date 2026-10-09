@@ -112,7 +112,9 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
     const best = bestFound(d);
     const served = (p: Pick) => d?.servers.some((s) => s.endpoint === p.endpoint && s.models.some((m) => m.id === p.model)) ?? false;
     setPick((p) => (p && (p.typed || served(p)) ? p : best ? { endpoint: best.server.endpoint, model: best.model.id } : null));
-    if (!settled.current) setChoice(best ? "local" : "chatgpt"); // nothing running here: one sign-in, no key
+    // The local card always leads, found or not: it says what runs here, or how to get a model and what size fits.
+    // ChatGPT stays the sign-in button below the cards; it becomes the chosen card only once it is signed in.
+    if (!settled.current) setChoice("local");
   }, []);
 
   const scan = useCallback(async () => {
