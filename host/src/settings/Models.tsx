@@ -3,6 +3,7 @@ import { ModelPicker } from "./ModelPicker.js";
 import { LocalModel } from "./LocalModel.js";
 import { ProviderChoice, signInFirst, type ApiService, type Choice } from "./ProviderChoice.js";
 import { ChatGptChoice } from "./ChatGptChoice.js";
+import { answerChatKeyOffer, chatKeyOffer } from "./chat-key-offer.js";
 import { signInWithOpenRouter } from "../api/openrouter.js";
 import { announceModelsChanged } from "../model-declaration.js";
 import type { SettingsApi } from "../screens/Settings.js";
@@ -54,6 +55,8 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<{ ok: boolean; detail: string; warning?: string } | null>(null);
+  /** An OpenRouter key the vault chat saved before it ran on the app's model, offered once (chat-key-offer.ts). */
+  const [offeredKey, setOfferedKey] = useState<string | null>(null);
 
   /** Take what the engine answered as the settings, and show the card it belongs to (it may read an address differently than it was typed). */
   const adopt = useCallback((next: AppSettings) => {
@@ -72,6 +75,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
         if (!alive) return;
         adopt(s);
         setModel(s.models.model);
+        if (typeof localStorage !== "undefined") setOfferedKey(chatKeyOffer(localStorage, s.models));
       })
       .catch((e: Error) => alive && setError(e.message));
     return () => {
@@ -151,6 +155,29 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
       setSigningIn(false);
     }
   }
+  /** The chat's OpenRouter key becomes the app's: the OpenRouter card shows, with the model still to choose. */
+  async function useOfferedKey(key: string) {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const next = await api.saveSettings(info, { models: { provider: "openrouter", apiKey: key } });
+      announceModelsChanged();
+      if (typeof localStorage !== "undefined") answerChatKeyOffer(localStorage, "used");
+      setOfferedKey(null);
+      adopt(next);
+      setModel(next.models.model);
+      setSaved(true);
+    } catch (err) {
+      setError(`Could not use the key: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function declineOfferedKey() {
+    if (typeof localStorage !== "undefined") answerChatKeyOffer(localStorage, "declined");
+    setOfferedKey(null);
+  }
   async function validate() {
     setBusy(true);
     setVerdict(null);
@@ -182,6 +209,18 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     <div className="kv-settings-body">
       <p className="kv-settings-lead">The chat and the processing pipeline use one AI model. A vault created after this is set up processes its sources on its own.</p>
       {settings === null && !error && <p className="kv-quiet" role="status">Loading…</p>}
+      {settings && offeredKey && (
+        <div className="kv-offer" role="region" aria-label="Your chat's OpenRouter key">
+          <p>
+            <strong>The vault chat has an OpenRouter key saved in this app.</strong> Use it for the whole app, so the chat and
+            processing both run on OpenRouter? You choose the model next.
+          </p>
+          <div className="kv-form-actions">
+            <button type="button" className="kv-button kv-button-primary" disabled={busy} onClick={() => void useOfferedKey(offeredKey)}>Use it</button>
+            <button type="button" className="kv-button" disabled={busy} onClick={declineOfferedKey}>No thanks</button>
+          </div>
+        </div>
+      )}
       {settings && (
         <form className="kv-form" onSubmit={(e) => void submit(e)}>
           <ProviderChoice
