@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { win32 } from "node:path";
 import { selfBuiltReady } from "./install.js";
 
 /**
@@ -22,10 +22,22 @@ export function isMusl(platform: NodeJS.Platform = process.platform): boolean {
 /** The Microsoft Visual C++ runtime the Windows binding links against; not on a clean Windows, and the app does not ship it. */
 const VC_RUNTIME = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll"];
 export const VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
-export function hasVcRuntime(platform: NodeJS.Platform = process.platform): boolean {
+/**
+ * Whether Windows would find the runtime the binding imports. The loader looks, file by file, in the app's own folder,
+ * System32, the Windows folder and every PATH folder. The redistributable installs into System32, but a PC where
+ * another program left its copy on PATH loads the binding too, and must not be told it cannot.
+ */
+export function hasVcRuntime(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+  appDir: string = win32.dirname(process.execPath),
+): boolean {
   if (platform !== "win32") return true;
-  const system32 = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
-  return VC_RUNTIME.every((dll) => existsSync(join(system32, dll)));
+  const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir ?? env.WINDIR ?? "C:\\Windows";
+  const onPath = (env.Path ?? env.PATH ?? "").split(";").map((d) => d.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  const dirs = [appDir, win32.join(root, "System32"), root, ...onPath];
+  return VC_RUNTIME.every((dll) => dirs.some((dir) => exists(win32.join(dir, dll))));
 }
 
 /** Which binding this machine can install, or why none. */
