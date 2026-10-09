@@ -96,6 +96,27 @@ impl SidecarState {
         self.crashes = CrashWindow::new(120_000);
     }
 
+    /// The one answer for the `sidecar:status` events, the tray and the page's first read (`sidecar_info`).
+    /// While Windows unpacks the engine nothing has been spawned yet: that is starting, never "exited"
+    /// with no exit code — the window loads during the unpack and reads this before any event reaches it.
+    fn status(&self) -> SidecarStatus {
+        let mut status = status_of(
+            self.ready.clone(),
+            self.running,
+            self.exit_code,
+            self.attempt,
+            self.delay_ms,
+            self.fatal.clone(),
+            self.stopping,
+        );
+        status.log_tail = self.tail.lines();
+        status.preparing = self.preparing;
+        if self.preparing && status.state == "exited" {
+            status.state = "starting";
+        }
+        status
+    }
+
     fn now_ms(&self) -> u64 {
         self.started_at.elapsed().as_millis() as u64
     }
@@ -192,28 +213,14 @@ pub fn status_of(
 }
 
 fn snapshot(app: &AppHandle) -> SidecarStatus {
-    let st = app.state::<Mutex<SidecarState>>();
-    let st = st.lock().unwrap();
-    let mut status = status_of(
-        st.ready.clone(),
-        st.running,
-        st.exit_code,
-        st.attempt,
-        st.delay_ms,
-        st.fatal.clone(),
-        st.stopping,
-    );
-    status.log_tail = st.tail.lines();
-    status.preparing = st.preparing;
-    if st.preparing && status.state == "exited" {
-        status.state = "starting";
-    }
-    status
+    app.state::<Mutex<SidecarState>>().lock().unwrap().status()
 }
 
-/// Windows: the engine is being unpacked before its first start (shown as starting), or no longer is.
-pub fn set_preparing(app: &AppHandle, preparing: bool) {
-    app.state::<Mutex<SidecarState>>().lock().unwrap().preparing = preparing;
+/// Windows: the engine is being unpacked before its first start (shown as starting). The spawn ends
+/// it in the same step that marks the engine running, or a refusal does (report_fatal) — never a
+/// separate status in between, which would read as "exited".
+pub fn mark_preparing(app: &AppHandle) {
+    app.state::<Mutex<SidecarState>>().lock().unwrap().preparing = true;
     emit_status(app);
 }
 
@@ -383,6 +390,7 @@ pub fn spawn_sidecar(
         let mut st = state.lock().unwrap();
         st.child = Some(child);
         st.running = true;
+        st.preparing = false;
         st.exit_code = None;
         st.ready = None;
         st.restart_requested = false;
@@ -642,18 +650,7 @@ pub fn stop_sidecar_blocking(app: &AppHandle) {
 
 #[tauri::command]
 pub fn sidecar_info(state: tauri::State<'_, Mutex<SidecarState>>) -> SidecarStatus {
-    let st = state.lock().unwrap();
-    let mut status = status_of(
-        st.ready.clone(),
-        st.running,
-        st.exit_code,
-        st.attempt,
-        st.delay_ms,
-        st.fatal.clone(),
-        st.stopping,
-    );
-    status.log_tail = st.tail.lines();
-    status
+    state.lock().unwrap().status()
 }
 
 #[cfg(test)]
@@ -873,5 +870,32 @@ mod tests {
         assert_eq!(s.state, "stopping");
         let s = status_of(None, false, Some(1), 1, None, None, false);
         assert_eq!(s.state, "exited");
+    }
+
+    #[test]
+    fn the_first_read_during_the_unpack_is_starting_not_an_exit() {
+        // Windows' first start of a version: the window loads while the archive unpacks and reads
+        // sidecar_info before any event reaches it. Nothing has been spawned yet: starting, with the
+        // page's "Unpacking the engine" — never "The engine stopped. Exit code unknown."
+        let unpacking = SidecarState {
+            preparing: true,
+            ..SidecarState::default()
+        };
+        let s = unpacking.status();
+        assert_eq!(s.state, "starting");
+        assert!(s.preparing);
+        assert_eq!(s.code, None);
+        // An archive that would not unpack (report_fatal) still reads as the refusal, with its reason.
+        let refused = SidecarState {
+            fatal: Some(FatalInfo {
+                reason: "engine-unpack".into(),
+                message: "The engine could not be unpacked".into(),
+            }),
+            ..SidecarState::default()
+        };
+        let s = refused.status();
+        assert_eq!(s.state, "exited");
+        assert!(!s.preparing);
+        assert_eq!(s.fatal.map(|f| f.reason).as_deref(), Some("engine-unpack"));
     }
 }

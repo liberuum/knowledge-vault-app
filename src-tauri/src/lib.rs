@@ -360,7 +360,7 @@ pub fn run() {
                 // Windows ships the engine as one archive (the installer's 260-character path limit): it is
                 // unpacked once per version, off the main thread, while the page shows the engine starting.
                 let base = app.path().app_local_data_dir()?.join("engine");
-                sidecar::set_preparing(&handle, true);
+                sidecar::mark_preparing(&handle);
                 let h = handle.clone();
                 std::thread::spawn(move || {
                     match engine_archive::unpack(&archive, &base, env!("CARGO_PKG_VERSION")) {
@@ -369,7 +369,7 @@ pub fn run() {
                                 data_dir: paths.data_dir,
                                 sidecar: SidecarLaunch::at(root),
                             };
-                            sidecar::set_preparing(&h, false);
+                            // The spawn ends the unpack's "preparing" itself (or report_fatal does).
                             if let Err(e) = spawn_sidecar(
                                 &h,
                                 &paths,
