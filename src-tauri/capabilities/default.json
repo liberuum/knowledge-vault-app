@@ -26,6 +26,7 @@
     "allow-reveal-path",
     "allow-quit-app",
     "allow-retry-engine",
-    "allow-host-loaded"
+    "allow-host-loaded",
+    "allow-take-dropped-paths"
   ]
 }

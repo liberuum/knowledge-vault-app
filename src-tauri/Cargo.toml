@@ -34,3 +34,7 @@ tar = "0.4"
 # A session logout or `kill` sends SIGTERM: quit gracefully (stop the engine) instead of dying at once.
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4"
+
+# Reading a drop's full file list from GTK (drop_capture.rs): the same gtk the webview uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

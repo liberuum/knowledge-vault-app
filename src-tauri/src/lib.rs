@@ -1,6 +1,7 @@
 mod backoff;
 mod config;
 mod download;
+mod drop_capture;
 mod engine_archive;
 mod host_server;
 mod log_tail;
@@ -135,13 +136,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(download::Downloads::default())
         .manage(smoke::HostLoaded::default())
+        .manage(std::sync::Arc::new(drop_capture::DropCapture::default()))
         .invoke_handler(tauri::generate_handler![
             sidecar_info,
             open_logs,
             reveal_path,
             quit_app,
             retry_engine,
-            host_loaded
+            host_loaded,
+            take_dropped_paths
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -199,7 +202,7 @@ pub fn run() {
             } else {
                 tauri::WebviewUrl::default()
             };
-            tauri::WebviewWindowBuilder::new(app, "main", url)
+            let window = tauri::WebviewWindowBuilder::new(app, "main", url)
                 .title("Knowledge Vault")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1)
@@ -289,6 +292,14 @@ pub fn run() {
                     false
                 })
                 .build()?;
+            // Linux: WebKitGTK shows a page only the first file of a drop; the shell keeps the whole list.
+            #[cfg(target_os = "linux")]
+            drop_capture::watch(
+                &window,
+                app.state::<std::sync::Arc<drop_capture::DropCapture>>().inner().clone(),
+            )?;
+            #[cfg(not(target_os = "linux"))]
+            let _ = window;
             // Dev loop (scripts/dev.mjs) already runs a sidecar: adopt it instead of spawning another.
             // Never in an installed app: its engine is its own (review minor 6).
             if let (false, Ok(p), Ok(c), Ok(t)) = (
@@ -473,6 +484,15 @@ mod working_dir_tests {
     }
 }
 
+/// The files of the last Linux drop, which WebKitGTK shows the page only the first of (drop_capture.rs).
+/// Empty on Windows and macOS, whose pages get the files themselves.
+#[tauri::command]
+fn take_dropped_paths(
+    capture: tauri::State<'_, std::sync::Arc<drop_capture::DropCapture>>,
+) -> Vec<String> {
+    capture.take()
+}
+
 #[cfg(test)]
 mod capability_tests {
     /// Every command the shell registers must be granted to the page, or the installed app's page
@@ -494,6 +514,7 @@ mod capability_tests {
             "quit_app",
             "retry_engine",
             "host_loaded",
+            "take_dropped_paths",
         ] {
             let perm = format!("allow-{}", cmd.replace('_', "-"));
             assert!(

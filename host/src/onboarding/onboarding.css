@@ -123,6 +123,12 @@
 /* the overview's closing row: a reassurance left, the one action that ends the guide right */
 .kv-onb-actions-note { margin: 0 auto 0 0; max-width: 44ch; }
 
+/* long file names stay inside their box: grid tracks may shrink below a name's width, the name ends in "…" */
+.kv-onb-progress, .kv-onb-files, .kv-onb-filelist { grid-template-columns: minmax(0, 1fr); }
+.kv-onb-files li, .kv-onb-filelist li { min-width: 0; }
+.kv-onb-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-onb-files li .kv-hint, .kv-onb-filelist li .kv-hint, .kv-onb-files li .kv-link { flex: none; white-space: nowrap; }
+
 /* the overview, before the first notes: what the vault shows meanwhile (an explanation, not a warning) */
 .kv-onb-callout { margin: 14px 0 0; padding: 12px 14px; display: grid; gap: 4px; border: 1px solid var(--bai-border); border-left: 3px solid var(--bai-accent); border-radius: 10px; background: var(--bai-deep); }
 .kv-onb-callout strong { color: var(--bai-text); font-weight: 600; }

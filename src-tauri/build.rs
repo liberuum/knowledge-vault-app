@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "quit_app",
     "retry_engine",
     "host_loaded",
+    "take_dropped_paths",
 ];
 
 fn main() {
