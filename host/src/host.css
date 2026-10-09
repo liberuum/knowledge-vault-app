@@ -363,3 +363,20 @@ body, #root { margin: 0; min-height: 100vh; }
 /* the way back to the setup guide while it is still open for this vault (Wayfinding) */
 .kv-appbar-guide { padding: 3px 10px; border: 1px solid var(--bai-accent); border-radius: 999px; background: var(--bai-accent-soft); color: var(--bai-text); font: inherit; font-size: 13px; cursor: pointer; }
 .kv-appbar-guide:hover { background: var(--bai-accent); color: var(--bai-accent-text); }
+
+/* Settings › Models › ChatGPT: the plan's models as a row of buttons, the one in use highlighted */
+.kv-chatgpt-choice { display: grid; gap: 12px; }
+.kv-model-choice { display: grid; gap: 8px; }
+.kv-model-choice-label { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--bai-text); }
+.kv-model-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.kv-model-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--bai-border); border-radius: 999px; background: var(--bai-surface); color: var(--bai-text-secondary); font: inherit; font-size: 14px; line-height: 20px; cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease; }
+.kv-model-pill:hover:not(:disabled) { border-color: var(--bai-accent); color: var(--bai-text); }
+.kv-model-pill[aria-pressed="true"] { border-color: var(--bai-accent); background: var(--bai-accent-soft); color: var(--bai-text); font-weight: 600; }
+.kv-model-pill:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: 2px; }
+.kv-model-pill:disabled { cursor: progress; }
+.kv-model-pill:disabled:not([aria-pressed="true"]) { opacity: 0.6; }
+.kv-model-choice-note { margin: 0; }
+@media (prefers-reduced-motion: reduce) { .kv-model-pill { transition: none; } }
+/* "Manage usage" in the signed-in panel: a link, at the row's end */
+.kv-chatgpt-manage { margin-left: auto; font-size: 14px; }
+.kv-chatgpt-manage:hover { text-decoration: underline; }

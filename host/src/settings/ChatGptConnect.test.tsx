@@ -46,7 +46,7 @@ describe("ChatGptConnect", () => {
     expect(screen.queryByText("You're using your ChatGPT plan")).toBeNull();
     expect(screen.getByText("Using ChatGPT plan")).toBeTruthy();
     expect(screen.getByText("Signed in as ada@example.com.")).toBeTruthy();
-    expect((screen.getByRole("link", { name: "Manage usage" }) as HTMLAnchorElement).href).toBe("https://chatgpt.com/settings/usage");
+    expect((screen.getByRole("link", { name: /^Manage usage/ }) as HTMLAnchorElement).href).toBe("https://chatgpt.com/settings/usage");
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(api.signOut).toHaveBeenCalled());
     expect(await screen.findByText("Last signed in as ada@example.com.")).toBeTruthy();

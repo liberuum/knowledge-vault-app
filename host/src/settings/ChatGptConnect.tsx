@@ -227,8 +227,9 @@ export function ChatGptConnect({ info, api = realChatGptApi, pollMs = POLL_MS, o
         <div className="kv-identity-row">
           <ChatGptLogo size={18} />
           <span>Using ChatGPT plan</span>
-          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noreferrer">
-            Manage usage
+          <a className="kv-link kv-chatgpt-manage" href={CHATGPT_USAGE_URL} target="_blank" rel="noreferrer">
+            Manage usage <span aria-hidden="true">↗</span>
+            <span className="kv-visually-hidden"> (opens ChatGPT in your browser)</span>
           </a>
         </div>
         {who && (
