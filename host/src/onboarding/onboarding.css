@@ -122,3 +122,11 @@
 
 /* the overview's closing row: a reassurance left, the one action that ends the guide right */
 .kv-onb-actions-note { margin: 0 auto 0 0; max-width: 44ch; }
+
+/* the overview, before the first notes: what the vault shows meanwhile (an explanation, not a warning) */
+.kv-onb-callout { margin: 14px 0 0; padding: 12px 14px; display: grid; gap: 4px; border: 1px solid var(--bai-border); border-left: 3px solid var(--bai-accent); border-radius: 10px; background: var(--bai-deep); }
+.kv-onb-callout strong { color: var(--bai-text); font-weight: 600; }
+.kv-onb-callout span { color: var(--bai-text-secondary); font-size: 14px; }
+/* a card's title with its "After processing" tag; overrides the card's secondary span style for the title row */
+.kv-onb-card .kv-onb-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--bai-text); font-size: inherit; }
+.kv-onb-card .kv-onb-card-tag { flex: none; font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--bai-border); border-radius: 999px; background: var(--bai-deep); color: var(--bai-text-secondary); white-space: nowrap; }

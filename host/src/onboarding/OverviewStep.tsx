@@ -33,11 +33,12 @@ function processingLine(p: PipelineStatus | null, notes: number): string {
   return "Your sources are queued; the first one starts within a minute.";
 }
 
-const CARDS: ReadonlyArray<{ view: VaultView | "runs"; title: string; line: string }> = [
-  { view: "chat", title: "Chat with your vault", line: "Ask a question; the answer names the notes it used." },
-  { view: "notes", title: "Read your notes", line: "One idea each, with its links and the source it came from. Approve the ones that hold." },
-  { view: "graph", title: "See how ideas connect", line: "The graph shows the links; maps of your topics gather the notes on one theme." },
-  { view: "search", title: "Search by meaning", line: "Find a note even when your words differ from its words." },
+/** `afterNotes`: the view shows nothing until processing has written the first notes. */
+const CARDS: ReadonlyArray<{ view: VaultView | "runs"; title: string; line: string; afterNotes?: true }> = [
+  { view: "chat", title: "Chat with your vault", line: "Ask a question; the answer names the notes it used.", afterNotes: true },
+  { view: "notes", title: "Read your notes", line: "One idea each, with its links and the source it came from. Approve the ones that hold.", afterNotes: true },
+  { view: "graph", title: "See how ideas connect", line: "The graph shows the links; maps of your topics gather the notes on one theme.", afterNotes: true },
+  { view: "search", title: "Search by meaning", line: "Find a note even when your words differ from its words.", afterNotes: true },
   { view: "sources", title: "Add more sources", line: "Drop files in Sources any time; each one is read on its own." },
   { view: "runs", title: "Watch the processing", line: "Each source going through its four steps, live, in Workflows." },
 ];
@@ -84,7 +85,7 @@ export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { inf
   return (
     <section aria-labelledby="onb-title">
       <h2 id="onb-title" className="kv-onb-title" tabIndex={-1}>Your vault is filling up</h2>
-      <p className="kv-onb-lead">Your sources are being read and turned into notes. There is no need to wait here: everything below works while it runs.</p>
+      <p className="kv-onb-lead">Your sources are being read and turned into notes. There is no need to wait here: look around while it runs.</p>
       <div className="kv-onb-progress" aria-live="polite">
         {files.length > 0 && (
           <>
@@ -106,6 +107,15 @@ export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { inf
         )}
         <p className="kv-onb-processing" data-busy={pipeline?.state === "ready" && pipeline.lastRun?.status === "RUNNING"}>{processingLine(pipeline, notes)}</p>
       </div>
+      {notes === 0 && (
+        <aside className="kv-onb-callout" aria-label="Before the first notes">
+          <strong>Notes appear after processing</strong>
+          <span>
+            Until a source has been processed, your vault shows it only under Sources: no notes, links, maps or chat answers yet. Each source
+            takes a few minutes, and its notes appear as soon as it is done.
+          </span>
+        </aside>
+      )}
       <h3 className="kv-onb-subtitle">What you can do</h3>
       <ul className="kv-onb-cards">
         {CARDS.map((c) => (
@@ -116,7 +126,10 @@ export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { inf
               disabled={c.view === "runs" && !workflowId}
               onClick={() => (c.view === "runs" ? workflowId && onRuns(workflowId) : onVisit(c.view))}
             >
-              <strong>{c.title}</strong>
+              <span className="kv-onb-card-head">
+                <strong>{c.title}</strong>
+                {c.afterNotes && notes === 0 && <span className="kv-onb-card-tag">After processing</span>}
+              </span>
               <span>{c.line}</span>
             </button>
           </li>
