@@ -479,7 +479,7 @@ function AddressForm({ info, disabled, onPick }: { info: SidecarInfo; disabled: 
         />
         <button type="button" className="kv-button" onClick={() => void connect()} disabled={disabled || connecting || !url.trim()}>{connecting ? "Connecting…" : "Connect"}</button>
       </div>
-      <p className="kv-hint">Its OpenAI-compatible API, usually ending in /v1.</p>
+      <p className="kv-hint">Its OpenAI-compatible API, usually ending in /v1. It can be on this computer, your local network or a VPN such as Tailscale.</p>
       {result && !result.ok && <p className="kv-error">Could not connect: {result.detail}</p>}
       {result?.ok && result.models.length === 1 && <p className="kv-onb-ok">Connected: {result.models[0]} is chosen.</p>}
       {result?.ok && result.models.length > 1 && (

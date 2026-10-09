@@ -28,7 +28,7 @@ describe("a model server on this computer", () => {
     const down = vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
     expect(await probeLocalModels("http://127.0.0.1:9/v1", allowed, down)).toMatchObject({ ok: false, detail: expect.stringContaining("Could not reach") });
     expect(await probeLocalModels("http://127.0.0.1:8080/v1", allowed, answer(200, { data: [] }))).toMatchObject({ ok: false, detail: "The server answered, but serves no model." });
-    expect(await probeLocalModels("https://openrouter.ai/api/v1", allowed, answer(200, { data: [{ id: "x" }] }))).toMatchObject({ ok: false, detail: "Only a server on this computer or your local network can be used here." });
+    expect(await probeLocalModels("https://openrouter.ai/api/v1", allowed, answer(200, { data: [{ id: "x" }] }))).toMatchObject({ ok: false, detail: "Only a server on a network of your own can be used here: this computer, your local network, or a VPN such as Tailscale." });
     expect(await probeLocalModels("nope", allowed, answer(200, {}))).toMatchObject({ ok: false, detail: expect.stringContaining("not a URL") });
   });
 

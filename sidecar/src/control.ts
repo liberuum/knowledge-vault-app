@@ -51,6 +51,8 @@ export type ControlDeps = {
   workflowsDrive: () => Promise<DriveRef>;
   readSettings: () => AppSettings;
   writeSettings: (patch: SettingsPatch) => AppSettings;
+  /** The endpoint's name when it resolves to a network of your own (a LAN name, a VPN's MagicDNS), else null. */
+  privateHost?: (endpoint: string) => Promise<string | null>;
   /** Studio's Knowledge Vault connection, filled from this app: the engine's address and, when asked, a token from the sign-in. */
   fillConnection: (connectionId: string, options: { token: boolean }) => Promise<FillResult>;
   /** Settings › Models › Validate: the saved endpoint and key against the provider. */
@@ -376,6 +378,9 @@ export function createControlServer(deps: ControlDeps) {
       }
       if (req.method === "PUT" && url.pathname === "/settings") {
         const patch = settingsPatch(await readJson(req));
+        if (patch.models && typeof patch.models.endpoint === "string" && patch.models.provider !== "chatgpt" && deps.privateHost) {
+          patch.models.privateHost = await deps.privateHost(patch.models.endpoint);
+        }
         const settings = deps.writeSettings(patch);
         if (patch.conversion) await deps.applyConversion(settings.conversion);
         // Removing the key must stop its use: the pipelines' runtime secret still holds it.

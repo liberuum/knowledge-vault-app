@@ -130,14 +130,16 @@ export type LocalProbe = { ok: true; endpoint: string; models: string[] } | { ok
  * serve? Only addresses on this computer or the local network are tried, and no key is sent.
  * The address is normalised the way Settings stores it (a trailing /chat/completions is dropped).
  */
-export async function probeLocalModels(raw: string, isAllowed: (endpoint: string) => boolean, fetchImpl: typeof fetch = fetch): Promise<LocalProbe> {
+export async function probeLocalModels(raw: string, isAllowed: (endpoint: string) => boolean | Promise<boolean>, fetchImpl: typeof fetch = fetch): Promise<LocalProbe> {
   const endpoint = raw.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
   try {
     new URL(endpoint);
   } catch {
     return { ok: false, endpoint, detail: "That is not a URL. Try http://127.0.0.1:8080/v1." };
   }
-  if (!isAllowed(endpoint)) return { ok: false, endpoint, detail: "Only a server on this computer or your local network can be used here." };
+  if (!(await isAllowed(endpoint))) {
+    return { ok: false, endpoint, detail: "Only a server on a network of your own can be used here: this computer, your local network, or a VPN such as Tailscale." };
+  }
   const catalog = await fetchModelCatalog(endpoint, "", fetchImpl);
   if (!catalog.ok) return { ok: false, endpoint, detail: catalog.detail };
   if (catalog.models.length === 0) return { ok: false, endpoint, detail: "The server answered, but serves no model." };

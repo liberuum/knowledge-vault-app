@@ -63,7 +63,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       remove: (id) => { remotes = remotes.filter((v) => v.id !== id); },
     },
     validateModels: async () => ({ ok: true, detail: "3 models available" }),
-    probeModels: async (endpoint: string) => (endpoint.includes("127.0.0.1") ? { ok: true, endpoint, models: ["lfm2.5-8b-a1b"] } : { ok: false, endpoint, detail: "Only a server on this computer or your local network can be used here." }),
+    probeModels: async (endpoint: string) => (endpoint.includes("127.0.0.1") ? { ok: true, endpoint, models: ["lfm2.5-8b-a1b"] } : { ok: false, endpoint, detail: "Only a server on a network of your own can be used here: this computer, your local network, or a VPN such as Tailscale." }),
     repairQueue: async (vaultId: string) => (vaultId === "v1" ? { requeued: ["Foreword"], dropped: ["Old"] } : { requeued: [], dropped: [], skipped: "no pipeline" }),
     modelCatalog: async (endpoint?: string) => ({ ok: true, models: [{ id: "a", name: "A", free: false }], endpoint: endpoint ?? "saved" }),
     fillConnection: async (id, opts) => {

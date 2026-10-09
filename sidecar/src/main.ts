@@ -49,7 +49,8 @@ function requestStop(): void {
 
 /** When this engine came up: runs that began earlier belong to a previous life of it. */
 const ENGINE_STARTED_AT = new Date().toISOString();
-import { privateHostAllow, isLocalEndpoint } from "./egress.js";
+import { privateHostAllow, isLocalEndpoint, resolvesPrivate } from "./egress.js";
+import { isIP } from "node:net";
 import type { PipelineTemplate } from "./templates.js";
 import { createRequire } from "node:module";
 import { createProtectionSwitch } from "./protection.js";
@@ -367,7 +368,16 @@ async function main(): Promise<void> {
     // An address from the form asks that service with the key; without one, the saved provider answers (ChatGPT: the account's models).
     modelCatalog: (endpoint) =>
       !endpoint && readSettings(cfg.dataDir).models.provider === "chatgpt" ? chatgpt.catalog() : fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, hostedKey()),
-    probeModels: (endpoint) => probeLocalModels(endpoint, (e) => isLocalEndpoint(e) || privateHostAllow(e) !== null),
+    probeModels: (endpoint) => probeLocalModels(endpoint, (e) => resolvesPrivate(e)),
+    privateHost: async (endpoint) => {
+      let host: string;
+      try {
+        host = new URL(endpoint).hostname.toLowerCase();
+      } catch {
+        return null;
+      }
+      return !isIP(host.replace(/^\[|\]$/g, "")) && (await resolvesPrivate(endpoint)) ? host : null;
+    },
     discoverModels: async () => {
       const [gpu, servers] = await Promise.all([
         detectGraphicsMemory(),

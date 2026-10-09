@@ -152,3 +152,18 @@ describe("the model's provider", () => {
     expect(writeSettings(d, { models: { endpoint: "https://api.openai.com/v1" } }).models.provider).toBe("openai");
   });
 });
+
+describe("a model server named on a network of your own", () => {
+  it("is local while its address stays, as the engine marked it when saved, and stops being so when the address changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kv-settings-private-"));
+    writeSettings(dir, { models: { endpoint: "http://gpu-box.tail1234.ts.net:11434/v1", model: "qwen3", privateHost: "gpu-box.tail1234.ts.net" } });
+    expect(readSettings(dir).models.local).toBe(true);
+    writeSettings(dir, { models: { model: "llama4" } }); // another model, same server
+    expect(readSettings(dir).models.local).toBe(true);
+    writeSettings(dir, { models: { endpoint: "https://gpu-box.example.com/v1" } }); // another address: not marked
+    expect(readSettings(dir).models.local).toBe(false);
+    writeSettings(dir, { models: { endpoint: "http://other.tail1234.ts.net/v1", privateHost: "gpu-box.tail1234.ts.net" } }); // a mark for another name
+    expect(readSettings(dir).models.local).toBe(false);
+  });
+});
+

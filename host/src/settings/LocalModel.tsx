@@ -191,7 +191,7 @@ export function LocalModel({ current, probe, use, disabled, storage, discover }:
           {checking ? "Connecting…" : "Connect"}
         </button>
       </div>
-      <p className="kv-hint">The address of its OpenAI-compatible API — usually ends in <code>/v1</code>.</p>
+      <p className="kv-hint">Its OpenAI-compatible API, usually ending in <code>/v1</code>. It can be on this computer, your local network or a VPN such as Tailscale.</p>
       {status}
       {result?.ok && (
         <>

@@ -53,7 +53,8 @@ export type OnboardingState = "skipped" | "done";
 export type UiSettings = { closeToTray: boolean; onboarding?: OnboardingState };
 export type AppSettings = { version: 1; models: ModelSettings; conversion: ConversionSettings; ui: UiSettings };
 export type SettingsPatch = {
-  models?: { endpoint?: string; model?: string; apiKey?: string | null; provider?: keyof typeof PROVIDER_ENDPOINTS };
+  /** `privateHost`: set by the engine, never the page: the endpoint's name, resolved to a network of your own when it was saved. */
+  models?: { endpoint?: string; model?: string; apiKey?: string | null; provider?: keyof typeof PROVIDER_ENDPOINTS; privateHost?: string | null };
   conversion?: { mode?: ConversionMode; remoteUrl?: string };
   ui?: { closeToTray?: boolean; onboarding?: OnboardingState };
 };
@@ -111,14 +112,24 @@ export function readModelKey(dataDir: string): string | undefined {
   }
 }
 
+function hostnameOf(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
 export function readSettings(dataDir: string): AppSettings {
   const raw = readRaw(dataDir);
   const models = (raw.models && typeof raw.models === "object" ? raw.models : {}) as Record<string, unknown>;
   const conversion = (raw.conversion && typeof raw.conversion === "object" ? raw.conversion : {}) as Record<string, unknown>;
   const ui = (raw.ui && typeof raw.ui === "object" ? raw.ui : {}) as Record<string, unknown>;
   const endpoint = typeof models.endpoint === "string" && models.endpoint ? models.endpoint : DEFAULT_ENDPOINT;
-  // This computer or the local network: needs no key, takes one source at a time (review I1).
-  const local = isLocalEndpoint(endpoint) || privateHostAllow(endpoint) !== null;
+  // This computer or a network of your own: needs no key, takes one source at a time (review I1). A name (a LAN's, a
+  // VPN's such as Tailscale's MagicDNS) cannot be resolved here; it was resolved when it was saved, and is remembered.
+  const privateHost = typeof models.privateHost === "string" ? models.privateHost : undefined;
+  const local = isLocalEndpoint(endpoint) || privateHostAllow(endpoint) !== null || (privateHost !== undefined && privateHost === hostnameOf(endpoint));
   // The ChatGPT plan is marked, not inferred (it shares OpenAI's address); its "key" is a sign-in allowed to use the plan.
   const chatgpt = models.provider === "chatgpt" && !local;
   return {
@@ -143,10 +154,12 @@ export function writeSettings(dataDir: string, patch: SettingsPatch): AppSetting
   const raw = readRaw(dataDir);
   const current = readSettings(dataDir);
   // "chatgpt" is a mark beside OpenAI's address: it stays until another provider or an address is chosen.
-  const models: { endpoint: string; model: string; provider?: "chatgpt" } = {
+  const storedModels = (raw.models && typeof raw.models === "object" ? raw.models : {}) as Record<string, unknown>;
+  const models: { endpoint: string; model: string; provider?: "chatgpt"; privateHost?: string } = {
     endpoint: current.models.endpoint,
     model: current.models.model,
     ...(current.models.provider === "chatgpt" ? { provider: "chatgpt" as const } : {}),
+    ...(typeof storedModels.privateHost === "string" ? { privateHost: storedModels.privateHost } : {}),
   };
   if (patch.models) {
     if (patch.models.provider === "chatgpt") {
@@ -165,6 +178,9 @@ export function writeSettings(dataDir: string, patch: SettingsPatch): AppSetting
       if (!/^https?:\/\//.test(endpoint)) throw new SettingsError("The model endpoint must be an http(s) URL.");
       models.endpoint = normalizeEndpoint(endpoint);
     }
+    // A new address drops the old one's mark; the engine marks the new one when its name resolved to your network.
+    if (models.endpoint !== current.models.endpoint || patch.models.privateHost !== undefined) delete models.privateHost;
+    if (typeof patch.models.privateHost === "string" && patch.models.privateHost === hostnameOf(models.endpoint)) models.privateHost = patch.models.privateHost;
     if (typeof patch.models.model === "string") models.model = patch.models.model.trim();
     if (patch.models.apiKey !== undefined) {
       if (patch.models.apiKey === null || patch.models.apiKey === "") {
