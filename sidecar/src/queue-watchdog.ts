@@ -7,7 +7,9 @@ import { execute, gql, toActions } from "./reactor-gql.js";
  * no handoff — the model refused, the key ran dry), and one whose source was deleted. The
  * watchdog fails the first and queues it again as a fresh task (which the trigger will fire),
  * and fails the second with its reason. It never touches a task while a run is in progress,
- * and only after a task has been held for a while.
+ * and only after a task has been held for a while. Each pass then asks the vault to catch the
+ * queue up with what it already holds (POST tasks/reconcile): a task whose report was lost, or a
+ * fresh one for a source already extracted, moves past every phase the vault proves done.
  */
 export type QueueTask = {
   id: string;
@@ -57,20 +59,28 @@ export function planRepairs(tasks: readonly QueueTask[], sourceIds: ReadonlySet<
   return out;
 }
 
-export type SourceState = { id: string; name: string; status: string; claims: number };
+export type SourceState = {
+  id: string;
+  name: string;
+  status: string;
+  claims: number;
+  /** An extraction ran to the end and recorded its stats: "extracted, no claims" is then its result, not a loss. */
+  statsRecorded?: boolean;
+};
 export type SourceRepair =
   | { kind: "reopen"; source: SourceState; reason: string }
   | { kind: "queue"; source: SourceState; reason: string };
 
 /**
- * A source must never read as extracted without claims, and one that says it is being extracted
- * must have a task to do it. Checked on the start-up pass, over every source of the vault.
+ * A source must never read as extracted without claims, unless an extraction ran to the end and found
+ * none (a contacts page, a table the model cannot read: its stats say so), and one that says it is
+ * being extracted must have a task to do it. Checked on the start-up pass, over every source of the vault.
  */
 export function planSourceRepairs(sources: readonly SourceState[], tasks: readonly QueueTask[]): SourceRepair[] {
   const open = new Set(tasks.filter((t) => t.taskType === "claim" && (t.status === "PENDING" || t.status === "IN_PROGRESS")).map((t) => t.documentRef ?? ""));
   const out: SourceRepair[] = [];
   for (const s of sources) {
-    if (s.status === "EXTRACTED" && s.claims === 0) {
+    if (s.status === "EXTRACTED" && s.claims === 0 && !s.statsRecorded) {
       out.push({ kind: "reopen", source: s, reason: "marked extracted but no claims were ever made" });
       if (!open.has(s.id)) out.push({ kind: "queue", source: s, reason: "queued again" });
     } else if (s.status === "EXTRACTING" && !open.has(s.id)) {
@@ -86,7 +96,32 @@ export type WatchdogDeps = {
   now?: () => string;
   newId?: () => string;
 };
-export type WatchdogResult = { requeued: string[]; dropped: string[]; reopened?: string[]; queued?: string[]; skipped?: string };
+export type WatchdogResult = {
+  requeued: string[];
+  dropped: string[];
+  reopened?: string[];
+  queued?: string[];
+  /** Tasks the vault's catch-up moved on (POST tasks/reconcile), each "title: phase, phase". */
+  caughtUp?: string[];
+  skipped?: string;
+};
+
+/**
+ * The vault's own catch-up: every waiting task moved past each phase its notes, links and MoC places
+ * already prove (a report the pipeline lost). An engine whose vault package predates the route answers
+ * 404, which is no failure: the pass goes on without it.
+ */
+export async function catchUpQueue(deps: WatchdogDeps, vaultId: string): Promise<string[]> {
+  const res = await deps.fetchImpl(`${deps.origin}/api/@powerhousedao/knowledge-note/tasks/reconcile`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ drive: vaultId, by: "desktop app" }),
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`the vault's catch-up answered ${res.status}`);
+  const body = (await res.json()) as { advanced?: Array<{ title?: string; phases?: string[] }> };
+  return (body.advanced ?? []).map((a) => `${a.title ?? "?"}: ${(a.phases ?? []).join(", ")}`);
+}
 export type PassOptions = {
   /** The first pass after the engine started: everything held was cut off, and the sources are checked too. */
   startup?: boolean;
@@ -146,14 +181,14 @@ export async function repairQueue(deps: WatchdogDeps, vaultId: string, workflowI
     // The sources, once per launch: never "extracted" without claims, never "extracting" without a task.
     const sources: SourceState[] = [];
     for (const id of sourceIds) {
-      const doc = await gql<{ document: { document: { name: string; state: { global: { status?: string; extractedClaims?: unknown[] } } } } }>(
+      const doc = await gql<{ document: { document: { name: string; state: { global: { status?: string; extractedClaims?: unknown[]; extractionStats?: unknown } } } } }>(
         deps.origin,
         `query($id: String!) { document(idOrSlug: $id) { document { name state } } }`,
         { id },
         f,
       );
       const g = doc.document.document.state.global;
-      sources.push({ id, name: doc.document.document.name, status: g.status ?? "", claims: g.extractedClaims?.length ?? 0 });
+      sources.push({ id, name: doc.document.document.name, status: g.status ?? "", claims: g.extractedClaims?.length ?? 0, statsRecorded: !!g.extractionStats });
     }
     // Tasks this pass is adding count as open for the sources they cover.
     const afterRepairs = [...tasks, ...repairs.filter((r) => r.kind === "requeue").map((r) => ({ ...r.task, status: "PENDING" }))];
@@ -172,6 +207,14 @@ export async function repairQueue(deps: WatchdogDeps, vaultId: string, workflowI
   }
 
   if (ops.length) await execute(deps.origin, queueId, toActions(ops, () => at), f);
+  // Then the vault's catch-up, over the queue as just repaired: a fresh task for a source already
+  // extracted moves straight past what is done. Its failure never undoes the repairs above.
+  try {
+    const caught = await catchUpQueue(deps, vaultId);
+    if (caught.length) result.caughtUp = caught;
+  } catch (error) {
+    console.warn(`[sidecar] queue watchdog (${vaultId}): the vault's catch-up failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return result;
 }
 
@@ -198,6 +241,7 @@ export function startQueueWatchdog(opts: {
           const r = await repairQueue(opts.deps, p.vaultId, p.workflowId, { startup, engineStartedAt: opts.engineStartedAt });
           const touched = r.requeued.length + r.dropped.length + (r.reopened?.length ?? 0) + (r.queued?.length ?? 0);
           if (touched) log(`queue watchdog (${p.vaultId}${startup ? ", start-up" : ""}): queued again ${r.requeued.length + (r.queued?.length ?? 0)} (${[...r.requeued, ...(r.queued ?? [])].join(", ")}); dropped ${r.dropped.length} for a missing source; reopened ${r.reopened?.length ?? 0} marked extracted without claims`);
+          if (r.caughtUp?.length) log(`queue watchdog (${p.vaultId}): caught up from the vault: ${r.caughtUp.join("; ")}`);
         } catch (error) {
           log(`queue watchdog (${p.vaultId}) failed: ${error instanceof Error ? error.message : String(error)}`);
         }

@@ -47,12 +47,21 @@ describe("planSourceRepairs", () => {
       ["queue", "Waiting"],
     ]);
   });
+  it("leaves a source whose extraction ran to the end and found nothing: its stats say so", () => {
+    const sources = [{ id: "s1", name: "Contacts page", status: "EXTRACTED", claims: 0, statsRecorded: true }];
+    expect(planSourceRepairs(sources, [])).toEqual([]);
+  });
 });
 
 describe("repairQueue", () => {
-  function engine(tasks: QueueTask[], runStatus = "SUCCEEDED", sourceStatus = "EXTRACTING") {
+  function engine(tasks: QueueTask[], runStatus = "SUCCEEDED", sourceStatus = "EXTRACTING", catchUp: { status: number; body?: unknown } = { status: 404 }) {
     const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
-    const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
+    const caughtUp: unknown[] = [];
+    const fetchImpl = vi.fn(async (u: unknown, init?: { body?: unknown }) => {
+      if (String(u).endsWith("/api/@powerhousedao/knowledge-note/tasks/reconcile")) {
+        caughtUp.push(JSON.parse(String(init?.body)));
+        return { ok: catchUp.status < 300, status: catchUp.status, json: async () => catchUp.body ?? {} };
+      }
       const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
       calls.push(body);
       if (body.query.includes("runsPage")) return { ok: true, json: async () => ({ data: { workflowRuntime: { runsPage: { items: [{ status: runStatus, startedAt: "2026-10-08T10:20:00.000Z" }] } } } }) };
@@ -68,7 +77,7 @@ describe("repairQueue", () => {
       }
       throw new Error(`unexpected query: ${body.query}`);
     }) as unknown as typeof fetch;
-    return { fetchImpl, calls };
+    return { fetchImpl, calls, caughtUp };
   }
   const deps = (fetchImpl: typeof fetch) => ({ origin: "http://127.0.0.1:4201", fetchImpl, now: () => NOW, newId: () => "new-id" });
 
@@ -82,6 +91,24 @@ describe("repairQueue", () => {
       { type: "ADD_TASK", input: { id: "new-id", taskType: "claim", target: "Foreword", documentRef: "src1", createdAt: NOW } },
       { type: "FAIL_TASK", input: { taskId: "orphan", reason: "the source no longer exists", updatedAt: NOW } },
     ]);
+  });
+  it("asks the vault to catch the queue up after its own repairs, and reports what moved", async () => {
+    const e = engine([t({ id: "fine" })], "SUCCEEDED", "EXTRACTING", { status: 200, body: { advanced: [{ title: "Foreword", phases: ["create", "reflect"] }, { phases: [] }] } });
+    expect(await repairQueue(deps(e.fetchImpl), "vault1", "wf-1")).toEqual({ requeued: [], dropped: [], caughtUp: ["Foreword: create, reflect", "?: "] });
+    expect(e.caughtUp).toEqual([{ drive: "vault1", by: "desktop app" }]);
+    // nothing moved: nothing reported
+    const quiet = engine([t({ id: "fine" })], "SUCCEEDED", "EXTRACTING", { status: 200, body: {} });
+    expect(await repairQueue(deps(quiet.fetchImpl), "vault1", "wf-1")).toEqual({ requeued: [], dropped: [] });
+  });
+  it("goes on without the catch-up on an engine that predates it, or when it fails", async () => {
+    const old = engine([t({ id: "fine" })]);
+    expect(await repairQueue(deps(old.fetchImpl), "vault1", "wf-1")).toEqual({ requeued: [], dropped: [] });
+    expect(old.caughtUp).toHaveLength(1);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const broken = engine([t({ id: "stuck", status: "IN_PROGRESS", updatedAt: "2026-10-08T10:05:00.000Z" })], "SUCCEEDED", "EXTRACTING", { status: 500 });
+    expect((await repairQueue(deps(broken.fetchImpl), "vault1", "wf-1")).requeued).toEqual(["Foreword"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/the vault's catch-up failed: the vault's catch-up answered 500/));
+    warn.mockRestore();
   });
   it("does nothing while a run is in progress", async () => {
     const e = engine([t({ id: "stuck", status: "IN_PROGRESS", updatedAt: "2026-10-08T10:05:00.000Z" })], "RUNNING");
