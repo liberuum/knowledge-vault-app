@@ -155,10 +155,12 @@ vault as files. Uninstalling the app leaves your data in place; *Delete all loca
 
 ## Working with a team
 
-Sign in with **Renown** (Settings › Identity) to use a shared Knowledge Vault hosted on a Powerhouse server. Choose
-**Connect remote vault**, enter the server address and the vault, and it appears next to your local vaults. You can
-open it as long as its administrator has given your account access. You can also **protect** your local vaults so
-that every change is signed with your identity.
+To use a shared Knowledge Vault hosted on a Powerhouse server, choose **Connect remote vault** and paste the server's
+address: with or without `/graphql`, or a link to one of its vaults. The app lists the vaults that server lets you
+read; pick one or several and they appear next to your local vaults. A vault on an open server needs no sign-in. For
+a protected one, sign in with **Renown** first (Settings › Identity); you can open it as long as its administrator
+has given your account access. You can also **protect** your local vaults so that every change is signed with your
+identity.
 
 ## Use it with your own tools
 
