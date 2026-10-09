@@ -108,7 +108,8 @@ back to it any time from **Settings › About**.
    one you pick with a real request before you go on:
    - **On this computer**: the app looks for a model already running here (Ollama, LM Studio, llama.cpp, vLLM,
      Jan and others) and offers the one it finds. Free, private, and nothing leaves your machine. If there is none,
-     it tells you what size of model your graphics card runs well.
+     it tells you what size of model your graphics card runs well. A model on another computer of yours works too,
+     on your local network or over a VPN such as Tailscale: choose *A server at another address*.
    - **Continue with ChatGPT**: use your ChatGPT Plus or Pro plan. You sign in once in the browser; no API key.
    - **OpenRouter**: one account for hundreds of models, pay as you go. Sign in with OpenRouter; no key to paste.
    - **API key**: OpenAI, Anthropic, Google Gemini, xAI, or any other OpenAI-compatible service.

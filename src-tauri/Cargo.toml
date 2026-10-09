@@ -1,6 +1,6 @@
 [package]
 name = "knowledge-vault-app"
-version = "0.2.0"
+version = "0.2.1"
 description = "Knowledge Vault — a local desktop app for the Powerhouse Knowledge Vault"
 authors = ["Powerhouse"]
 license = "AGPL-3.0-only"
