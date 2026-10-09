@@ -408,7 +408,10 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-gs-step[data-done="true"] .kv-gs-text strong { color: var(--bai-text-secondary); font-weight: 500; }
 .kv-gs-action { justify-self: end; }
 .kv-gs-action .kv-hint { margin: 0; font-size: 13px; }
-.kv-gs-optional-label { margin: 6px 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--bai-text-tertiary); }
+.kv-gs-group { display: grid; gap: 2px; }
+.kv-gs-group-label { margin: 6px 0 2px 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--bai-text-tertiary); }
+.kv-gs[data-variant="settings"] { margin: 0; }
+.kv-gs-closed { margin: 0 0 16px; }
 .kv-gs-tools { display: grid; gap: 8px; padding: 4px 10px 0 44px; }
 .kv-gs-tools .kv-hint { margin: 0; }
 @media (max-width: 640px) {

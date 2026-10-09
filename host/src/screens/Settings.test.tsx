@@ -500,21 +500,21 @@ describe("Settings › Models chooses a provider", () => {
     expect(screen.getByText("Free tier: Google uses what you send to improve its products.")).toBeTruthy();
   });
 
-  it("offers this computer, ChatGPT, OpenRouter and an API key as four cards in one radio group", async () => {
+  it("offers this computer, OpenRouter and an API key as cards in one radio group, and ChatGPT as its sign-in button below them", async () => {
     render(<Harness api={api()} start="models" />);
     const group = await screen.findByRole("radiogroup", { name: "AI model provider" });
     const cards = within(group).getAllByRole("radio");
     expect(cards.map((c) => c.textContent)).toEqual([
       "On this computer A model running here: free, private, no key.",
-      "ChatGPT Use your ChatGPT Plus or Pro plan: just sign in, no key.",
       "OpenRouter One account, hundreds of models, pay as you go.",
       "API key OpenAI, Anthropic, Google Gemini, xAI or another service.",
     ]);
-    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"]); // the saved provider is OpenRouter
-    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "0", "-1"]); // one tab stop: the chosen card
-    fireEvent.click(cards[3]!);
-    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "true"]);
-    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1", "0"]);
+    expect(within(group).getByRole("button", { name: /Continue with ChatGPT/ })).toBeTruthy(); // not a card until chosen
+    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]); // the saved provider is OpenRouter
+    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "0", "-1"]); // one tab stop: the chosen card
+    fireEvent.click(cards[2]!);
+    expect(cards.map((c) => c.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    expect(cards.map((c) => c.getAttribute("tabindex"))).toEqual(["-1", "-1", "0"]);
   });
 
   it.each([
@@ -542,7 +542,7 @@ describe("Settings › Models chooses a provider", () => {
 
   it("moves between the cards with the arrow keys, choosing as it goes — and leaves the arrows to the fields inside", async () => {
     render(<Harness api={api()} start="models" />);
-    const [local, , router, apiKey] = (await screen.findAllByRole("radio")) as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    const [local, router, apiKey] = (await screen.findAllByRole("radio")) as [HTMLElement, HTMLElement, HTMLElement];
     const chosen = () => screen.getByRole("radio", { checked: true });
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowLeft" });

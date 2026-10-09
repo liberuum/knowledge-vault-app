@@ -13,6 +13,8 @@ import type { IdentityController } from "../state/use-identity.js";
 import { ModelsSection } from "../settings/Models.js";
 import { VaultsSection } from "../settings/Vaults.js";
 import { WorkflowsSection } from "../settings/Workflows.js";
+import { GettingStartedSection } from "../settings/GettingStartedSection.js";
+import type { VaultView } from "../landing/GettingStarted.js";
 
 export type SettingsApi = {
   fetchVaults: (info: SidecarInfo) => Promise<VaultSummary[]>;
@@ -63,6 +65,7 @@ export const realSettingsApi: SettingsApi = {
 };
 
 const LABELS: Record<SettingsSection, string> = {
+  start: "Getting started",
   vaults: "Vaults",
   appearance: "Appearance",
   models: "Models",
@@ -81,10 +84,14 @@ type Props = {
   onOpenWorkflows: () => void;
   api?: SettingsApi;
   identity: IdentityController;
+  /** Settings › Getting started: its steps open a vault on a view, the create form, or the setup guide. */
+  onOpenView?: (vault: VaultSummary, view: VaultView) => void;
+  onNewVault?: () => void;
+  onGuide?: () => void;
 };
 
 /** Settings as a full page: the sections list is where a sidebar belongs — here the sections are peers. */
-export function Settings({ info, section, onSection, onBack, onOpenWorkflows, api = realSettingsApi, identity }: Props) {
+export function Settings({ info, section, onSection, onBack, onOpenWorkflows, api = realSettingsApi, identity, onOpenView, onNewVault, onGuide }: Props) {
   return (
     <div className="kv-vault-screen">
       <AppBar title="Settings" onBack={onBack} />
@@ -98,6 +105,17 @@ export function Settings({ info, section, onSection, onBack, onOpenWorkflows, ap
         </nav>
         <section className="kv-settings-panel" aria-labelledby="settings-section-heading">
           <h2 id="settings-section-heading" className="kv-settings-heading">{LABELS[section]}</h2>
+          {section === "start" && (
+            <GettingStartedSection
+              info={info}
+              api={api}
+              onOpenView={onOpenView ?? (() => undefined)}
+              onNewVault={onNewVault ?? onBack}
+              onModels={() => onSection("models")}
+              onWorkflows={onOpenWorkflows}
+              onGuide={onGuide ?? onBack}
+            />
+          )}
           {section === "vaults" && <VaultsSection info={info} api={api} identity={identity} />}
           {section === "appearance" && <AppearanceSection info={info} api={api} />}
           {section === "models" && <ModelsSection info={info} api={api} />}

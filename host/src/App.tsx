@@ -145,7 +145,22 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
       );
       break;
     case "settings":
-      screen = <Settings info={info} section={route.section} onSection={(section) => navigate({ name: "settings", section })} onBack={toVaults} onOpenWorkflows={toWorkflows} identity={identity} />;
+      screen = (
+        <Settings
+          info={info}
+          section={route.section}
+          onSection={(section) => navigate({ name: "settings", section })}
+          onBack={toVaults}
+          onOpenWorkflows={toWorkflows}
+          identity={identity}
+          onOpenView={(v, view) => {
+            setOpenView(v.id, view);
+            navigate({ name: "vault", id: v.id });
+          }}
+          onNewVault={() => navigate({ name: "vaults", newVault: true })}
+          onGuide={() => toGuide()}
+        />
+      );
       break;
     default:
       // Until the start-up gate decided, the landing waits: a newcomer goes straight to the guide, no flash.
@@ -164,6 +179,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           localBearer={bearer}
           onGuide={() => toGuide()}
           onModels={() => navigate({ name: "settings", section: "models" })}
+          onStartSettings={() => navigate({ name: "settings", section: "start" })}
           onOpenView={(v, view) => {
             setOpenView(v.id, view);
             navigate({ name: "vault", id: v.id });

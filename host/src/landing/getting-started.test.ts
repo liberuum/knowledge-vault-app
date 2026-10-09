@@ -5,26 +5,22 @@ function storage(entries: Record<string, string> = {}): Storage {
   const m = new Map(Object.entries(entries));
   return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k), clear: () => m.clear(), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; } };
 }
+const facts = { modelReady: false, vaults: [], asked: false, readNotes: false, explored: {}, toolsCopied: false };
 
 describe("getting started", () => {
-  it("ticks each step from what was done, optional ones apart", () => {
-    const none = gettingStartedSteps({ modelReady: false, vaults: [], asked: false, readNotes: false, toolsCopied: false });
+  it("sets up, then explores, each step ticked from what was done", () => {
+    const none = gettingStartedSteps(facts);
     expect(none.filter((s) => s.done)).toEqual([]);
-    expect(none.filter((s) => s.optional).map((s) => s.id)).toEqual(["tools"]);
-    const vault = { id: "v", slug: "v", name: "V", noteCount: 0, sourceCount: 2 };
-    const some = gettingStartedSteps({ modelReady: true, vaults: [vault], asked: false, readNotes: false, toolsCopied: false });
-    expect(some.filter((s) => s.done).map((s) => s.id)).toEqual(["model", "vault", "source"]);
-    // A vault with notes but no source count (an older engine) has had a source.
-    const older = gettingStartedSteps({ modelReady: true, vaults: [{ id: "o", slug: "o", name: "O", noteCount: 4 }], asked: false, readNotes: false, toolsCopied: false });
-    expect(older.find((s) => s.id === "source")?.done).toBe(true);
+    expect(none.map((s) => `${s.group}:${s.id}`)).toEqual(["setup:model", "setup:vault", "setup:source", "explore:notes", "explore:chat", "explore:graph", "explore:search", "explore:processing", "optional:tools"]);
+    const some = gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ id: "o", slug: "o", name: "O", noteCount: 4 }], explored: { graph: true } });
+    expect(some.filter((s) => s.done).map((s) => s.id)).toEqual(["model", "vault", "source", "graph"]); // notes imply a source
   });
   it("reads a question asked in the chat, and remembers what only this window knows", () => {
     expect(askedAQuestion(storage({ "bai-chat:v1:v": JSON.stringify([{ messages: [{ role: "assistant", content: "Hi" }] }]) }))).toBe(false);
     expect(askedAQuestion(storage({ "bai-chat:v1:v": JSON.stringify([{ messages: [{ role: "user", content: "What is X?" }] }]) }))).toBe(true);
-    expect(askedAQuestion(storage({ "bai-chat:v1:v": "{broken" }))).toBe(false);
     const s = storage();
-    remember(s, { readNotes: true });
-    remember(s, { collapsed: true });
-    expect(readRemembered(s)).toEqual({ readNotes: true, collapsed: true });
+    remember(s, { explored: { graph: true } });
+    remember(s, { explored: { search: true }, hidden: true });
+    expect(readRemembered(s)).toEqual({ explored: { graph: true, search: true }, hidden: true });
   });
 });

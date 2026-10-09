@@ -89,8 +89,10 @@ type Props = {
   onGuide?: () => void;
   /** Settings › Models, from the getting-started checklist. */
   onModels?: () => void;
-  /** Opens a vault on one of its views (Sources, Notes, Chat), from the getting-started checklist. */
+  /** Opens a vault on one of its views (Sources, Notes, Chat, Graph, Search), from the getting-started list. */
   onOpenView?: (vault: VaultSummary, view: VaultView) => void;
+  /** Settings › Getting started: where the list is when closed. */
+  onStartSettings?: () => void;
 };
 
 /**
@@ -98,7 +100,7 @@ type Props = {
  * recently opened one largest; on first run, the inline create form; the
  * engine's state in a strip at the bottom. Never a workspace.
  */
-export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide, onModels, onOpenView }: Props) {
+export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide, onModels, onOpenView, onStartSettings }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const [vaults, setVaults] = useState<VaultSummary[] | null>(null);
   const [remotes, setRemotes] = useState<RemoteVault[] | null>(null);
@@ -348,7 +350,9 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
             onModels={onModels}
             onNewVault={() => setShowForm(true)}
             onOpenView={onOpenView ? openView : undefined}
+            onWorkflows={onWorkflows}
             onGuide={onGuide}
+            onOpenSettings={onStartSettings}
           />
         )}
         {loading && (
