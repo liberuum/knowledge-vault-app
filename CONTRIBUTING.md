@@ -14,6 +14,17 @@ to use it, see the [README](README.md).
 
 The installers bundle their own Node (24 LTS) for the engine, so users install nothing else.
 
+**One model for the whole app.** The engine's control server hosts an OpenAI-compatible model gateway at `/llm/v1`
+(`sidecar/src/gateway/`). The vault chat and every pipeline reach the model through it, so the provider's key stays
+in the engine: the page never sees it, and a pipeline's connection holds only the gateway's own key
+(`secrets/gateway.key`). The gateway forwards to the provider chosen in Settings › Models (a server on this computer,
+OpenRouter, OpenAI, Anthropic through its native Messages API, Gemini, xAI or another service), queues requests so a
+local model that answers one at a time is never flooded (the chat goes first), and turns provider errors into plain
+sentences. With **Continue with ChatGPT** (`sidecar/src/chatgpt/`), the engine signs in with OpenAI's "Sign in with
+ChatGPT" for open-source apps, keeps and renews the tokens in `secrets/chatgpt.json`, and the gateway translates
+requests to the Responses API. Models running on this computer are found by probing every listening port for the
+known servers' endpoints (`sidecar/src/model-discovery.ts`).
+
 The Knowledge Vault app itself — its document models, editors, the pipeline's workflow piece — comes from the
 published package `@powerhousedao/knowledge-note`, pinned in `host/package.json` and `sidecar/package.json` and
 resolved from the Powerhouse registry (`bunfig.toml` and `.npmrc` route the `@powerhousedao` scope to
@@ -64,10 +75,13 @@ node scripts/seed-demo-vault.mjs --name "Team wiki" --size small
 
 ### Working on the Knowledge Vault package at the same time
 
-Point both dependencies at your checkout for the session —
-`"@powerhousedao/knowledge-note": "file:../../bai-knowledge-note"` — run `bun install`, and after each rebuild of the
-package clear Vite's cache (`rm -rf host/node_modules/.vite`). Switch back to a published version before committing:
-installers and CI only build from published versions.
+```bash
+bun run dev:vault        # the same loop, with the vault app served live from ../bai-knowledge-note
+```
+
+The window then takes the vault's editors and styles from your checkout as you save. The engine still runs the
+installed package: a change to its server side (subgraphs, processors, the pipeline step) needs a package build and an
+engine restart. Installers and CI only build from published versions of the package.
 
 ## Build an installer
 

@@ -99,26 +99,35 @@ The app is not notarised by Apple yet, so the first time you open it macOS stops
 If you prefer the Terminal, this does the same in one step:
 `xattr -dr com.apple.quarantine "/Applications/Knowledge Vault.app"`
 
-### 2. Create a vault
+### 2. Follow the setup guide
 
-Open the app and choose **New vault**. Give it a name — that is all.
+The first time you open the app, a short setup guide walks you through what it needs. You can skip it and come
+back to it any time from **Settings › About**.
 
-### 3. Connect an AI model
+1. **Choose your AI.** The pipeline and the chat need a language model. The guide offers four ways, and checks the
+   one you pick with a real request before you go on:
+   - **On this computer**: the app looks for a model already running here (Ollama, LM Studio, llama.cpp, vLLM,
+     Jan and others) and offers the one it finds. Free, private, and nothing leaves your machine. If there is none,
+     it tells you what size of model your graphics card runs well.
+   - **Continue with ChatGPT**: use your ChatGPT Plus or Pro plan. You sign in once in the browser; no API key.
+   - **OpenRouter**: one account for hundreds of models, pay as you go. Sign in with OpenRouter; no key to paste.
+   - **API key**: OpenAI, Anthropic, Google Gemini, xAI, or any other OpenAI-compatible service.
+2. **Name your first vault.**
+3. **Add your first sources**: drop files, paste text, or start with the app's own guide, *How Knowledge Vault
+   works*, whose notes explain how the app works.
+4. **Watch your vault fill up.** Each source is read and turned into notes within a few minutes; the guide shows the
+   progress and what you can do meanwhile.
 
-The pipeline and the chat need a language model. Go to **Settings › Models** and either:
+Everything the guide sets up can be changed later in **Settings › Models**. The chat and the processing both use
+that one model; your keys stay inside the app's engine and are never shown again.
 
-- paste an **[OpenRouter](https://openrouter.ai)** key, which gives you access to many models with one account, or
-- point the app at a model running **on your own computer** (Ollama, LM Studio or any OpenAI-compatible server) —
-  then nothing leaves your machine at all.
+### 3. Keep going with the checklist
 
-Once a model is set, every vault gets its processing pipeline automatically.
+The front page keeps a short **Getting started** list: add a source, read your first notes, ask your vault a
+question, and, if you like, use your vault from Claude Code, Codex or Gemini CLI. Each step
+ticks itself when you have done it, and the next one is always one click away.
 
-### 4. Add your first source
-
-Open your vault, add a source (drop a file or paste text) and choose **Queue for processing**. A minute or two later
-your first notes appear, linked and organised. Open them to review and approve.
-
-**Tip:** sources with several related points give the richest results — a short source with only one or two claims
+**Tip:** sources with several related points give the richest results. A short source with only one or two claims
 is kept, but needs company before it gets its own map.
 
 ## Privacy and your data
@@ -128,7 +137,8 @@ settings and your sign-in. The app does not collect usage data and has no analyt
 
 **What leaves it, only when you choose:**
 
-- the text sent to the **AI model provider** you configured (none, if you use a local model);
+- the text sent to the **AI model provider** you configured (none, if you use a model on this computer), or to
+  ChatGPT when you use your ChatGPT plan;
 - your requests to a **shared team vault**, if you connect one;
 - signing in with **[Renown](https://renown.id)**, the identity used for shared vaults.
 
@@ -152,18 +162,27 @@ that every change is signed with your identity.
 
 ## Use it with your own tools
 
-The app's engine also serves the vault to other tools on your computer — the Powerhouse command line and AI agents
-that speak MCP. **Settings › Diagnostics › Connect your tools** shows the exact address to use.
+The app's engine also serves your vaults to other tools on your computer, the Powerhouse command line and AI
+agents that speak MCP, while the app is running. One command connects an agent; the **Getting started** list shows
+it ready to copy, with this computer's address:
+
+```bash
+claude mcp add --transport http knowledge-vault http://127.0.0.1:4201/mcp     # Claude Code
+codex mcp add knowledge-vault --url http://127.0.0.1:4201/mcp                 # Codex
+gemini mcp add --transport http knowledge-vault http://127.0.0.1:4201/mcp     # Gemini CLI
+```
+
+**Settings › Diagnostics › Connect your tools** shows the addresses for the Powerhouse command line and GraphQL.
 
 ## Questions
 
 **Does it work offline?** Yes, for everything except the AI steps when you use an online model provider. With a
 local model it works entirely offline.
 
-**What file types can it read?** Text, Markdown, web pages and PDFs with a text layer work out of the box. Word,
-PowerPoint, Excel, scanned PDFs and images can be enabled in **Settings › Conversion**, which installs the extra
-components on request — on Linux, Windows and Apple silicon Macs. (Intel Macs can use a conversion server instead;
-the same settings page explains how.)
+**What file types can it read?** Text, Markdown, web pages and PDFs with a text layer work out of the box. For
+Word, PowerPoint, Excel, scanned PDFs and images the app installs its document converter on its own the first time it
+starts, on Linux, Windows and Apple silicon Macs. **Settings › Conversion** shows its state and can remove it, or
+point the app at a conversion server instead.
 
 **How much does the AI cost?** It depends on your provider and model. Processing a typical article costs a fraction
 of a cent with an efficient model; each run in Workflow Studio shows its cost.
