@@ -7,7 +7,7 @@ import { SettingsError, type AppSettings } from "./settings.js";
 import { RemoteAuthError, RemoteInputError, type RemoteVault } from "./remote.js";
 import { NotAVaultError, type VaultSummary } from "./vaults.js";
 
-const vaults: VaultSummary[] = [{ id: "v1", slug: "research", name: "Research", noteCount: 2 }];
+const vaults: VaultSummary[] = [{ id: "v1", slug: "research", name: "Research", noteCount: 2, sourceCount: 1 }];
 let close: (() => Promise<void>) | undefined;
 let deleted: string[] = [];
 let signedIn = false;
@@ -45,7 +45,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
     hostOrigin: "http://127.0.0.1:4200",
     status: () => ({ ok: true, port: 4201, controlPort: 0, appVersion: "0.1.0", protected: false, dataDir: "/data/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" }),
     listVaults: async () => vaults,
-    createVault: async (name) => ({ id: "v2", slug: "n", name, noteCount: 0 }),
+    createVault: async (name) => ({ id: "v2", slug: "n", name, noteCount: 0, sourceCount: 0 }),
     renameVault: async (id, name) => { if (id !== "v1") throw new NotAVaultError("That drive is not a vault."); return { id, slug: "research", name }; },
     deleteVault: async (id) => { if (id !== "v1") throw new NotAVaultError("That drive is not a vault."); deleted.push(id); },
     workflowsDrive: async () => ({ id: "w1", slug: "workflows", name: "Workflows" }),
@@ -121,7 +121,7 @@ describe("control API", () => {
     expect(await (await fetch(`${base}/vaults`, { headers: h })).json()).toEqual({ vaults });
     const created = await fetch(`${base}/vaults`, { method: "POST", headers: h, body: JSON.stringify({ name: "New" }) });
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ vault: { id: "v2", slug: "n", name: "New", noteCount: 0 }, pipeline: { state: "unconfigured" } });
+    expect(await created.json()).toEqual({ vault: { id: "v2", slug: "n", name: "New", noteCount: 0, sourceCount: 0 }, pipeline: { state: "unconfigured" } });
   });
   it("rejects a vault without a name", async () => {
     const base = await start();
@@ -302,7 +302,7 @@ describe("pipelines over the control API", () => {
     const base = await start();
     const created = await fetch(`${base}/vaults`, { method: "POST", headers: h, body: JSON.stringify({ name: "New" }) });
     expect(created.status).toBe(201);
-    expect(await created.json()).toEqual({ vault: { id: "v2", slug: "n", name: "New", noteCount: 0 }, pipeline: { state: "unconfigured" } });
+    expect(await created.json()).toEqual({ vault: { id: "v2", slug: "n", name: "New", noteCount: 0, sourceCount: 0 }, pipeline: { state: "unconfigured" } });
     const explicit = await fetch(`${base}/vaults/v2/pipeline`, { method: "POST", headers: h });
     expect(explicit.status).toBe(409);
     expect(await explicit.json()).toEqual({ error: "Set up a model first — Settings › Models." });

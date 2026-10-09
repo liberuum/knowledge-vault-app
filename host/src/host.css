@@ -386,3 +386,33 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-offer p { margin: 0; color: var(--bai-text-secondary); font-size: 14px; }
 .kv-offer strong { color: var(--bai-text); font-weight: 600; }
 .kv-offer .kv-form-actions { margin: 0; }
+
+/* The landing's getting-started checklist (design §5): one card, the next step's action highlighted */
+.kv-gs { margin: 0 0 20px; padding: 16px 18px; display: grid; gap: 12px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); }
+.kv-gs-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.kv-gs-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--bai-text); }
+.kv-gs-count { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-gs-head-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 14px; }
+.kv-gs-bar { height: 6px; border-radius: 3px; background: var(--bai-deep); overflow: hidden; }
+.kv-gs-bar > span { display: block; height: 100%; background: var(--bai-accent); border-radius: 3px; transition: width 400ms ease; }
+.kv-gs-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.kv-gs-step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; }
+.kv-gs-step[data-next="true"] { background: var(--bai-deep); }
+.kv-gs-mark { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--bai-border); display: inline-flex; align-items: center; justify-content: center; color: var(--bai-accent-text); }
+.kv-gs-step[data-done="true"] .kv-gs-mark { border-color: var(--bai-ok); background: var(--bai-ok); }
+.kv-gs-step[data-next="true"] .kv-gs-mark { border-color: var(--bai-accent); }
+.kv-gs-text { display: grid; gap: 2px; min-width: 0; }
+.kv-gs-text strong { font-weight: 600; color: var(--bai-text); font-size: 14px; }
+.kv-gs-text > span { color: var(--bai-text-secondary); font-size: 13px; }
+.kv-gs-step[data-done="true"] .kv-gs-text strong { color: var(--bai-text-secondary); font-weight: 500; }
+.kv-gs-action { justify-self: end; }
+.kv-gs-action .kv-hint { margin: 0; font-size: 13px; }
+.kv-gs-optional-label { margin: 6px 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--bai-text-tertiary); }
+.kv-gs-tools { display: grid; gap: 8px; padding: 4px 10px 0 44px; }
+.kv-gs-tools .kv-hint { margin: 0; }
+@media (max-width: 640px) {
+  .kv-gs-step { grid-template-columns: 22px minmax(0, 1fr); }
+  .kv-gs-action { grid-column: 2; justify-self: start; }
+  .kv-gs-tools { padding-left: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .kv-gs-bar > span { transition: none; } }

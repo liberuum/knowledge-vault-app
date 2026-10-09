@@ -3,7 +3,10 @@ import { fetchFullGraph, fetchVaultGraph, type FullGraph, type VaultGraphSample 
 import { createTokenProvider, type IdentityStatus } from "../api/identity.js";
 import { addRemoteVault, authorizedFetch, checkRemoteVault, fetchRemoteVaults, removeRemoteVault, type RemoteCheck, type RemoteVault } from "../api/remote.js";
 import type { SidecarInfo } from "../sidecar.js";
-import { createVault, deleteVault, fetchStatus, fetchVaults, renameVault, type DriveRef, type VaultSummary } from "../vaults.js";
+import { createVault, deleteVault, fetchSettings, fetchStatus, fetchVaults, renameVault, type DriveRef, type ModelSettings, type VaultSummary } from "../vaults.js";
+import { GettingStarted, type VaultView } from "../landing/GettingStarted.js";
+import { remember } from "../landing/getting-started.js";
+import { modelReady as isModelReady } from "../onboarding/onboarding-state.js";
 import { ConnectRemoteDialog } from "../landing/ConnectRemoteDialog.js";
 import { DeleteVaultDialog } from "../landing/DeleteVaultDialog.js";
 import { NewVaultForm } from "../landing/NewVaultForm.js";
@@ -34,6 +37,8 @@ export type LandingApi = {
   loadLayout: (driveId: string) => Promise<Map<string, XY> | null>;
   /** The user's bearer for remote servers; built per engine when not injected. */
   tokenProvider?: (info: SidecarInfo) => () => Promise<string | undefined>;
+  /** The app's model setting, for the getting-started checklist; without it the model step reads as not done. */
+  fetchModels?: (info: SidecarInfo) => Promise<ModelSettings>;
 };
 
 export const realLandingApi: LandingApi = {
@@ -50,6 +55,7 @@ export const realLandingApi: LandingApi = {
   fetchVersion: async (info) => (await fetchStatus(info)).appVersion,
   loadLayout: loadSavedLayout,
   tokenProvider: (info) => createTokenProvider(info),
+  fetchModels: async (info) => (await fetchSettings(info)).models,
 };
 
 /** Whole graphs already fetched this session, keyed by vault and graph size (a changed count refetches). */
@@ -81,6 +87,10 @@ type Props = {
   localBearer?: () => Promise<string | undefined>;
   /** Opens the setup guide (spec §5): offered on the first-run screen to anyone who skipped it. */
   onGuide?: () => void;
+  /** Settings › Models, from the getting-started checklist. */
+  onModels?: () => void;
+  /** Opens a vault on one of its views (Sources, Notes, Chat), from the getting-started checklist. */
+  onOpenView?: (vault: VaultSummary, view: VaultView) => void;
 };
 
 /**
@@ -88,7 +98,7 @@ type Props = {
  * recently opened one largest; on first run, the inline create form; the
  * engine's state in a strip at the bottom. Never a workspace.
  */
-export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide }: Props) {
+export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide, onModels, onOpenView }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const [vaults, setVaults] = useState<VaultSummary[] | null>(null);
   const [remotes, setRemotes] = useState<RemoteVault[] | null>(null);
@@ -105,10 +115,24 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
   const [deleting, setDeleting] = useState<VaultSummary | null>(null);
   const [removing, setRemoving] = useState<RemoteVault | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  /** Whether the app has a usable AI model (the checklist's first step); null until known. */
+  const [modelReady, setModelReady] = useState<boolean | null>(null);
   const tokenProvider = useMemo(() => (info && api.tokenProvider ? api.tokenProvider(info) : undefined), [api, info]);
   const localFetch = useMemo(() => (localBearer ? authorizedFetch(localBearer) : undefined), [localBearer]);
 
   useEffect(() => setShowForm(newVault), [newVault]);
+  useEffect(() => {
+    if (!info || engine.state !== "ready") return;
+    if (!api.fetchModels) return setModelReady(false);
+    let alive = true;
+    api
+      .fetchModels(info)
+      .then((m) => alive && setModelReady(isModelReady(m)))
+      .catch(() => alive && setModelReady(false));
+    return () => {
+      alive = false;
+    };
+  }, [api, info, engine.state]);
   const closeForm = () => {
     setShowForm(false);
     if (newVault) onNewVaultDone?.();
@@ -191,9 +215,19 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
     (v: AnyVault) => {
       setRecents(rememberOpened(store, v.id));
       if (v.kind === "remote") onOpenRemote?.(v);
-      else onOpen?.(v);
+      else {
+        if (v.noteCount > 0) remember(store, { readNotes: true }); // the checklist's "Read your first notes"
+        onOpen?.(v);
+      }
     },
     [onOpen, onOpenRemote, store],
+  );
+  const openView = useCallback(
+    (v: VaultSummary, view: VaultView) => {
+      setRecents(rememberOpened(store, v.id));
+      onOpenView?.(v, view);
+    },
+    [onOpenView, store],
   );
 
   async function create(name: string) {
@@ -283,34 +317,25 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           !ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>
         )}
         {error && !showForm && !firstRun && <p role="alert" className="kv-error">{error}</p>}
-        {firstRun && (
-          <>
-            <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
-            {onGuide && (
-              <p className="kv-hint">
-                New here?{" "}
-                <button type="button" className="kv-link" onClick={onGuide}>Open the setup guide</button>
-                {" "}to choose an AI and add your first sources.
-              </p>
-            )}
-            <p className="kv-hint">
-              Already have a vault on a server?{" "}
-              {signedIn ? (
-                <button type="button" className="kv-link" onClick={() => setConnecting(true)}>Connect a remote vault</button>
-              ) : (
-                <>
-                  {onIdentity ? (
-                    <button type="button" className="kv-link" onClick={onIdentity}>Sign in</button>
-                  ) : (
-                    "Sign in"
-                  )}
-                  , then connect it from here.
-                </>
-              )}
-            </p>
-          </>
-        )}
+        {firstRun && <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />}
         {ready && !firstRun && showForm && <NewVaultForm firstRun={false} busy={busy} error={error} onCreate={(n) => void create(n)} onCancel={closeForm} />}
+        {ready && info && vaults !== null && remotes !== null && modelReady !== null && (
+          // Replaces the first-run hints (design §5): the setup guide, signing in for a shared vault, the next step.
+          <GettingStarted
+            info={info}
+            vaults={ordered.filter((v): v is { kind: "local" } & VaultSummary => v.kind === "local")}
+            remotes={remotes.length}
+            signedIn={signedIn}
+            modelReady={modelReady}
+            storage={store}
+            onModels={onModels}
+            onNewVault={() => setShowForm(true)}
+            onOpenView={onOpenView ? openView : undefined}
+            onIdentity={onIdentity}
+            onConnect={() => setConnecting(true)}
+            onGuide={onGuide}
+          />
+        )}
         {loading && (
           <div className="kv-grid" role="status" aria-label="Loading vaults">
             <SkeletonTile lead />

@@ -1,5 +1,5 @@
 import type { SidecarInfo } from "./sidecar.js";
-export type VaultSummary = { id: string; slug: string; name: string; noteCount: number };
+export type VaultSummary = { id: string; slug: string; name: string; noteCount: number; /** From engines that report it (0.2 on). */ sourceCount?: number };
 
 export class ControlError extends Error {
   constructor(message: string, public readonly status: number) {

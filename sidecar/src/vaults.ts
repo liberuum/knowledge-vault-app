@@ -1,4 +1,4 @@
-export type VaultSummary = { id: string; slug: string; name: string; noteCount: number };
+export type VaultSummary = { id: string; slug: string; name: string; noteCount: number; sourceCount: number };
 export type DriveRef = { id: string; slug: string; name: string };
 export const VAULT_APP_ID = "knowledge-vault";
 /** The Workflow Studio drive the engine keeps for workflows and connections (as Vetra does). */
@@ -39,8 +39,8 @@ type DriveItem = {
 };
 type DriveInfo = { id: string; slug: string; name: string; meta?: { preferredEditor?: string } };
 
-function countNotes(item: DriveItem): number {
-  return (item.state?.global?.nodes ?? []).filter((n) => n.kind === "file" && n.documentType === "bai/knowledge-note").length;
+function countFiles(item: DriveItem, documentType: string): number {
+  return (item.state?.global?.nodes ?? []).filter((n) => n.kind === "file" && n.documentType === documentType).length;
 }
 
 export async function listVaultDrives(origin: string, fetchImpl: typeof fetch = fetch): Promise<VaultSummary[]> {
@@ -56,7 +56,7 @@ export async function listVaultDrives(origin: string, fetchImpl: typeof fetch = 
     if (!res.ok) continue;
     const info = (await res.json()) as DriveInfo;
     if (info.meta?.preferredEditor !== VAULT_APP_ID) continue;
-    out.push({ id: item.id, slug: info.slug || item.slug, name: info.name || item.name, noteCount: countNotes(item) });
+    out.push({ id: item.id, slug: info.slug || item.slug, name: info.name || item.name, noteCount: countFiles(item, "bai/knowledge-note"), sourceCount: countFiles(item, "bai/source") });
   }
   return out;
 }
@@ -78,7 +78,7 @@ export async function createVaultDrive(origin: string, name: string, fetchImpl: 
     { docId: drive.id, input: { name } },
     fetchImpl,
   );
-  return { id: drive.id, slug: drive.slug, name, noteCount: 0 };
+  return { id: drive.id, slug: drive.slug, name, noteCount: 0, sourceCount: 0 };
 }
 
 async function driveInfo(origin: string, idOrSlug: string, fetchImpl: typeof fetch): Promise<DriveInfo | null> {

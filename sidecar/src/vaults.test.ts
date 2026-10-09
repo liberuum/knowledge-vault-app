@@ -35,7 +35,7 @@ describe("listVaultDrives", () => {
       throw new Error(`unexpected ${url}`);
     });
     const vaults = await listVaultDrives(ORIGIN, fetchImpl);
-    expect(vaults).toEqual([{ id: "v1", slug: "research", name: "Research", noteCount: 2 }]);
+    expect(vaults).toEqual([{ id: "v1", slug: "research", name: "Research", noteCount: 2, sourceCount: 0 }]);
   });
 });
 
@@ -48,7 +48,7 @@ describe("createVaultDrive", () => {
       throw new Error(`unexpected query ${q}`);
     });
     const vault = await createVaultDrive(ORIGIN, "My vault", fetchImpl);
-    expect(vault).toEqual({ id: "v9", slug: "my-vault", name: "My vault", noteCount: 0 });
+    expect(vault).toEqual({ id: "v9", slug: "my-vault", name: "My vault", noteCount: 0, sourceCount: 0 });
     expect((calls[0]!.body as { variables: unknown }).variables).toEqual({
       name: "My vault", slug: "my-vault", preferredEditor: "knowledge-vault",
     });

@@ -4,26 +4,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import type { EngineStatus } from "../vaults.js";
 import { redact } from "../redact.js";
 import { invokeIfTauri, isTauri } from "../shell/tauri.js";
-
-function CopyBlock({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
-  return (
-    <div className="kv-code">
-      <span className="kv-code-label">{label}</span>
-      <code className="kv-code-value">{value}</code>
-      <button type="button" className="kv-button" onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
-    </div>
-  );
-}
+import { CopyBlock } from "../shell/CopyBlock.js";
 
 /** The engineering view: what runs where, and how to point the CLI, the plugin and agents at this engine. */
 /** What "Copy diagnostics" puts on the clipboard: versions, ports, the data folder and the redacted tail — never a credential. */

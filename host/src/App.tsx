@@ -163,6 +163,11 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           onSettings={toSettings}
           localBearer={bearer}
           onGuide={() => toGuide()}
+          onModels={() => navigate({ name: "settings", section: "models" })}
+          onOpenView={(v, view) => {
+            setOpenView(v.id, view);
+            navigate({ name: "vault", id: v.id });
+          }}
         />
       );
   }
