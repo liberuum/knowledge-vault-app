@@ -307,6 +307,14 @@ async function main(): Promise<void> {
     readModelKey: () => readModelKey(cfg.dataDir),
     chatgpt: createChatGptBridge({ session: chatgpt, log: (line) => console.warn(`[gateway] ${line}`) }),
   });
+  /** The person's sign-in for a remote server, when there is one; an open server needs none. */
+  const remoteToken = async (): Promise<string | undefined> => {
+    try {
+      return (await identity.token()).token;
+    } catch {
+      return undefined;
+    }
+  };
   const control = createControlServer({
     gateway,
     gatewayKey,
@@ -428,24 +436,16 @@ async function main(): Promise<void> {
     chatgpt,
     remote: {
       list: () => readRemoteVaults(cfg.dataDir),
-      discover: async (url) => {
-        let token: string | undefined;
-        try {
-          token = (await identity.token()).token;
-        } catch {
-          token = undefined; // signed out: the server decides whether that is enough
-        }
-        return discoverRemoteVaults(url, token, new Set(readRemoteVaults(cfg.dataDir).map((v) => v.id)));
-      },
+      discover: async (url) => discoverRemoteVaults(url, await remoteToken(), new Set(readRemoteVaults(cfg.dataDir).map((v) => v.id))),
       check: async (url, drive) => {
         const parsed = parseRemoteVaultInput(url, drive);
         if (!parsed.drive) throw new RemoteInputError("Name the vault: a drive URL (…/d/<slug>) or the drive id or slug.");
-        return checkRemoteVault(parsed.origin, parsed.drive, (await identity.token()).token);
+        return checkRemoteVault(parsed.origin, parsed.drive, await remoteToken());
       },
       add: async (url, drive) => {
         const parsed = parseRemoteVaultInput(url, drive);
         if (!parsed.drive) throw new RemoteInputError("Name the vault: a drive URL (…/d/<slug>) or the drive id or slug.");
-        const checked = await checkRemoteVault(parsed.origin, parsed.drive, (await identity.token()).token);
+        const checked = await checkRemoteVault(parsed.origin, parsed.drive, await remoteToken());
         const vault = { kind: "remote" as const, id: checked.id, slug: checked.slug, name: checked.name, switchboardUrl: checked.switchboardUrl, addedAt: new Date().toISOString() };
         writeRemoteVaults(cfg.dataDir, [...readRemoteVaults(cfg.dataDir).filter((v) => v.id !== vault.id), vault]);
         return vault;

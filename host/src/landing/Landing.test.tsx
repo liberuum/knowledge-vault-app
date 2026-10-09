@@ -44,8 +44,8 @@ describe("Landing", () => {
     expect(await screen.findByText("Create your first vault")).toBeTruthy();
     expect(within(await screen.findByRole("region", { name: "Getting started" })).getByText("0 of 8 done")).toBeTruthy();
     const hint = screen.getByText(/Already have a vault on a server/);
-    expect(hint.textContent).toBe("Already have a vault on a server? Sign in, then connect it from here.");
-    fireEvent.click(within(hint).getByRole("button", { name: "Sign in" }));
+    expect(hint.textContent).toBe("Already have a vault on a server? Connect a remote vault. If its server asks who you are, sign in first.");
+    fireEvent.click(within(hint).getByRole("button", { name: "sign in" }));
     expect(onIdentity).toHaveBeenCalledTimes(1);
   });
   it("first run: the create form is the single target and Enter creates and opens the vault", async () => {
@@ -84,7 +84,8 @@ describe("Landing", () => {
     const input = screen.getByLabelText("Name");
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByLabelText("Name")).toBeNull();
-    expect(screen.getByRole("button", { name: "Connect remote vault" }).hasAttribute("disabled")).toBe(true);
+    // Signed out, the button still works: an open server needs no sign-in.
+    expect(screen.getByRole("button", { name: "Connect remote vault" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("shows the engine starting, and an exit with its code, in the same frame without touching the engine", () => {
@@ -151,13 +152,12 @@ describe("Landing", () => {
   });
 
   // Under the full suite's load a render can take longer than the library's 1 s default: these waits allow 5 s.
-  it("connects a remote vault only when signed in: paste the server, pick from its vaults, then a tile named for its server", async () => {
+  it("connects a remote vault, signed in or not: paste the server, pick from its vaults, then a tile named for its server", async () => {
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }]) });
     const signedOut = { authenticated: false, appDid: "did:key:z", renownUrl: "https://www.renown.id", pending: null };
-    const { rerender } = render(<Landing engine={{ state: "ready" }} info={info} identity={signedOut} api={a} storage={memoryStorage()} />);
+    render(<Landing engine={{ state: "ready" }} info={info} identity={signedOut} api={a} storage={memoryStorage()} />);
+    // An open server needs no sign-in, so the button does not wait for one.
     const connect = (await screen.findByRole("button", { name: "Connect remote vault" }, { timeout: 5000 })) as HTMLButtonElement;
-    expect(connect.disabled).toBe(true);
-    rerender(<Landing engine={{ state: "ready" }} info={info} identity={{ ...signedOut, authenticated: true, address: "0xabc" }} api={a} storage={memoryStorage()} />);
     expect(connect.disabled).toBe(false);
     fireEvent.click(connect);
     fireEvent.change(screen.getByLabelText("Vault server"), { target: { value: "switchboard.knowledge-vault.vetra.io" } });

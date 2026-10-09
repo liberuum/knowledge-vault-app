@@ -307,7 +307,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
               <button type="button" className="kv-button" onClick={() => setShowForm(true)} disabled={showForm} title="New vault (Ctrl+N)">
                 New vault
               </button>
-              <button type="button" className="kv-button" onClick={() => setConnecting(true)} disabled={!signedIn} title={signedIn ? "A vault on a server you have access to" : "Sign in first (Settings › Identity)"}>
+              <button type="button" className="kv-button" onClick={() => setConnecting(true)} title="A vault on a server: open ones need no sign-in">
                 Connect remote vault
               </button>
             </div>
@@ -324,16 +324,11 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
             <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
             <p className="kv-hint">
               Already have a vault on a server?{" "}
-              {signedIn ? (
-                <button type="button" className="kv-link" onClick={() => setConnecting(true)}>Connect a remote vault</button>
-              ) : (
+              <button type="button" className="kv-link" onClick={() => setConnecting(true)}>Connect a remote vault</button>.
+              {!signedIn && onIdentity && (
                 <>
-                  {onIdentity ? (
-                    <button type="button" className="kv-link" onClick={onIdentity}>Sign in</button>
-                  ) : (
-                    "Sign in"
-                  )}
-                  , then connect it from here.
+                  {" If its server asks who you are, "}
+                  <button type="button" className="kv-link" onClick={onIdentity}>sign in</button> first.
                 </>
               )}
             </p>

@@ -76,11 +76,14 @@ export function writeRemoteVaults(dataDir: string, remote: RemoteVault[]): void 
 }
 
 /** Ask the remote Switchboard, as the signed-in user, whether the drive exists and what it allows. */
-export async function checkRemoteVault(origin: string, drive: string, token: string, fetchImpl: typeof fetch = fetch): Promise<RemoteCheck> {
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+/** `token` is the person's sign-in when there is one; a vault on an open server is read without it. */
+export async function checkRemoteVault(origin: string, drive: string, token: string | undefined, fetchImpl: typeof fetch = fetch): Promise<RemoteCheck> {
+  const headers: Record<string, string> = { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) };
   const res = await fetchImpl(`${origin}/d/${encodeURIComponent(drive)}`, { headers });
-  if (res.status === 401) throw new RemoteAuthError("The server did not accept your sign-in. Sign in again and retry.");
-  if (res.status === 403) throw new RemoteAccessError("You are signed in, but this server has not granted you access to that vault. Ask its administrator for READ on the drive.");
+  if (res.status === 401) throw new RemoteAuthError(token ? "The server did not accept your sign-in. Sign in again and retry." : "This vault is open only to people who are signed in. Sign in, then try again.");
+  if (res.status === 403) {
+    throw new RemoteAccessError(token ? "You are signed in, but this server has not granted you access to that vault. Ask its administrator for READ on the drive." : "This vault is not open to everyone. Sign in, then try again.");
+  }
   if (res.status === 404) throw new RemoteNotFoundError("No vault with that id or slug on this server — or none you may read.");
   if (!res.ok) throw new Error(`The server answered HTTP ${res.status}.`);
   await assertServerCurrent(origin, headers, fetchImpl);
@@ -164,12 +167,16 @@ export async function discoverRemoteVaults(input: string, token: string | undefi
   const f = withAuth(fetchImpl, token);
   const origin = await resolveSwitchboard(parsed.origin, f);
   const res = await f(`${origin}${VAULTS_ROUTE}`);
-  if (res.status === 401) {
-    throw new RemoteAuthError(token ? "The server did not accept your sign-in. Sign in again and retry." : "This server shows its vaults only to people who are signed in. Sign in, then try again.");
-  }
-  if (res.status === 403) throw new RemoteAccessError("You are signed in, but this server does not let you list its vaults. Ask its administrator for access.");
   let found: Array<Omit<RemoteVaultOption, "added">>;
-  if (res.ok) {
+  if (res.status === 401 || res.status === 403) {
+    // The listing wants a verified sign-in, even on a server that lets anyone read. Its drives are scanned instead,
+    // as whoever asks may see them: an open server answers anyone; a protected one shows nothing, and says why.
+    found = (await listVaultDrives(origin, f).catch(() => [])).map((v) => ({ id: v.id, slug: v.slug, name: v.name, documents: null }));
+    if (found.length === 0 && res.status === 401) {
+      throw new RemoteAuthError(token ? "The server did not accept your sign-in. Sign in again and retry." : "This server shows its vaults only to people who are signed in. Sign in, then try again.");
+    }
+    if (found.length === 0) throw new RemoteAccessError("You are signed in, but this server does not let you list its vaults. Ask its administrator for access.");
+  } else if (res.ok) {
     const body = (await res.json()) as { drives?: Array<{ id?: unknown; slug?: unknown; name?: unknown; nodes?: unknown }> };
     found = (body.drives ?? [])
       .filter((d): d is { id: string; slug?: unknown; name?: unknown; nodes?: unknown } => typeof d.id === "string" && d.id !== "")

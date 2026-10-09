@@ -82,21 +82,29 @@ describe("discoverRemoteVaults", () => {
     flows: { id: "flows", slug: "workflows", name: "Workflows", meta: { preferredEditor: "workflow-studio" } },
   };
   /** A Switchboard at switchboard.<host>, a Connect app at <host>; `listing` is what the vault package's route answers. */
-  const server = (listing: { status: number; body?: unknown }, seen: string[] = []) =>
+  /**
+   * A Switchboard at switchboard.<host>, a Connect app at <host>; `listing` is what the vault package's route answers.
+   * A protected server shows nothing to anonymous callers and refuses a stale sign-in; an open one serves anyone.
+   */
+  const server = (listing: { status: number; body?: unknown }, seen: string[] = [], open = false) =>
     (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input);
-      seen.push(`${new Headers(init?.headers).get("authorization") ? "auth" : "anon"} ${url}`);
+      const auth = new Headers(init?.headers).get("authorization");
+      seen.push(`${auth ? "auth" : "anon"} ${url}`);
       const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
       if (!url.startsWith(SB)) return new Response("<!doctype html><title>Connect</title>", { status: 200, headers: { "content-type": "text/html" } });
+      if (auth === "Bearer stale") return json(401, { error: "Credentials no longer valid" });
+      const reads = open || auth !== null;
       if (url === `${SB}/graphql`) {
         const q = String(JSON.parse(String(init?.body)).query);
         if (q.includes("__typename")) return json(200, { data: { __typename: "Query" } });
         if (q.includes("__type(")) return json(200, { data: { __type: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] } } });
-        if (q.includes("findDocuments")) return json(200, { data: { findDocuments: { items: Object.values(drives).map((d) => ({ id: d.id, name: d.slug, slug: d.slug, state: {} })) } } });
+        if (q.includes("findDocuments")) return json(200, { data: { findDocuments: { items: reads ? Object.values(drives).map((d) => ({ id: d.id, name: d.slug, slug: d.slug, state: {} })) : [] } } });
       }
       if (url === `${SB}/api/@powerhousedao/knowledge-note/drives`) return listing.body === undefined ? new Response(null, { status: listing.status }) : json(listing.status, listing.body);
       const d = url.match(/\/d\/([^/]+)$/);
       if (d) {
+        if (!reads) return new Response(null, { status: 403 });
         const drive = Object.values(drives).find((x) => x.id === decodeURIComponent(d[1]!) || x.slug === decodeURIComponent(d[1]!));
         return drive ? json(200, drive) : new Response(null, { status: 404 });
       }
@@ -123,6 +131,13 @@ describe("discoverRemoteVaults", () => {
     expect(d.switchboardUrl).toBe(SB);
     expect(d.vaults.map((v) => v.name)).toEqual(["Powerhouse Knowledge", "Team Wiki"]); // the workflow drive is not a vault
     await expect(discoverRemoteVaults("https://example.org", "tok", new Set(), server(listing))).rejects.toBeInstanceOf(RemoteNotSwitchboardError);
+  });
+
+  it("finds and checks the vaults of an open server without a sign-in, though its vault listing wants one", async () => {
+    const open = server({ status: 401, body: { error: "A verified bearer is required" } }, [], true);
+    const d = await discoverRemoteVaults("https://switchboard.knowledge-vault.vetra.io/graphql", undefined, new Set(), open);
+    expect(d.vaults.map((v) => v.name)).toEqual(["Powerhouse Knowledge", "Team Wiki"]);
+    expect(await checkRemoteVault(SB, "team-wiki", undefined, open)).toEqual({ id: "team", slug: "team-wiki", name: "Team Wiki", switchboardUrl: SB, access: "read" });
   });
 
   it("asks a signed-out person to sign in, and a signed-in one to sign in again, when the server refuses them", async () => {
