@@ -61,6 +61,14 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     fetchStatus: vi.fn(async () => ({ ok: true as const, port: 4301, controlPort: 4302, appVersion: "0.1.0", protected: false, dataDir: "/home/u/.local/share/kv/vault", stackVersion: "6.2.3-dev.44", vaultPackageVersion: "1.0.54-dev.22" })),
     fetchProtection: vi.fn(async () => ({ protected: false, adminAddress: null })),
     probeLocalModels: vi.fn(async (_i, endpoint: string) => (endpoint.includes("8080") ? { ok: true as const, endpoint, models: ["lfm2.5-8b-a1b", "qwen3.8-flash-next"] } : { ok: false as const, endpoint, detail: "Could not reach " + endpoint + ": fetch failed" })),
+    fetchModelCatalogFor: vi.fn(async () => ({
+      ok: true as const,
+      models: [
+        { id: "claude-sonnet-5", name: "Claude Sonnet 5", free: false },
+        { id: "claude-haiku-5", name: "Claude Haiku 5", free: false },
+        { id: "text-embedding-test", name: "An embedding model", free: false },
+      ],
+    })),
     fetchModelCatalog: vi.fn(async () => ({
       ok: true as const,
       models: [
@@ -224,11 +232,25 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: "Validate" })).toBeTruthy();
   });
 
+  it("lists a service's models as soon as its key is entered, before saving, and saves the one picked", async () => {
+    const a = api({ fetchSettings: vi.fn(async () => savedWith("openai", { model: "", hasKey: false })) });
+    render(<Harness api={a} start="models" />);
+    fireEvent.change(await screen.findByLabelText("Service"), { target: { value: "anthropic" } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-ant-test" } });
+    await waitFor(() => expect(a.fetchModelCatalogFor).toHaveBeenCalledWith(info, { provider: "anthropic", endpoint: "", apiKey: "sk-ant-test" }), { timeout: 3000 });
+    fireEvent.click(await screen.findByRole("button", { name: "Show the models" }));
+    expect(screen.queryByRole("option", { name: /text-embedding-test/ })).toBeNull(); // not a chat model
+    fireEvent.click(await screen.findByRole("option", { name: /claude-sonnet-5/ }));
+    expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("claude-sonnet-5");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, expect.objectContaining({ models: expect.objectContaining({ provider: "anthropic", model: "claude-sonnet-5", apiKey: "sk-ant-test" }) })));
+  });
+
   it("asks nothing of the provider without a saved key and says why", async () => {
     const a = api();
     render(<Harness api={a} start="models" />);
     await screen.findByLabelText("Model (required for processing)");
-    expect(screen.getByText("Save your API key to pick from the models it gives you.")).toBeTruthy();
+    expect(screen.getByText("Enter your API key to see the models it gives you.")).toBeTruthy();
     expect(a.fetchModelCatalog).not.toHaveBeenCalled();
   });
 
@@ -716,7 +738,7 @@ describe("Settings › Models chooses a provider", () => {
     expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).not.toBe(saved);
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Validate" })).toBeNull();
-    expect(screen.getByText("Save your API key to pick from the models it gives you.")).toBeTruthy();
+    expect(screen.getByText("Enter your API key to see the models it gives you.")).toBeTruthy();
     expect(a.fetchModelCatalog).toHaveBeenCalledTimes(1); // the saved key was not tried against the other service
     fireEvent.click(screen.getByRole("radio", { name: /OpenRouter/ }));
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();

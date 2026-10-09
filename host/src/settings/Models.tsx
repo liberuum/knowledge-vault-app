@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ModelPicker } from "./ModelPicker.js";
+import { useDebounced } from "./use-debounced.js";
 import { LocalModel } from "./LocalModel.js";
 import { ProviderChoice, signInFirst, type ApiService, type Choice } from "./ProviderChoice.js";
 import { ChatGptChoice } from "./ChatGptChoice.js";
@@ -89,7 +90,15 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
   const keySaved = onSaved && settings?.models.hasKey === true;
   // The saved key lists the saved address's models; Another service follows the address in the form.
   const catalogEndpoint = choice === "apikey" && service === "custom" && customEndpoint.trim() ? customEndpoint.trim() : settings?.models.endpoint;
-  const loadCatalog = useCallback(() => api.fetchModelCatalog(info, catalogEndpoint), [api, info, catalogEndpoint]);
+  // A key just entered lists its service's models before it is saved, so the model is picked from a list, not typed.
+  const typedKey = useDebounced(apiKey.trim(), 500);
+  const listProvider = choice === "openrouter" ? "openrouter" : service;
+  const listsTypedKey = typedKey !== "" && (choice === "openrouter" || (choice === "apikey" && (service !== "custom" || customEndpoint.trim() !== "")));
+  const canList = keySaved || listsTypedKey;
+  const loadCatalog = useCallback(
+    () => (listsTypedKey ? api.fetchModelCatalogFor(info, { provider: listProvider, endpoint: customEndpoint.trim(), apiKey: typedKey }) : api.fetchModelCatalog(info, catalogEndpoint)),
+    [api, info, catalogEndpoint, listsTypedKey, listProvider, customEndpoint, typedKey],
+  );
 
   /** Notes about the last action (Saved, a verdict, an error) belong to the card they were made on. */
   function clearNotes() {
@@ -256,13 +265,15 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
                 {onSaved && settings.models.local === true && <p className="kv-hint">Not needed for a model on this computer.</p>}
               </>
             }
+            modelBlock={
+              canSave ? (
+                <>
+                  <label htmlFor="models-model">Model (required for processing)</label>
+                  <ModelPicker id="models-model" value={model} onChange={setModel} placeholder={canList ? "Choose a model" : "The model’s name"} disabled={busy} hasKey={canList} load={loadCatalog} reloadKey={catalogEndpoint} />
+                </>
+              ) : undefined
+            }
           />
-          {canSave && (
-            <>
-              <label htmlFor="models-model">Model (required for processing)</label>
-              <ModelPicker id="models-model" value={model} onChange={setModel} placeholder={choice === "openrouter" ? "openai/gpt-6-luna" : "The model’s name"} disabled={busy} hasKey={keySaved} load={loadCatalog} reloadKey={catalogEndpoint} />
-            </>
-          )}
           {(canSave || canValidate || saved) && (
             <div className="kv-form-actions">
               {canSave && (

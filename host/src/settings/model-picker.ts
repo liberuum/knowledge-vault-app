@@ -37,8 +37,11 @@ export type Fit = { ok: true } | { ok: false; reason: string } | { ok: null };
  * whole source (64k+ context) and give a long reply (16k+). `ok: null` when the provider's list
  * says too little to tell (OpenAI, a local server).
  */
+/** What a service lists beside its chat models when it says nothing about them: embeddings, speech, transcription, images, video. */
+const NOT_CHAT = /(embed|tts|whisper|transcri|dall-e|davinci|babbage|moderation|realtime|audio|image|veo|lyria|sora|computer-use|\baqa\b)/i;
+
 export function fitForProcessing(m: CatalogModel): Fit {
-  if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) return { ok: null };
+  if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) return NOT_CHAT.test(m.id) ? { ok: false, reason: "not a chat model" } : { ok: null };
   if (m.jsonOutput === false) return { ok: false, reason: "no JSON output" };
   if (m.inputs && !m.inputs.includes("text")) return { ok: false, reason: "does not take text input" };
   if (m.textOutput === false) return { ok: false, reason: "does not produce text" };

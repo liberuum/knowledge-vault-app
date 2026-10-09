@@ -24,7 +24,7 @@ import { createChatGpt } from "./chatgpt/session.js";
 import { chatGptReady } from "./chatgpt/store.js";
 import { ensureSecret } from "./secrets.js";
 import { singleFlight } from "./single-flight.js";
-import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion } from "./settings.js";
+import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion, PROVIDER_ENDPOINTS } from "./settings.js";
 import { acquireEngineLockWaiting, StoreInUseError } from "./engine-lock.js";
 import { readLastAction, runPendingAction, takePending, writeLastAction, writePending } from "./pending.js";
 import { cleanPartialBackups, listBackups, recoverInterruptedRestore } from "./backups.js";
@@ -368,6 +368,13 @@ async function main(): Promise<void> {
     // An address from the form asks that service with the key; without one, the saved provider answers (ChatGPT: the account's models).
     modelCatalog: (endpoint) =>
       !endpoint && readSettings(cfg.dataDir).models.provider === "chatgpt" ? chatgpt.catalog() : fetchModelCatalog(endpoint ?? readSettings(cfg.dataDir).models.endpoint, hostedKey()),
+    modelCatalogFor: async ({ provider, endpoint, apiKey }) => {
+      // A named service's own address, or the one typed for another service; the key is asked with, not saved.
+      const known = provider !== "chatgpt" && Object.hasOwn(PROVIDER_ENDPOINTS, provider) ? PROVIDER_ENDPOINTS[provider as keyof typeof PROVIDER_ENDPOINTS] : "";
+      const address = (known || endpoint).replace(/\/chat\/completions\/?$/, "").replace(/\/+$/, "");
+      if (!/^https?:\/\//.test(address)) return { ok: false, detail: "Enter the service's address first." };
+      return fetchModelCatalog(address, apiKey);
+    },
     probeModels: (endpoint) => probeLocalModels(endpoint, (e) => resolvesPrivate(e)),
     privateHost: async (endpoint) => {
       let host: string;

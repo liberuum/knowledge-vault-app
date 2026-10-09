@@ -51,6 +51,8 @@ type Props = {
   localBlock: ReactNode;
   /** The ChatGPT card's body (`<ChatGptChoice …/>`); without it the card is not offered. */
   chatgptBlock?: ReactNode;
+  /** The model field: part of the OpenRouter and API key cards, under their key. */
+  modelBlock?: ReactNode;
   /** The form is busy saving. */
   disabled?: boolean;
   /** Drops the saved key; the button sits beside the key field while one is saved. */
@@ -111,6 +113,7 @@ export function ProviderChoice(props: Props) {
                 {c.id === "chatgpt" && props.chatgptBlock}
                 {c.id === "openrouter" && <OpenRouterCard {...props} />}
                 {c.id === "apikey" && <ApiKeyCard {...props} />}
+                {(c.id === "openrouter" || c.id === "apikey") && props.modelBlock}
               </div>
             )}
           </div>

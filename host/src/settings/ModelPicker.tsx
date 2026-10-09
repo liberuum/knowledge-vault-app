@@ -110,19 +110,20 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
   };
 
   const status = !hasKey
-    ? "Save your API key to pick from the models it gives you."
+    ? "Enter your API key to see the models it gives you."
     : loading
       ? "Listing your provider's models…"
       : catalog && !catalog.ok
         ? `Could not list models: ${catalog.detail}`
         : catalog?.ok
-          ? `${offerableModels(catalog.models, "").length} of the ${catalog.models.length} models your key gives you can do the vault's work (text in, JSON out) — type to search, or pick from the list. Recommended ones are ranked by the quality score the provider reports.`
+          ? `${offerableModels(catalog.models, "").length} of the ${catalog.models.length} models your key gives you can do the vault's work (text in, JSON out) — type to search, or pick from the list.${catalog.models.some((m) => m.quality !== undefined) ? " Recommended ones are ranked by the quality score the provider reports." : ""}`
           : null;
   const current = catalog?.ok ? catalog.models.find((m) => m.id === value) : undefined;
   let index = -1;
 
   return (
     <div className="kv-picker" ref={root}>
+      <div className="kv-picker-field">
       <input
         id={id}
         value={value}
@@ -143,6 +144,21 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         aria-autocomplete="list"
         aria-activedescendant={open && flat[active] ? `${listId}-${active}` : undefined}
       />
+      {catalog?.ok && (
+        <button
+          type="button"
+          className="kv-picker-toggle"
+          aria-label={open ? "Hide the models" : "Show the models"}
+          tabIndex={-1}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => (open ? setOpen(false) : show())}
+          disabled={disabled}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
       {open && catalog?.ok && (
         <div className="kv-picker-list" role="listbox" id={listId} aria-label="Models">
           {flat.length === 0 && typed && <p className="kv-picker-empty">No model matches “{value}”. You can still save what you typed.</p>}
@@ -183,6 +199,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
           ))}
         </div>
       )}
+      </div>
       {status && <p className="kv-hint" role="status">{status}</p>}
       {current && catalog?.ok && (formatContext(current) || formatPrice(current)) && (
         <p className="kv-hint">

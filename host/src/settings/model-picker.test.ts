@@ -67,4 +67,10 @@ describe("the model picker's logic", () => {
     expect(offerableModels(models, "chosen-bad").map((x) => x.id)).toEqual(["good", "llama3", "chosen-bad"]);
     expect(offerableModels(models, "").map((x) => x.id)).toEqual(["good", "llama3"]);
   });
+
+  it("hides what a service lists beside its chat models when it says nothing about them", () => {
+    const bare = (id: string): CatalogModel => ({ id, name: id, free: false });
+    const listed = ["gpt-6-luna", "text-embedding-3-large", "tts-1", "whisper-1", "gpt-image-1", "omni-moderation-latest", "gpt-4o-realtime-preview", "claude-sonnet-5", "gemini-embedding-001", "aqa", "grok-4"].map(bare);
+    expect(offerableModels(listed, "").map((m) => m.id)).toEqual(["gpt-6-luna", "claude-sonnet-5", "grok-4"]);
+  });
 });

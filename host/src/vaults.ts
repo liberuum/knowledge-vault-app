@@ -147,6 +147,11 @@ export async function discoverLocalModels(info: SidecarInfo, fetchImpl: typeof f
 }
 /** The provider's model list with the saved key, for the picker (the engine asks; the page never holds the key). */
 export type ModelCatalog = { ok: true; models: import("./settings/model-picker.js").CatalogModel[] } | { ok: false; detail: string };
+/** The models a key just entered gives, before it is saved: a named service's, or another one's at its address. */
+export async function fetchModelCatalogFor(info: SidecarInfo, request: { provider: string; endpoint?: string; apiKey: string }, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
+  return control<ModelCatalog>(info, "/settings/models/catalog", { method: "POST", body: JSON.stringify(request) }, fetchImpl);
+}
+
 export async function fetchModelCatalog(info: SidecarInfo, endpoint?: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
   const q = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : "";
   return control<ModelCatalog>(info, `/settings/models/catalog${q}`, { method: "GET" }, fetchImpl);

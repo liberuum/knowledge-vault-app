@@ -4,12 +4,13 @@ import { signInWithOpenRouter } from "../api/openrouter.js";
 import { announceModelsChanged } from "../model-declaration.js";
 import { DEFAULT_LOCAL_ENDPOINT } from "../settings/LocalModel.js";
 import { ModelPicker } from "../settings/ModelPicker.js";
+import { useDebounced } from "../settings/use-debounced.js";
 import { formatPrice, recommendedModels, type CatalogModel } from "../settings/model-picker.js";
 import { ProviderChoice, type ApiService, type Choice } from "../settings/ProviderChoice.js";
 import { ChatGptChoice } from "../settings/ChatGptChoice.js";
 import {
   discoverLocalModels,
-  fetchModelCatalog,
+  fetchModelCatalog, fetchModelCatalogFor,
   fetchSettings,
   probeLocalModels,
   saveSettings,
@@ -160,13 +161,23 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
   const onSavedCard = saved !== null && saved.choice === choice && (choice !== "apikey" || saved.service === service);
   const keySaved = onSavedCard && settings?.models.hasKey === true;
   const catalogEndpoint = choice === "apikey" && service === "custom" && customEndpoint.trim() ? customEndpoint.trim() : settings?.models.endpoint;
-  const loadCatalog = useCallback(() => fetchModelCatalog(info, catalogEndpoint), [info, catalogEndpoint]);
+  // A key just entered lists its service's models before it is saved.
+  const typedKey = useDebounced(apiKey.trim(), 500);
+  const listsTypedKey = typedKey !== "" && (choice === "openrouter" || (choice === "apikey" && (service !== "custom" || customEndpoint.trim() !== "")));
+  const canList = keySaved || listsTypedKey;
+  const loadCatalog = useCallback(
+    () =>
+      listsTypedKey
+        ? fetchModelCatalogFor(info, { provider: choice === "openrouter" ? "openrouter" : service, endpoint: customEndpoint.trim(), apiKey: typedKey })
+        : fetchModelCatalog(info, catalogEndpoint),
+    [info, catalogEndpoint, listsTypedKey, choice, service, customEndpoint, typedKey],
+  );
 
   // A key for this card is saved: list what it can use, and choose the best value for processing if nothing is chosen.
   useEffect(() => {
-    if (choice === "local" || !keySaved) return;
+    if (choice === "local" || !canList) return;
     let alive = true;
-    fetchModelCatalog(info, catalogEndpoint)
+    loadCatalog()
       .then((c) => {
         if (!alive || !c.ok) return;
         setCatalog(c.models);
@@ -177,7 +188,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
     return () => {
       alive = false;
     };
-  }, [choice, keySaved, info, catalogEndpoint]);
+  }, [choice, canList, loadCatalog]);
 
   /** A different card keeps no model from another provider. */
   const switchTo = (c: Choice, s: ApiService) => {
@@ -382,30 +393,30 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
             localBlock={localBlock}
             chatgptBlock={<ChatGptChoice info={info} current={settings.models} active={choice === "chatgpt"} onActivate={() => switchTo("chatgpt", service)} onChosen={() => void afterChatGpt()} />}
             disabled={busy}
+            modelBlock={choice !== "local" && choice !== "chatgpt" ? (
+              <>
+                <label htmlFor="onb-model" className="kv-onb-label">Model</label>
+                <ModelPicker
+                  id="onb-model"
+                  value={model}
+                  onChange={(v) => {
+                    settled.current = true;
+                    setModel(v);
+                    setPhase(IDLE);
+                  }}
+                  placeholder={canList ? "Chosen for you" : "Chosen for you once the key is entered"}
+                  disabled={busy}
+                  hasKey={canList}
+                  load={loadCatalog}
+                  reloadKey={catalogEndpoint}
+                />
+                <p className="kv-hint">
+                  {price ? `Costs ${price}; you pay ${payer} for what is processed. ` : ""}
+                  A model suited to processing, at a good price, is chosen for you; change it only if you prefer another.
+                </p>
+              </>
+            ) : undefined}
           />
-          {choice !== "local" && choice !== "chatgpt" && (
-            <>
-              <label htmlFor="onb-model" className="kv-onb-label">Model</label>
-              <ModelPicker
-                id="onb-model"
-                value={model}
-                onChange={(v) => {
-                  settled.current = true;
-                  setModel(v);
-                  setPhase(IDLE);
-                }}
-                placeholder={keySaved ? "Chosen for you" : "Chosen for you once the key is saved"}
-                disabled={busy}
-                hasKey={keySaved}
-                load={loadCatalog}
-                reloadKey={catalogEndpoint}
-              />
-              <p className="kv-hint">
-                {price ? `Costs ${price}; you pay ${payer} for what is processed. ` : ""}
-                A model suited to processing, at a good price, is chosen for you; change it only if you prefer another.
-              </p>
-            </>
-          )}
           <div className="kv-onb-verdict" aria-live="polite">
             {phase.kind === "checking" && (
               <p role="status" className="kv-quiet">
