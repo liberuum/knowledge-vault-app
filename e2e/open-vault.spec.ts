@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { createVaultOnLanding, skipSetupGuide } from "./fixtures/landing.js";
 
-test("create a vault on the landing and open the Knowledge Vault app against the local engine", async ({ page }) => {
+test("create a vault on the landing and open the Knowledge Vault app against the local engine", async ({ page, request }) => {
+  await skipSetupGuide(request);
   // Spec §2: nothing leaves the machine. Every network request must target one of the three loopback ports.
   const allowed = /^(?:https?|wss?):\/\/127\.0\.0\.1:420\d(?:[/?#]|$)/;
   const foreign: string[] = [];
@@ -13,11 +15,8 @@ test("create a vault on the landing and open the Knowledge Vault app against the
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe("rgb(30, 30, 46)");
   await page.screenshot({ path: "test-results/landing-dark.png" });
   // First run shows the form; with vaults already present (another spec ran first) "New vault" opens it.
-  const newVault = page.getByRole("button", { name: "New vault" });
-  if (await newVault.isVisible().catch(() => false)) await newVault.click();
   // Keyboard only: type the name, Enter creates and opens (spec §5.7 — nothing else is required).
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("E2E vault");
-  await page.keyboard.press("Enter");
+  await createVaultOnLanding(page, "E2E vault", "enter");
 
   // The vault app (from @powerhousedao/knowledge-note) renders its sidebar.
   await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible({ timeout: 60_000 });

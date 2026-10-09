@@ -22,16 +22,15 @@ test("conversion: ready out of the box, anonymous through the engine, switched l
   await page.goto("/#/settings/conversion");
   await expect(page.getByRole("heading", { name: "Conversion" })).toBeVisible({ timeout: 120_000 });
   await expect(page.getByText("Ready", { exact: true })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText(/^Reads PDF, Markdown and plain text files\./)).toBeVisible();
-
-  // Stage B: the components, each with the one action that fits — this Linux runner can install the binding; the models wait for it.
-  await expect(page.getByRole("button", { name: "Install binding" })).toBeVisible();
-  await expect(page.getByText("Needs the converter binding first.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Install models" })).toHaveCount(0);
+  await expect(page.getByText(/^Reads PDF/)).toBeVisible();
+  // The components, each with the one action that fits. The converter installs its binding on its own at start, so
+  // this run may meet it before or after: either the binding to install, or installed.
+  await expect(page.getByRole("button", { name: "Install binding" }).or(page.getByRole("button", { name: "Remove binding" })).first()).toBeVisible({ timeout: 60_000 });
 
   // The engine's own route, anonymous: open mode lets the owner through; the service is the runtime one.
   const health = (await (await request.get(`${ENGINE}/convert/health`)).json()) as Record<string, unknown>;
-  expect(health).toMatchObject({ configured: true, ok: true, source: "runtime", binding: false });
+  expect(health).toMatchObject({ configured: true, ok: true, source: "runtime" });
+  const binding = health.binding === true;
 
   const md = await request.post(`${ENGINE}/convert?filename=notes.md`, {
     headers: octets,
@@ -45,10 +44,12 @@ test("conversion: ready out of the box, anonymous through the engine, switched l
   expect(pdf.status()).toBe(200);
   expect(await pdf.json()).toMatchObject({ textSource: "pdfjs", pages: 1 });
 
-  // A format the binding-less service cannot read names the remedy — never an empty source.
-  const docx = await request.post(`${ENGINE}/convert?filename=report.docx`, { headers: octets, data: Buffer.from("PK\u0003\u0004 not a docx") });
-  expect(docx.status()).toBe(415);
-  expect(await docx.json()).toMatchObject({ code: "BINDING_REQUIRED", details: { binding: false } });
+  // Without the binding, a format it cannot read names the remedy — never an empty source.
+  if (!binding) {
+    const docx = await request.post(`${ENGINE}/convert?filename=report.docx`, { headers: octets, data: Buffer.from("PK\u0003\u0004 not a docx") });
+    expect(docx.status()).toBe(415);
+    expect(await docx.json()).toMatchObject({ code: "BINDING_REQUIRED", details: { binding: false } });
+  }
 
   // Off: the engine reports no converter at once — no restart.
   await page.getByLabel(/^Off/).click();

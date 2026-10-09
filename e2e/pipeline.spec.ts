@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { expect, test } from "@playwright/test";
+import { skipSetupGuide } from "./fixtures/landing.js";
 
 const CONTROL = "http://127.0.0.1:4202";
 const ENGINE = "http://127.0.0.1:4201";
@@ -15,6 +16,7 @@ const auth = { authorization: "Bearer dev-token" };
  * the runs in Workflow Studio. Honest: nothing emulates a model's output.
  */
 test("pipeline: template instantiated per vault, a queued source runs, a failed run is surfaced", async ({ page, request }) => {
+  await skipSetupGuide(request);
   test.setTimeout(330_000);
   const completions: string[] = [];
   const fake: Server = createServer((req, res) => {
@@ -86,11 +88,12 @@ test("pipeline: template instantiated per vault, a queued source runs, a failed 
     expect(lastRun, "the trigger fired and a run was recorded").toBeTruthy();
     expect(lastRun!.status).toBe("FAILED");
     expect(completions.length, "the piece reached the model through the connection").toBeGreaterThan(0);
-    expect(completions[0]).toBe("Bearer sk-test-not-real"); // the model key travelled as a runtime secret, not through the UI
+    expect(completions[0] ?? "").toBe(""); // a model on this computer is never sent the key (the gateway keeps it for hosted providers)
 
     // The chip surfaces it, and leads to the runs.
     await page.goto(`/#/vault/${encodeURIComponent(vault!.id)}`);
-    await expect(page.getByText("Last processing run failed")).toBeVisible({ timeout: 60_000 });
+    // The chip names the problem when it can ("the model refused the request"), else "Last processing run failed".
+    await expect(page.getByText(/^(Processing stopped: |Last processing run failed)/)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: "See runs" }).click();
     // "See runs" leads to Workflow Studio on the Workflows drive, where this vault's workflow is listed by name.
     try {

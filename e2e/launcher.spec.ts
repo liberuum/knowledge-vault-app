@@ -1,13 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { createVaultOnLanding, skipSetupGuide } from "./fixtures/landing.js";
 
 // Self-contained: creates its own vault (first-run form, or "New vault" when vaults already exist).
-test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sections, Workflow Studio reachable, typed delete", async ({ page }) => {
+test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sections, Workflow Studio reachable, typed delete", async ({ page, request }) => {
+  await skipSetupGuide(request);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
-  const newVault = page.getByRole("button", { name: "New vault" });
-  if (await newVault.isVisible().catch(() => false)) await newVault.click();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Launcher vault");
-  await page.getByRole("button", { name: "Create vault" }).click();
+  await createVaultOnLanding(page, "Launcher vault");
 
   // Creating opens the vault. Inside, the landing's chrome is gone; the app bar is the only landmark.
   await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible({ timeout: 60_000 });

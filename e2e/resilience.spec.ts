@@ -39,12 +39,12 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   const backups = page.getByRole("list", { name: "Backups" });
   await expect(backups.getByText(/^\d{4}-\d{2}-\d{2}T.*-6\.2\.3/)).toBeVisible({ timeout: 120_000 });
 
-  // (c) Delete all local data, keeping the backups: the app reloads into its first run.
+  // (c) Delete all local data, keeping the backups: the app reloads into its first run, the setup guide.
   const del = page.getByRole("button", { name: "Delete all local data" });
   await expect(del).toBeDisabled();
   await page.getByLabel("Type delete to confirm").fill("delete");
   await del.click();
-  await expect(page.getByRole("heading", { name: "Create your first vault" })).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByRole("heading", { name: "Turn your documents into connected notes" })).toBeVisible({ timeout: 120_000 });
   const after = await (await request.get(`${CONTROL}/backups`, { headers: auth })).json();
   expect(after.backups.length).toBeGreaterThan(0);
   expect(after.lastAction).toMatchObject({ action: "delete-all", ok: true });

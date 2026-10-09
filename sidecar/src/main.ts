@@ -245,10 +245,13 @@ async function main(): Promise<void> {
   });
   // Install what is missing on its own (binding, then models), so a new vault reads PDFs and Office
   // files without a trip to Settings; a component the user removed stays removed.
+  // KV_CONVERTER_AUTO_INSTALL=0 leaves the components to Settings (the end-to-end tests: no 700 MB download per run).
   const autoInstallConverter = () =>
-    void converter
-      .autoInstall(readSettings(cfg.dataDir).conversion.removed)
-      .catch((error: unknown) => console.error(`[converter] ${error instanceof Error ? error.message : String(error)}`));
+    process.env.KV_CONVERTER_AUTO_INSTALL === "0"
+      ? undefined
+      : void converter
+          .autoInstall(readSettings(cfg.dataDir).conversion.removed)
+          .catch((error: unknown) => console.error(`[converter] ${error instanceof Error ? error.message : String(error)}`));
   void converter
     .apply(readSettings(cfg.dataDir).conversion)
     .then(autoInstallConverter)

@@ -150,11 +150,12 @@ describe("Landing", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open Beta" })).toBeNull());
   });
 
+  // Under the full suite's load a render can take longer than the library's 1 s default: these waits allow 5 s.
   it("connects a remote vault only when signed in: check, then add, then a tile named for its server", async () => {
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }]) });
     const signedOut = { authenticated: false, appDid: "did:key:z", renownUrl: "https://www.renown.id", pending: null };
     const { rerender } = render(<Landing engine={{ state: "ready" }} info={info} identity={signedOut} api={a} storage={memoryStorage()} />);
-    const connect = (await screen.findByRole("button", { name: "Connect remote vault" })) as HTMLButtonElement;
+    const connect = (await screen.findByRole("button", { name: "Connect remote vault" }, { timeout: 5000 })) as HTMLButtonElement;
     expect(connect.disabled).toBe(true);
     rerender(<Landing engine={{ state: "ready" }} info={info} identity={{ ...signedOut, authenticated: true, address: "0xabc" }} api={a} storage={memoryStorage()} />);
     expect(connect.disabled).toBe(false);
@@ -162,10 +163,10 @@ describe("Landing", () => {
     fireEvent.change(screen.getByLabelText("Vault server (Switchboard URL)"), { target: { value: "https://switchboard.knowledge-vault.vetra.io/graphql" } });
     fireEvent.change(screen.getByLabelText("Drive id or slug"), { target: { value: "powerhouse-knowledge" } });
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByText(/you can read and write/)).toBeTruthy();
+    expect(await screen.findByText(/you can read and write/, {}, { timeout: 5000 })).toBeTruthy();
     expect(a.checkRemote).toHaveBeenCalledWith(info, "https://switchboard.knowledge-vault.vetra.io/graphql", "powerhouse-knowledge");
     fireEvent.click(screen.getByRole("button", { name: "Add vault" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Open powerhouse-knowledge" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open powerhouse-knowledge" })).toBeTruthy(), { timeout: 5000 });
     expect(screen.getByText("On switchboard.knowledge-vault.vetra.io")).toBeTruthy();
     expect(a.fetchGraph).toHaveBeenCalledWith("https://switchboard.knowledge-vault.vetra.io", "c589", expect.any(Number), undefined);
   });

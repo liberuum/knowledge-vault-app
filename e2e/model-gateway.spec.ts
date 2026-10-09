@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
+import { createVaultOnLanding, skipSetupGuide } from "./fixtures/landing.js";
 
 // The vault chat answers through the app's one model (the engine's gateway), with no connect form of its own.
 const CONTROL = "http://127.0.0.1:4202";
@@ -30,12 +31,10 @@ test("the vault chat answers through the app's model, with no connect form", asy
   const direct = await request.get(`${CONTROL}/llm/v1/models`, { headers: auth });
   expect(await direct.json()).toMatchObject({ data: [{ id: "fake-model" }] });
 
+  await skipSetupGuide(request);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
-  const newVault = page.getByRole("button", { name: "New vault" });
-  if (await newVault.isVisible().catch(() => false)) await newVault.click();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Gateway vault");
-  await page.getByRole("button", { name: "Create vault" }).click();
+  await createVaultOnLanding(page, "Gateway vault");
 
   await page.getByRole("button", { name: "Chat" }).first().click({ timeout: 60_000 });
   await expect(page.getByText("fake-model on this computer")).toBeVisible();
