@@ -460,3 +460,16 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-provider-body .kv-form-inline input { width: 100%; }
 @media (prefers-reduced-motion: reduce) { .kv-provider-body input, .kv-provider-body select { transition: none; } }
 
+/* Connect a remote vault: the server's vaults, one row each */
+.kv-dialog-form .kv-remote-hint { color: var(--bai-text-tertiary); font-size: 13px; margin-top: -4px; }
+.kv-remote-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.kv-dialog-form .kv-remote-option { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--bai-border); border-radius: 8px; background: var(--bai-deep); cursor: pointer; font-weight: 400; transition: border-color 120ms ease, background-color 120ms ease; }
+.kv-dialog-form .kv-remote-option:hover { border-color: var(--bai-accent); }
+.kv-dialog-form .kv-remote-option:has(input:checked) { border-color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 9%, var(--bai-deep)); }
+.kv-dialog-form .kv-remote-option[data-added] { cursor: default; opacity: 0.7; }
+.kv-dialog-form .kv-remote-option[data-added]:hover { border-color: var(--bai-border); }
+.kv-dialog-form .kv-remote-option input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 3px 0 0; padding: 0; accent-color: var(--bai-accent); }
+.kv-remote-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kv-remote-option-name { font-weight: 500; color: var(--bai-text); overflow-wrap: anywhere; }
+.kv-remote-option-meta { font-size: 13px; color: var(--bai-text-tertiary); }
+

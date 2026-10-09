@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchFullGraph, fetchVaultGraph, type FullGraph, type VaultGraphSample } from "../api/graph.js";
 import { createTokenProvider, type IdentityStatus } from "../api/identity.js";
-import { addRemoteVault, authorizedFetch, checkRemoteVault, fetchRemoteVaults, removeRemoteVault, type RemoteCheck, type RemoteVault } from "../api/remote.js";
+import { addRemoteVault, authorizedFetch, discoverRemoteVaults, fetchRemoteVaults, removeRemoteVault, type RemoteDiscovery, type RemoteVault } from "../api/remote.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { createVault, deleteVault, fetchSettings, fetchStatus, fetchVaults, renameVault, type DriveRef, type ModelSettings, type VaultSummary } from "../vaults.js";
 import { GettingStarted, type VaultView } from "../landing/GettingStarted.js";
@@ -27,7 +27,7 @@ export type LandingApi = {
   renameVault: (info: SidecarInfo, id: string, name: string) => Promise<DriveRef>;
   deleteVault: (info: SidecarInfo, id: string) => Promise<void>;
   fetchRemoteVaults: (info: SidecarInfo) => Promise<RemoteVault[]>;
-  checkRemote: (info: SidecarInfo, url: string, drive: string | undefined) => Promise<RemoteCheck>;
+  discoverRemote: (info: SidecarInfo, url: string) => Promise<RemoteDiscovery>;
   addRemote: (info: SidecarInfo, url: string, drive: string | undefined) => Promise<RemoteVault>;
   removeRemote: (info: SidecarInfo, id: string) => Promise<void>;
   fetchGraph: (origin: string, driveId: string, maxNodes: number, fetchImpl?: typeof fetch) => Promise<VaultGraphSample>;
@@ -47,7 +47,7 @@ export const realLandingApi: LandingApi = {
   renameVault,
   deleteVault,
   fetchRemoteVaults,
-  checkRemote: checkRemoteVault,
+  discoverRemote: discoverRemoteVaults,
   addRemote: addRemoteVault,
   removeRemote: removeRemoteVault,
   fetchGraph: (origin, driveId, maxNodes, fetchImpl) => fetchVaultGraph(origin, driveId, { maxNodes }, fetchImpl),
@@ -412,11 +412,8 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
       )}
       {connecting && info && (
         <ConnectRemoteDialog
-          api={{ check: (u, d) => api.checkRemote(info, u, d), add: (u, d) => api.addRemote(info, u, d) }}
-          onAdded={(v) => {
-            setRemotes((prev) => [...(prev ?? []).filter((x) => x.id !== v.id), v]);
-            setConnecting(false);
-          }}
+          api={{ discover: (u) => api.discoverRemote(info, u), add: (u, d) => api.addRemote(info, u, d) }}
+          onAdded={(added) => setRemotes((prev) => [...(prev ?? []).filter((x) => !added.some((v) => v.id === x.id)), ...added])}
           onClose={() => setConnecting(false)}
         />
       )}

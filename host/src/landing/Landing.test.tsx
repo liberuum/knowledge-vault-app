@@ -17,7 +17,7 @@ function api(over: Partial<LandingApi> = {}): LandingApi {
     renameVault: vi.fn(async (_i, id: string, name: string) => ({ id, slug: "s", name })),
     deleteVault: vi.fn(async () => {}),
     fetchRemoteVaults: vi.fn(async () => []),
-    checkRemote: vi.fn(async (_i, url: string, drive: string | undefined) => ({ id: "c589", slug: drive ?? "pk", name: "powerhouse-knowledge", switchboardUrl: new URL(url).origin, access: "write" as const })),
+    discoverRemote: vi.fn(async () => ({ switchboardUrl: "https://switchboard.knowledge-vault.vetra.io", vaults: [{ id: "c589", slug: "powerhouse-knowledge", name: "powerhouse-knowledge", documents: 2863, added: false }] })),
     addRemote: vi.fn(async (_i, url: string, drive: string | undefined) => ({ kind: "remote" as const, id: "c589", slug: drive ?? "pk", name: "powerhouse-knowledge", switchboardUrl: new URL(url).origin, addedAt: "2026-10-06T12:00:00Z" })),
     removeRemote: vi.fn(async () => {}),
     fetchGraph: vi.fn(async () => sample),
@@ -151,7 +151,7 @@ describe("Landing", () => {
   });
 
   // Under the full suite's load a render can take longer than the library's 1 s default: these waits allow 5 s.
-  it("connects a remote vault only when signed in: check, then add, then a tile named for its server", async () => {
+  it("connects a remote vault only when signed in: paste the server, pick from its vaults, then a tile named for its server", async () => {
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }]) });
     const signedOut = { authenticated: false, appDid: "did:key:z", renownUrl: "https://www.renown.id", pending: null };
     const { rerender } = render(<Landing engine={{ state: "ready" }} info={info} identity={signedOut} api={a} storage={memoryStorage()} />);
@@ -160,13 +160,15 @@ describe("Landing", () => {
     rerender(<Landing engine={{ state: "ready" }} info={info} identity={{ ...signedOut, authenticated: true, address: "0xabc" }} api={a} storage={memoryStorage()} />);
     expect(connect.disabled).toBe(false);
     fireEvent.click(connect);
-    fireEvent.change(screen.getByLabelText("Vault server (Switchboard URL)"), { target: { value: "https://switchboard.knowledge-vault.vetra.io/graphql" } });
-    fireEvent.change(screen.getByLabelText("Drive id or slug"), { target: { value: "powerhouse-knowledge" } });
-    fireEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByText(/you can read and write/, {}, { timeout: 5000 })).toBeTruthy();
-    expect(a.checkRemote).toHaveBeenCalledWith(info, "https://switchboard.knowledge-vault.vetra.io/graphql", "powerhouse-knowledge");
+    fireEvent.change(screen.getByLabelText("Vault server"), { target: { value: "switchboard.knowledge-vault.vetra.io" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find vaults" }));
+    // The server's only vault is preselected.
+    const option = (await screen.findByRole("checkbox", { name: /powerhouse-knowledge/ }, { timeout: 5000 })) as HTMLInputElement;
+    expect(option.checked).toBe(true);
+    expect(a.discoverRemote).toHaveBeenCalledWith(info, "switchboard.knowledge-vault.vetra.io");
     fireEvent.click(screen.getByRole("button", { name: "Add vault" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Open powerhouse-knowledge" })).toBeTruthy(), { timeout: 5000 });
+    expect(a.addRemote).toHaveBeenCalledWith(info, "https://switchboard.knowledge-vault.vetra.io", "c589");
     expect(screen.getByText("On switchboard.knowledge-vault.vetra.io")).toBeTruthy();
     expect(a.fetchGraph).toHaveBeenCalledWith("https://switchboard.knowledge-vault.vetra.io", "c589", expect.any(Number), undefined);
   });

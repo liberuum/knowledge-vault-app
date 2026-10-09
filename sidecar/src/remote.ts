@@ -1,4 +1,5 @@
 import { readConfig, writeConfig } from "./settings.js";
+import { listVaultDrives } from "./vaults.js";
 
 /** A vault on a Switchboard the user has access to, reached in client mode (spec §5.5). */
 export type RemoteVault = { kind: "remote"; id: string; slug: string; name: string; switchboardUrl: string; addedAt: string };
@@ -42,8 +43,9 @@ const RESERVED = new Set(["graphql", "api", "d", "mcp", "health"]);
  */
 export function parseRemoteVaultInput(input: string, drive?: string): { origin: string; drive?: string } {
   let url: URL;
+  const raw = input.trim();
   try {
-    url = new URL(input.trim());
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
   } catch {
     throw new RemoteInputError("Enter the vault's address as a URL, like https://switchboard.example.com/graphql.");
   }
@@ -101,3 +103,106 @@ export async function checkRemoteVault(origin: string, drive: string, token: str
   }
   return { id, slug, name, switchboardUrl: origin, access };
 }
+
+/** No vault server answered at the address: a Connect app, a website, a typo. */
+export class RemoteNotSwitchboardError extends Error {}
+
+/** A vault the server lets the signed-in person read; `added` when it is already on this app's list. */
+export type RemoteVaultOption = { id: string; slug: string; name: string; documents: number | null; added: boolean };
+export type RemoteDiscovery = { switchboardUrl: string; vaults: RemoteVaultOption[]; hint?: string };
+
+const VAULT_APP = "knowledge-vault";
+/** The vault package's own listing: the drives whose app is the Knowledge Vault, among those the caller may read. */
+const VAULTS_ROUTE = "/api/@powerhousedao/knowledge-note/drives";
+
+function withAuth(fetchImpl: typeof fetch, token: string | undefined): typeof fetch {
+  if (!token) return fetchImpl;
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${token}`);
+    return fetchImpl(input, { ...init, headers });
+  }) as typeof fetch;
+}
+
+/** A Switchboard answers GraphQL at /graphql (or refuses a caller it does not know); a Connect app or a website does not. */
+async function answersGraphql(origin: string, fetchImpl: typeof fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${origin}/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "{ __typename }" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 401) return true;
+    if (!res.ok) return false;
+    const body = (await res.json()) as { data?: { __typename?: unknown } };
+    return typeof body.data?.__typename === "string";
+  } catch {
+    return false;
+  }
+}
+
+/** The origin as pasted when a Switchboard answers there; else Vetra's convention, switchboard.<host> beside <host>'s Connect. */
+export async function resolveSwitchboard(origin: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  if (await answersGraphql(origin, fetchImpl)) return origin;
+  const url = new URL(origin);
+  if (!url.hostname.startsWith("switchboard.")) {
+    const guess = `${url.protocol}//switchboard.${url.host}`;
+    if (await answersGraphql(guess, fetchImpl)) return guess;
+  }
+  throw new RemoteNotSwitchboardError(`No vault server answered at ${url.host}. Paste the address of its Switchboard, like https://switchboard.example.com.`);
+}
+
+/**
+ * The vaults on a server, as the signed-in person sees them. The server decides: its listing returns only the
+ * drives whose app is the Knowledge Vault among those this person may read. A server without that listing (an
+ * older vault package, a bare engine) is asked for its drives, and the vaults are kept by their preferred editor.
+ * A link to one vault (…/d/<slug>) preselects it.
+ */
+export async function discoverRemoteVaults(input: string, token: string | undefined, addedIds: ReadonlySet<string>, fetchImpl: typeof fetch = fetch): Promise<RemoteDiscovery> {
+  const parsed = parseRemoteVaultInput(input);
+  const f = withAuth(fetchImpl, token);
+  const origin = await resolveSwitchboard(parsed.origin, f);
+  const res = await f(`${origin}${VAULTS_ROUTE}`);
+  if (res.status === 401) {
+    throw new RemoteAuthError(token ? "The server did not accept your sign-in. Sign in again and retry." : "This server shows its vaults only to people who are signed in. Sign in, then try again.");
+  }
+  if (res.status === 403) throw new RemoteAccessError("You are signed in, but this server does not let you list its vaults. Ask its administrator for access.");
+  let found: Array<Omit<RemoteVaultOption, "added">>;
+  if (res.ok) {
+    const body = (await res.json()) as { drives?: Array<{ id?: unknown; slug?: unknown; name?: unknown; nodes?: unknown }> };
+    found = (body.drives ?? [])
+      .filter((d): d is { id: string; slug?: unknown; name?: unknown; nodes?: unknown } => typeof d.id === "string" && d.id !== "")
+      .map((d) => ({ id: d.id, slug: typeof d.slug === "string" && d.slug ? d.slug : d.id, name: typeof d.name === "string" ? d.name : "", documents: typeof d.nodes === "number" ? d.nodes : null }));
+  } else if (res.status === 404) {
+    found = (await listVaultDrives(origin, f)).map((v) => ({ id: v.id, slug: v.slug, name: v.name, documents: null }));
+  } else {
+    throw new Error(`The server answered HTTP ${res.status}.`);
+  }
+  await assertServerCurrent(origin, { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, fetchImpl);
+  // The drive's own name: the listing reports its state name, which is often the slug.
+  const drive = async (idOrSlug: string) => {
+    try {
+      const r = await f(`${origin}/d/${encodeURIComponent(idOrSlug)}`);
+      return r.ok ? ((await r.json()) as { id?: string; slug?: string; name?: string; meta?: { preferredEditor?: string } }) : null;
+    } catch {
+      return null;
+    }
+  };
+  const vaults: RemoteVaultOption[] = [];
+  for (const v of found) {
+    const info = await drive(v.id);
+    vaults.push({ ...v, name: info?.name || v.name || v.slug, added: addedIds.has(v.id) });
+  }
+  let hint: string | undefined;
+  if (parsed.drive) {
+    const info = await drive(parsed.drive);
+    if (info?.id && info.meta?.preferredEditor === VAULT_APP) {
+      hint = info.id;
+      if (!vaults.some((v) => v.id === info.id)) vaults.push({ id: info.id, slug: info.slug || info.id, name: info.name || info.slug || info.id, documents: null, added: addedIds.has(info.id) });
+    }
+  }
+  vaults.sort((a, b) => a.name.localeCompare(b.name));
+  return { switchboardUrl: origin, vaults, ...(hint ? { hint } : {}) };
+}
+

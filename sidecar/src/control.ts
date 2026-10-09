@@ -11,7 +11,7 @@ import { callbackPage, createOAuthStore } from "./oauth.js";
 import { CALLBACK_PATH as CHATGPT_CALLBACK_PATH } from "./chatgpt/constants.js";
 import { ChatGptError, type ChatGptModel, type ChatGptStatus } from "./chatgpt/session.js";
 import type { AccessToken, IdentityStatus } from "./identity.js";
-import { RemoteAccessError, RemoteAuthError, RemoteInputError, RemoteNotFoundError, RemoteTooOldError, type RemoteCheck, type RemoteVault } from "./remote.js";
+import { RemoteAccessError, RemoteAuthError, RemoteInputError, RemoteNotFoundError, RemoteNotSwitchboardError, RemoteTooOldError, type RemoteCheck, type RemoteDiscovery, type RemoteVault } from "./remote.js";
 import { ConverterBusyError, ConverterInputError, type ConverterStatus } from "./converter.js";
 import { ConnectionError, type FillResult } from "./connections.js";
 import type { EnsureResult, PipelineStatus } from "./pipelines.js";
@@ -108,6 +108,7 @@ export type ControlDeps = {
   };
   remote: {
     list: () => RemoteVault[];
+    discover: (url: string) => Promise<RemoteDiscovery>;
     check: (url: string, drive?: string) => Promise<RemoteCheck>;
     add: (url: string, drive?: string) => Promise<RemoteVault>;
     remove: (id: string) => void;
@@ -436,6 +437,12 @@ export function createControlServer(deps: ControlDeps) {
       }
       // remote vaults (spec §5.5)
       if (req.method === "GET" && url.pathname === "/remote-vaults") return send(res, 200, { vaults: deps.remote.list() }, allowed);
+      if (req.method === "POST" && url.pathname === "/remote-vaults/discover") {
+        const body = await readJson(req);
+        const address = typeof body.url === "string" ? body.url.trim() : "";
+        if (!address) return send(res, 400, { error: "Paste the address of the vault's server." }, allowed);
+        return send(res, 200, { discovery: await deps.remote.discover(address) }, allowed);
+      }
       if (req.method === "POST" && (url.pathname === "/remote-vaults/check" || url.pathname === "/remote-vaults")) {
         const body = await readJson(req);
         const address = typeof body.url === "string" ? body.url : "";
@@ -497,6 +504,7 @@ export function createControlServer(deps: ControlDeps) {
       if (error instanceof ConverterBusyError) return send(res, 409, { error: error.message }, allowed);
       if (error instanceof NotAVaultError) return send(res, 404, { error: error.message }, allowed);
       if (error instanceof RemoteInputError) return send(res, 400, { error: error.message }, allowed);
+      if (error instanceof RemoteNotSwitchboardError) return send(res, 400, { error: error.message }, allowed);
       if (error instanceof RemoteAuthError) return send(res, 401, { error: error.message }, allowed);
       if (error instanceof RemoteAccessError) return send(res, 403, { error: error.message }, allowed);
       if (error instanceof RemoteNotFoundError) return send(res, 404, { error: error.message }, allowed);

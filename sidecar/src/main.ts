@@ -13,7 +13,7 @@ import { discoverLocalModels } from "./model-discovery.js";
 import { converterEnvironment, createConverterManager } from "./converter.js";
 import { createIdentity, DEFAULT_RENOWN_URL, defaultIdentityDeps } from "./identity.js";
 import { bindLoopbackOnly } from "./loopback.js";
-import { checkRemoteVault, parseRemoteVaultInput, readRemoteVaults, RemoteInputError, writeRemoteVaults } from "./remote.js";
+import { checkRemoteVault, discoverRemoteVaults, parseRemoteVaultInput, readRemoteVaults, RemoteInputError, writeRemoteVaults } from "./remote.js";
 import { prepareDataDir } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
 import { packageSpecs, switchboardOptions } from "./options.js";
@@ -428,6 +428,15 @@ async function main(): Promise<void> {
     chatgpt,
     remote: {
       list: () => readRemoteVaults(cfg.dataDir),
+      discover: async (url) => {
+        let token: string | undefined;
+        try {
+          token = (await identity.token()).token;
+        } catch {
+          token = undefined; // signed out: the server decides whether that is enough
+        }
+        return discoverRemoteVaults(url, token, new Set(readRemoteVaults(cfg.dataDir).map((v) => v.id)));
+      },
       check: async (url, drive) => {
         const parsed = parseRemoteVaultInput(url, drive);
         if (!parsed.drive) throw new RemoteInputError("Name the vault: a drive URL (…/d/<slug>) or the drive id or slug.");
