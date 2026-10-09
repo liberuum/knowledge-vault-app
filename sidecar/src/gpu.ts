@@ -4,8 +4,17 @@ import { totalmem } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
+type Run = (file: string, args: string[], options: { timeout: number; windowsHide: boolean }) => Promise<{ stdout: string }>;
+const defaultRun: Run = async (file, args, options) => ({ stdout: String((await execFileAsync(file, args, options)).stdout) });
 const GiB = 1024 ** 3;
+/** Below this, "graphics memory" is an integrated GPU's carve-out (Intel UHD, small APUs): no help for a model. */
+const MIN_DEDICATED = 2 * GiB;
+/** A command that failed may still have printed what was asked for (reg.exe exits 1 on one unreadable key). */
+const stdoutOf = (error: unknown): string => {
+  const out = (error as { stdout?: unknown } | null)?.stdout;
+  return typeof out === "string" ? out : Buffer.isBuffer(out) ? out.toString("utf8") : "";
+};
 
 /** How much memory a local model can run in (spec decision 2): the graphics card's, Apple silicon's shared memory, or none. */
 export type GraphicsMemory = { kind: "dedicated" | "unified" | "none"; bytes: number; name: string | null };
@@ -50,6 +59,7 @@ function linuxVram(root = "/sys/class/drm"): GraphicsMemory | null {
       } catch {
         vendor = null;
       }
+      if (bytes < MIN_DEDICATED) continue; // an integrated GPU's share of memory
       if (!best || bytes > best.bytes) best = { kind: "dedicated", bytes, name: vendor ? `${vendor} graphics` : null };
     }
   } catch {
@@ -58,7 +68,12 @@ function linuxVram(root = "/sys/class/drm"): GraphicsMemory | null {
   return best;
 }
 
-export async function detectGraphicsMemory(platform: NodeJS.Platform = process.platform, arch: string = process.arch): Promise<GraphicsMemory> {
+export async function detectGraphicsMemory(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+  run: Run = defaultRun,
+  total: number = totalmem(),
+): Promise<GraphicsMemory> {
   try {
     const { stdout } = await run("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], { timeout: 4000, windowsHide: true });
     const nvidia = parseNvidiaSmi(stdout);
@@ -70,21 +85,25 @@ export async function detectGraphicsMemory(platform: NodeJS.Platform = process.p
     const vram = linuxVram();
     if (vram) return vram;
   }
-  if (platform === "darwin" && arch === "arm64") return { kind: "unified", bytes: Math.round(totalmem() * 0.75), name: "Apple silicon" };
-  if (platform === "win32") {
-    try {
-      const { stdout } = await run(
-        "reg",
-        ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}", "/s", "/v", "HardwareInformation.qwMemorySize"],
-        { timeout: 6000, windowsHide: true },
-      );
-      const bytes = parseRegistryMemory(stdout);
-      if (bytes) return { kind: "dedicated", bytes, name: null };
-    } catch {
-      // no readable adapter key
-    }
+  if (platform === "darwin" && arch === "arm64") {
+    // macOS lets the GPU use about 2/3 of memory up to 32 GB, and 3/4 above; whole GB, rounded down.
+    const share = total > 32 * GiB ? 0.75 : 2 / 3;
+    return { kind: "unified", bytes: Math.floor((total * share) / GiB) * GiB, name: "Apple silicon" };
   }
-  return { kind: "none", bytes: totalmem(), name: null };
+  if (platform === "win32") {
+    const reg = `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\reg.exe`;
+    const args = ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}", "/s", "/v", "HardwareInformation.qwMemorySize"];
+    let stdout = "";
+    try {
+      stdout = (await run(reg, args, { timeout: 6000, windowsHide: true })).stdout;
+    } catch (error) {
+      // reg.exe exits 1 when one subkey (Properties) is SYSTEM-only, after printing every adapter it could read.
+      stdout = stdoutOf(error);
+    }
+    const bytes = parseRegistryMemory(stdout);
+    if (bytes && bytes >= MIN_DEDICATED) return { kind: "dedicated", bytes, name: null };
+  }
+  return { kind: "none", bytes: total, name: null };
 }
 
 /** One plain sentence: what this machine runs well (a small table, updated with releases). */

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { renameWithRetry, RM_RETRY } from "../fs-retry.js";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -79,7 +80,7 @@ export async function installBinding(opts: InstallBindingOptions): Promise<Bindi
   const downloads = join(opts.dir, "downloads");
   const staging = join(opts.dir, "node_modules.staging");
   mkdirSync(downloads, { recursive: true });
-  rmSync(staging, { recursive: true, force: true });
+  rmSync(staging, { recursive: true, force: true, ...RM_RETRY });
   let bytes = 0;
   for (const name of ["docling.rs", `docling.rs-${opts.triple}`]) {
     progress({ phase: "metadata", file: name });
@@ -100,8 +101,8 @@ export async function installBinding(opts: InstallBindingOptions): Promise<Bindi
     rmSync(tgz, { force: true });
   }
   const final = join(opts.dir, "node_modules");
-  rmSync(final, { recursive: true, force: true });
-  renameSync(staging, final);
+  rmSync(final, { recursive: true, force: true, ...RM_RETRY });
+  renameWithRetry(staging, final);
   const manifest: BindingManifest = { version, platform: opts.triple, installedAt: new Date().toISOString(), bytes };
   writeFileSync(join(opts.dir, "binding.json"), JSON.stringify(manifest, null, 2) + "\n");
   progress({ phase: "done" });
@@ -119,8 +120,8 @@ export function installedBinding(dir: string): BindingManifest | null {
 }
 
 export function removeBinding(dir: string): void {
-  rmSync(join(dir, "node_modules"), { recursive: true, force: true });
-  rmSync(join(dir, "node_modules.staging"), { recursive: true, force: true });
+  rmSync(join(dir, "node_modules"), { recursive: true, force: true, ...RM_RETRY });
+  rmSync(join(dir, "node_modules.staging"), { recursive: true, force: true, ...RM_RETRY });
   rmSync(join(dir, "binding.json"), { force: true });
 }
 
@@ -191,7 +192,7 @@ async function download(
       });
       await pipeline(Readable.fromWeb(res.body as unknown as WebReadableStream), counter, out);
       if (total === null || have >= total) {
-        renameSync(part, dest);
+        renameWithRetry(part, dest);
         return;
       }
       lastError = new Error(`short read: ${have} of ${total} bytes`);
@@ -205,7 +206,7 @@ async function download(
   if (existsSync(part) && !existsSync(dest)) {
     // Nothing left to fetch: the file is complete.
     if (lastError === null) {
-      renameSync(part, dest);
+      renameWithRetry(part, dest);
       return;
     }
   }

@@ -22,4 +22,8 @@ describe("finding local model servers and graphics memory", () => {
     expect(modelSizeHint({ kind: "dedicated", bytes: 16 * 1024 ** 3, name: null })).toBe("16 GB of graphics memory: models up to about 20B run well, such as gpt-oss-20b or Qwen3 14B.");
     expect(modelSizeHint({ kind: "none", bytes: 32 * 1024 ** 3, name: null })).toMatch(/^No graphics card found/);
   });
+  it("reads listening ports from a translated netstat (the State column is localized, the foreign address is not)", () => {
+    const german = "\r\nAktive Verbindungen\r\n\r\n  Proto  Lokale Adresse         Remoteadresse          Status           PID\r\n  TCP    0.0.0.0:11434          0.0.0.0:0              ABH\u00d6REN        4242\r\n  TCP    [::1]:1234             [::]:0                 ABH\u00d6REN        77\r\n  TCP    127.0.0.1:50000        127.0.0.1:50001        HERGESTELLT      9\r\n";
+    expect(parseNetstat(german).sort((a, b) => a - b)).toEqual([1234, 11434]);
+  });
 });

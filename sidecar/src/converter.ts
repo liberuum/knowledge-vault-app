@@ -111,9 +111,11 @@ export type ConverterDeps = {
 };
 
 /** The helper inherits the OS/session allowlist only — none of the engine's matrix, none of our KV_* config. */
-export function converterEnvironment(inherited: Record<string, string | undefined>): Record<string, string> {
+export function converterEnvironment(inherited: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): Record<string, string> {
   const env = engineEnvironment(inherited, {});
   for (const key of Object.keys(env)) if (key.startsWith("KV_")) delete env[key];
+  // macOS: an app opened from Finder gets a PATH without Homebrew's, so its OCR tools (tesseract, qpdf, gs) go unseen.
+  if (platform === "darwin" && !(env.PATH ?? "").split(":").includes("/opt/homebrew/bin")) env.PATH = [env.PATH, "/opt/homebrew/bin"].filter(Boolean).join(":");
   return env;
 }
 

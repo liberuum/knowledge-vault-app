@@ -25,7 +25,7 @@ function alive(pid: number): boolean {
 }
 
 type Run = (file: string, args: string[]) => string;
-const run: Run = (file, args) => execFileSync(file, args, { encoding: "utf8", windowsHide: true });
+const run: Run = (file, args) => execFileSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 10_000 });
 
 /**
  * A process's command line on Windows, which has no /proc and no `ps -o command=`: PowerShell
@@ -33,7 +33,7 @@ const run: Run = (file, args) => execFileSync(file, args, { encoding: "utf8", wi
  */
 export function windowsCommandLine(pid: number, exec: Run = run): string | undefined {
   try {
-    const out = exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Math.trunc(pid)}").CommandLine`]);
+    const out = exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${Math.trunc(pid)}"; if ($p.CommandLine) { $p.CommandLine } else { $p.Name }`]);
     return out.trim() || undefined;
   } catch {
     return undefined;

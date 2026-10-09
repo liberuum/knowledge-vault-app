@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { selfBuiltReady } from "./install.js";
 
 /**
@@ -17,19 +19,33 @@ export function isMusl(platform: NodeJS.Platform = process.platform): boolean {
   }
 }
 
+/** The Microsoft Visual C++ runtime the Windows binding links against; not on a clean Windows, and the app does not ship it. */
+const VC_RUNTIME = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll"];
+export const VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
+export function hasVcRuntime(platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== "win32") return true;
+  const system32 = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+  return VC_RUNTIME.every((dll) => existsSync(join(system32, dll)));
+}
+
 /** Which binding this machine can install, or why none. */
 export function platformTriple(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   musl: boolean = isMusl(platform),
   darwinReady: boolean = selfBuiltReady("darwin-arm64"),
+  vcRuntime: boolean = hasVcRuntime(platform),
 ): { triple: PlatformTriple | null; reason: string | null } {
   if (platform === "linux") {
     if (musl) return { triple: null, reason: "docling.rs publishes no binding for musl-based Linux." };
     if (arch === "x64") return { triple: "linux-x64-gnu", reason: null };
     if (arch === "arm64") return { triple: "linux-arm64-gnu", reason: null };
   }
-  if (platform === "win32" && arch === "x64") return { triple: "win32-x64-msvc", reason: null };
+  if (platform === "win32" && arch === "x64") {
+    // Without the runtime the binding installs but cannot load: nothing converts, and the models download fails.
+    if (!vcRuntime) return { triple: null, reason: `The converter needs the Microsoft Visual C++ Redistributable (x64). Install it from ${VC_REDIST_URL}, then restart the app; text PDFs, Markdown and plain text work now.` };
+    return { triple: "win32-x64-msvc", reason: null };
+  }
   if (platform === "darwin" && arch === "arm64") {
     if (darwinReady) return { triple: "darwin-arm64", reason: null };
     return { triple: null, reason: "The converter for macOS is coming — docling.rs publishes no macOS binding yet; text PDFs, Markdown and plain text work now." };

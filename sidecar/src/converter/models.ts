@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { RM_RETRY } from "../fs-retry.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -33,7 +34,7 @@ export function modelsInstalled(modelsDir: string): boolean {
 }
 
 export function removeModels(modelsDir: string): void {
-  rmSync(modelsDir, { recursive: true, force: true });
+  rmSync(modelsDir, { recursive: true, force: true, ...RM_RETRY });
 }
 
 export function dirBytes(dir: string): number {

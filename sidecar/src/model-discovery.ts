@@ -64,19 +64,43 @@ export function parseLsof(text: string): number[] {
   return [...ports];
 }
 
-/** Windows `netstat -ano`: LISTENING rows on loopback or every interface. */
+/**
+ * Windows `netstat -ano`: listening rows on loopback or every interface. The State column is translated (German
+ * ABHÖREN, Spanish ESCUCHANDO), so a listening row is told by its foreign address, which never is: 0.0.0.0:0 or [::]:0.
+ */
 export function parseNetstat(text: string): number[] {
   const ports = new Set<number>();
   for (const line of text.split("\n")) {
     const cols = line.trim().split(/\s+/);
-    if (cols[0] !== "TCP" || cols[3] !== "LISTENING") continue;
+    if (cols[0] !== "TCP" || !/^(0\.0\.0\.0|\[::\]):0$/.test(cols[2] ?? "")) continue;
     const m = /^(127\.[\d.]+|0\.0\.0\.0|\[::1?\]):(\d+)$/.exec(cols[1] ?? "");
     if (m) ports.add(Number(m[2]));
   }
   return [...ports];
 }
 
-export async function listeningPorts(platform: NodeJS.Platform = process.platform): Promise<number[]> {
+/** A scan step that never answers (lsof on a hung network mount ignores its kill) gives up instead of blocking the setup guide. */
+function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
+export function listeningPorts(platform: NodeJS.Platform = process.platform): Promise<number[]> {
+  return within(scanPorts(platform), 8000, []);
+}
+
+async function scanPorts(platform: NodeJS.Platform): Promise<number[]> {
   try {
     if (platform === "linux") {
       const read = (p: string) => {
@@ -88,8 +112,13 @@ export async function listeningPorts(platform: NodeJS.Platform = process.platfor
       };
       return [...new Set([...parseProcNetTcp(read("/proc/net/tcp")), ...parseProcNetTcp(read("/proc/net/tcp6"))])];
     }
-    if (platform === "darwin") return parseLsof((await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"], { timeout: 4000 })).stdout);
-    if (platform === "win32") return parseNetstat((await run("netstat", ["-ano"], { timeout: 6000, windowsHide: true })).stdout);
+    // Full paths: on Windows a bare name is looked up in the working directory (the engine's) before PATH.
+    // -b -w: lsof avoids kernel calls that block on a stuck network mount, and keeps quiet about it.
+    if (platform === "darwin") return parseLsof((await run("/usr/sbin/lsof", ["-b", "-w", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"], { timeout: 4000 })).stdout);
+    if (platform === "win32") {
+      const netstat = `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\netstat.exe`;
+      return parseNetstat((await run(netstat, ["-ano"], { timeout: 6000, windowsHide: true })).stdout);
+    }
   } catch {
     // lsof exits 1 when nothing listens; any failure leaves the well-known ports
   }

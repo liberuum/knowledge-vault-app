@@ -210,7 +210,9 @@ describe("platformTriple", () => {
   it("names the binding for Linux glibc and Windows x64, and says why not elsewhere", () => {
     expect(platformTriple("linux", "x64", false)).toEqual({ triple: "linux-x64-gnu", reason: null });
     expect(platformTriple("linux", "arm64", false)).toEqual({ triple: "linux-arm64-gnu", reason: null });
-    expect(platformTriple("win32", "x64", false)).toEqual({ triple: "win32-x64-msvc", reason: null });
+    expect(platformTriple("win32", "x64", false, false, true)).toEqual({ triple: "win32-x64-msvc", reason: null });
+    // Without the Visual C++ runtime the binding would install and never load: not offered, and the reason says why.
+    expect(platformTriple("win32", "x64", false, false, false)).toMatchObject({ triple: null, reason: expect.stringContaining("Visual C++ Redistributable") });
     expect(platformTriple("linux", "x64", true).triple).toBeNull();
     expect(platformTriple("freebsd", "x64", false).reason).toMatch(/freebsd\/x64/);
   });

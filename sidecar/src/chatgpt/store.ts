@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { renameWithRetry } from "../fs-retry.js";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PLAN_SCOPE } from "./constants.js";
 
@@ -74,7 +75,7 @@ export function writeChatGpt(dataDir: string, record: ChatGptRecord): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
   chmodSync(tmp, 0o600);
-  renameSync(tmp, path);
+  renameWithRetry(tmp, path); // a failed rename would lose a renewed refresh token
 }
 
 /** The record, created with this host's ID the first time anything needs it. */

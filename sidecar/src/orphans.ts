@@ -41,7 +41,7 @@ export function stopOrphanedHelper(dataDir: string, deps: Partial<ProcessProbe> 
   if (!record) return undefined;
   if (!sameBoot(record.bootTime, probe) || !probe.alive(record.pid)) return undefined;
   const cmd = probe.command(record.pid);
-  if (!cmd || !cmd.includes("converter/server")) return undefined;
+  if (!cmd || !cmd.replaceAll("\\", "/").includes("converter/server")) return undefined; // Windows paths use backslashes
   const kill = deps.kill ?? ((p: number) => process.kill(p, "SIGTERM"));
   try {
     kill(record.pid);

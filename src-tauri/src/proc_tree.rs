@@ -110,8 +110,11 @@ impl Tree {
 /// Windows: end the engine and everything it started in one call.
 #[cfg(windows)]
 pub fn end_tree_windows(root: u32) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console window flashing on quit
     let _ = Command::new("taskkill")
         .args(["/PID", &root.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
         .status();
 }
 
