@@ -35,7 +35,8 @@ export type UpdateInfo = { latest: string; url: string; assets: UpdateAsset[] };
 type Storage = { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void };
 /** v2: the answer carries the release's files (v1 had none). */
 const KEY = "kv.update-check.v2";
-const DAY = 24 * 3_600_000;
+/** How often the app asks GitHub: every hour and a half (the open app checks again on this beat), well inside the 60 requests an hour GitHub allows. */
+export const CHECK_EVERY_MS = 90 * 60_000;
 
 type Release = { tag_name?: string; html_url?: string; draft?: boolean; assets?: Array<{ name?: string; browser_download_url?: string; size?: number }> };
 
@@ -60,9 +61,9 @@ export function newestRelease(body: unknown, feedUrl: string): UpdateInfo | null
 }
 
 /**
- * Spec §11: a notice, not an updater. Asks the release feed at most once a day (cached
- * in storage) and answers the newer release, or null — when up to date, without a
- * feed, or when anything fails (an update check must never bother anyone).
+ * Spec §11: asks the release feed at most every hour and a half (cached in storage) and answers the
+ * newer release, or null — when up to date, without a feed, or when anything fails (an
+ * update check must never bother anyone).
  */
 export async function checkForUpdate(feedUrl: string, current: string, fetchImpl: typeof fetch, storage: Storage, now: () => number = Date.now): Promise<UpdateInfo | null> {
   if (!feedUrl) return null;
@@ -75,7 +76,7 @@ export async function checkForUpdate(feedUrl: string, current: string, fetchImpl
       cached = null;
     }
     let latest: UpdateInfo;
-    if (cached && now() - cached.at < DAY) {
+    if (cached && now() - cached.at < CHECK_EVERY_MS) {
       latest = { latest: cached.latest, url: cached.url, assets: cached.assets ?? [] };
     } else {
       const res = await fetchImpl(feedUrl, { headers: { accept: "application/vnd.github+json" } });

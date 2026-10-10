@@ -18,18 +18,18 @@ describe("compareSemver", () => {
   });
 });
 describe("checkForUpdate", () => {
-  it("is off without a feed, reports a newer release, caches the answer for a day, and never throws", async () => {
+  it("is off without a feed, reports a newer release, caches the answer for an hour and a half, and never throws", async () => {
     const storage = memory();
     const fetchImpl = vi.fn(async () => release("v0.2.0")) as unknown as typeof fetch;
     expect(await checkForUpdate("", "0.1.0", fetchImpl, storage, () => 0)).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
     const first = await checkForUpdate(feed, "0.1.0", fetchImpl, storage, () => 1_000);
     expect(first).toEqual({ latest: "0.2.0", url: "https://github.com/o/r/releases/tag/v0.2.0", assets: [] });
-    expect(await checkForUpdate(feed, "0.1.0", fetchImpl, storage, () => 1_000 + 23 * 3_600_000)).toEqual(first);
+    expect(await checkForUpdate(feed, "0.1.0", fetchImpl, storage, () => 1_000 + 89 * 60_000)).toEqual(first);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await checkForUpdate(feed, "0.1.0", fetchImpl, storage, () => 1_000 + 25 * 3_600_000);
+    await checkForUpdate(feed, "0.1.0", fetchImpl, storage, () => 1_000 + 91 * 60_000);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(await checkForUpdate(feed, "0.2.0", fetchImpl, storage, () => 1_000 + 25 * 3_600_000)).toBeNull();
+    expect(await checkForUpdate(feed, "0.2.0", fetchImpl, storage, () => 1_000 + 91 * 60_000)).toBeNull();
     expect(JSON.parse(storage.getItem("kv.update-check.v2")!)).toMatchObject({ latest: "0.2.0" });
     const broken = vi.fn(async () => { throw new Error("offline"); }) as unknown as typeof fetch;
     expect(await checkForUpdate(feed, "0.1.0", broken, memory(), () => 0)).toBeNull();

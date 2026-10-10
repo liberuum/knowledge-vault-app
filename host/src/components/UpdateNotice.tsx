@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SidecarInfo } from "../sidecar.js";
 import { invokeIfTauri, isTauri } from "../shell/tauri.js";
-import { checkForUpdate, type UpdateInfo } from "../update-check.js";
+import { CHECK_EVERY_MS, checkForUpdate, compareSemver, type UpdateInfo } from "../update-check.js";
 import { startUpdateDownload, updateDownloadStatus, type InstallerKind, type UpdateDownload } from "../update-download.js";
 import { UPDATE_FEED } from "../update-feed.js";
 import { ControlError, fetchStatus } from "../vaults.js";
@@ -84,24 +84,39 @@ export function UpdateNotice({ info, feed = UPDATE_FEED, version, download }: Up
   const [installError, setInstallError] = useState<string | null>(null);
   const api = useRef(download ?? { status: () => updateDownloadStatus(info), start: (r: { version: string; assets: UpdateInfo["assets"] }) => startUpdateDownload(info, r) });
 
-  // Is there a newer release? (at most one question to GitHub a day: update-check.ts)
+  // Is there a newer release? Asked at start and every hour and a half the app stays open (update-check.ts).
+  // A newer one than the notice shows drops the card again; a download under way or done is left be.
+  const shown = useRef<UpdateInfo | null>(null);
+  const phaseNow = useRef<Phase>(phase);
+  phaseNow.current = phase;
   useEffect(() => {
     let alive = true;
-    void (async () => {
+    const check = async (first: boolean) => {
       const current = await (version ?? (() => runningVersion(info)))().catch(() => null);
       if (!current || !alive) return;
       const found = await checkForUpdate(feed, current, fetch, window.localStorage);
       if (!found || !alive) return;
+      if (shown.current && compareSemver(found.latest, shown.current.latest) <= 0) return;
+      if (["downloading", "installing", "done", "ready"].includes(phaseNow.current)) return;
+      shown.current = found;
       setUpdate(found);
+      if (!first) {
+        setState({ state: "idle" });
+        setPhase("card");
+        return;
+      }
       // A download the engine already holds for it (the window was reloaded): carry on from there.
       const now = await api.current.status().catch((): UpdateDownload => ({ state: "idle" }));
       if (!alive) return;
       const same = now.state !== "idle" && now.version === found.latest;
       setState(same ? now : { state: "idle" });
       setPhase(same && now.state === "downloading" ? "downloading" : same && now.state === "done" ? "ready" : "card");
-    })();
+    };
+    void check(true);
+    const timer = setInterval(() => void check(false), CHECK_EVERY_MS);
     return () => {
       alive = false;
+      clearInterval(timer);
     };
   }, [info, feed, version]);
 
