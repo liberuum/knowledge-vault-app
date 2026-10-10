@@ -8,7 +8,9 @@ export function openAiError(status: number, message: string, code?: string) {
 /** The provider's own sentence, when its body carries one. */
 function detailOf(bodyText: string): string {
   try {
-    const parsed = JSON.parse(bodyText) as { error?: { message?: unknown } | string; message?: unknown };
+    // Google answers with a list of errors; the first one speaks for the rest.
+    const raw = JSON.parse(bodyText) as unknown;
+    const parsed = (Array.isArray(raw) ? raw[0] : raw) as { error?: { message?: unknown } | string; message?: unknown };
     const m = typeof parsed.error === "string" ? parsed.error : parsed.error?.message ?? parsed.message;
     return typeof m === "string" ? m.trim() : "";
   } catch {

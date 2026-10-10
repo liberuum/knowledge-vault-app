@@ -7,6 +7,8 @@ import { createQueue } from "./queue.js";
 import { modelsUrl, providerHeaders } from "../provider-auth.js";
 import { adaptPayload, withoutRefusedParameter } from "./compat.js";
 import { cleanJsonReply, withJsonInstruction } from "./json.js";
+import { createSignatureMemory, signatureTap, withThoughtSignatures } from "./gemini.js";
+import { isGeminiEndpoint } from "../provider-auth.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -34,6 +36,8 @@ export function createGateway(deps: GatewayDeps) {
   const f = deps.fetchImpl ?? fetch;
   const queue = createQueue();
   const anthropicJson = deps.anthropicJson ?? defaultAnthropicJson;
+  // Gemini 3's tool-call signatures, kept as answers pass so the next turn can carry them (gemini.ts).
+  const signatures = createSignatureMemory();
 
   async function handle(req: IncomingMessage, res: ServerResponse, body: Buffer, cors: Record<string, string>): Promise<void> {
     const path = new URL(req.url ?? "/", "http://gateway").pathname.slice(GATEWAY_PATH.length);
@@ -92,7 +96,10 @@ export function createGateway(deps: GatewayDeps) {
       let upstream: Response;
       const wantsJson = isChat && payload.response_format !== undefined && payload.stream !== true;
       if (isChat) payload = adaptPayload(endpoint, payload);
+      const gemini = isChat && isGeminiEndpoint(endpoint);
+      if (gemini) payload = withThoughtSignatures(payload, signatures);
       // A model that refuses one parameter by name (a newer OpenAI model and `temperature`) is asked again without it.
+      let overloaded = 0;
       for (let retries = 0; ; retries++) {
         try {
           upstream = await f(isChat ? `${endpoint}/chat/completions` : modelsUrl(endpoint), {
@@ -104,6 +111,14 @@ export function createGateway(deps: GatewayDeps) {
         } catch (error) {
           if (controller.signal.aborted) return;
           return sendJson(res, 502, openAiError(502, `Could not reach ${whoFor(settings)}: ${error instanceof Error ? error.message : String(error)}`, "provider_unreachable"), cors);
+        }
+        // An overloaded service (Gemini's free tier, often) is asked again twice, a moment later.
+        if (isChat && upstream.status === 503 && overloaded < 2) {
+          overloaded += 1;
+          await upstream.body?.cancel().catch(() => undefined);
+          await new Promise((resolve) => setTimeout(resolve, 1500 * overloaded));
+          if (controller.signal.aborted) return;
+          continue;
         }
         if (!isChat || upstream.status !== 400 || retries >= 3) break;
         const refusal = await upstream.text();
@@ -119,16 +134,26 @@ export function createGateway(deps: GatewayDeps) {
         return sendJson(res, upstream.status, openAiError(upstream.status, message, code), cors);
       }
       const type = upstream.headers.get("content-type") ?? "application/json";
+      const tap = gemini ? signatureTap(signatures, type) : null;
       if (wantsJson && type.includes("json")) {
         // An answer still wrapped in a code fence or prose comes back as the JSON alone.
-        const reply = cleanJsonReply(await upstream.text());
+        const text = await upstream.text();
+        if (tap) {
+          tap.push(new TextEncoder().encode(text));
+          tap.end();
+        }
+        const reply = cleanJsonReply(text);
         res.writeHead(200, { "content-type": type, "cache-control": "no-store", ...cors });
         res.end(reply);
         return;
       }
       res.writeHead(200, { "content-type": type, "cache-control": "no-store", ...cors });
       try {
-        for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) res.write(chunk);
+        for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
+          tap?.push(chunk);
+          res.write(chunk);
+        }
+        tap?.end();
       } catch {
         if (!controller.signal.aborted && type.includes("text/event-stream")) {
           // Review Focus 1: the chat sees why the answer stopped instead of waiting forever.
