@@ -32,6 +32,19 @@ export function gettingStartedSteps(f: Facts): Step[] {
   ];
 }
 
+/** The steps that read notes: until a source has been processed into notes, they wait. */
+export const NEEDS_NOTES: ReadonlySet<StepId> = new Set<StepId>(["notes", "chat", "graph", "search"]);
+
+/**
+ * The one step to do next: the first required step not done that can be done now. While the first notes are
+ * still being written, the steps that read them wait, and watching the processing comes first; when nothing can
+ * be done yet, the first step left (its reason shown). None once every required step is done.
+ */
+export function nextStep(steps: readonly Step[], hasNotes: boolean): StepId | undefined {
+  const left = steps.filter((s) => s.group !== "optional" && !s.done);
+  return (left.find((s) => hasNotes || !NEEDS_NOTES.has(s.id)) ?? left[0])?.id;
+}
+
 const KEY = "kv-getting-started:v1";
 /** What only this window knows: notes opened, views explored, a command copied, the list closed. */
 export type Remembered = { readNotes?: true; explored?: Explored; tools?: true; hidden?: boolean };

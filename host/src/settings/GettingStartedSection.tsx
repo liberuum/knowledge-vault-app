@@ -8,7 +8,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import type { VaultSummary } from "../vaults.js";
 import { plainError } from "../problem.js";
 
-/** Settings › Getting started: the front page's list, always here, so what is left can be seen and the list brought back. */
+/** Settings › Getting started: the whole list, always here, with the switch that shows it on the front page. */
 export function GettingStartedSection({
   info,
   api,
@@ -47,7 +47,7 @@ export function GettingStartedSection({
 
   return (
     <div className="kv-settings-body">
-      <p className="kv-settings-lead">The steps that make Knowledge Vault useful, ticked as you do them. Close the list on the front page any time; it stays here.</p>
+      <p className="kv-settings-lead">The steps that make Knowledge Vault useful, ticked as you do them.</p>
       {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       {vaults === null || ready === null ? (
         !error && <LoadingLine>Checking your steps…</LoadingLine>

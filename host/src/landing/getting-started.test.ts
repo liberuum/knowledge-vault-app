@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askedAQuestion, gettingStartedSteps, readRemembered, remember } from "./getting-started.js";
+import { askedAQuestion, gettingStartedSteps, nextStep, readRemembered, remember } from "./getting-started.js";
 
 function storage(entries: Record<string, string> = {}): Storage {
   const m = new Map(Object.entries(entries));
@@ -14,6 +14,22 @@ describe("getting started", () => {
     expect(none.map((s) => `${s.group}:${s.id}`)).toEqual(["setup:model", "setup:vault", "setup:source", "explore:notes", "explore:chat", "explore:graph", "explore:search", "explore:processing", "optional:tools"]);
     const some = gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ id: "o", slug: "o", name: "O", noteCount: 4 }], explored: { graph: true } });
     expect(some.filter((s) => s.done).map((s) => s.id)).toEqual(["model", "vault", "source", "graph"]); // notes imply a source
+  });
+  it("picks one next step: set up in order, then exploring — and while the first notes are written, watching them", () => {
+    const vault = { id: "o", slug: "o", name: "O", noteCount: 0 };
+    expect(nextStep(gettingStartedSteps(facts), false)).toBe("model");
+    expect(nextStep(gettingStartedSteps({ ...facts, modelReady: true }), false)).toBe("vault");
+    expect(nextStep(gettingStartedSteps({ ...facts, modelReady: true, vaults: [vault] }), false)).toBe("source");
+    // A source in, no notes yet: reading, asking, the graph and search wait; the processing can be watched now.
+    const processing = gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ ...vault, sourceCount: 1 }] });
+    expect(nextStep(processing, false)).toBe("processing");
+    // Watched already, still no notes: the first step left, which says why it waits.
+    expect(nextStep(gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ ...vault, sourceCount: 1 }], explored: { processing: true } }), false)).toBe("notes");
+    const withNotes = gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ ...vault, noteCount: 3 }], readNotes: true });
+    expect(nextStep(withNotes, true)).toBe("chat");
+    // Every required step done: none, whatever the optional one.
+    const all = gettingStartedSteps({ ...facts, modelReady: true, vaults: [{ ...vault, noteCount: 3 }], readNotes: true, asked: true, explored: { graph: true, search: true, processing: true } });
+    expect(nextStep(all, true)).toBeUndefined();
   });
   it("reads a question asked in the chat, and remembers what only this window knows", () => {
     expect(askedAQuestion(storage({ "bai-chat:v1:v": JSON.stringify([{ messages: [{ role: "assistant", content: "Hi" }] }]) }))).toBe(false);

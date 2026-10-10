@@ -42,7 +42,7 @@ describe("Landing", () => {
     const onIdentity = vi.fn();
     render(<Landing engine={{ state: "ready" }} info={info} api={api()} onIdentity={onIdentity} storage={memoryStorage()} />);
     expect(await screen.findByText("Create your first vault")).toBeTruthy();
-    expect(within(await screen.findByRole("region", { name: "Getting started" })).getByText("0 of 8 done")).toBeTruthy();
+    expect(within(await screen.findByRole("region", { name: "Getting started" })).getByText("0 of 8 steps done")).toBeTruthy();
     const hint = screen.getByText(/Already have a vault on a server/);
     expect(hint.textContent).toBe("Already have a vault on a server? Connect a remote vault. If its server asks who you are, sign in first.");
     fireEvent.click(within(hint).getByRole("button", { name: "sign in" }));

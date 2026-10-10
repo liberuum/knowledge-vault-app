@@ -1,0 +1,214 @@
+/*
+ * Getting started (GettingStarted.tsx). Where you are — a track of the steps by stage, drawn as nodes and links
+ * like a vault's graph — then the one thing to do next, and the whole list a click away.
+ */
+.kv-gs {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--bai-border);
+  border-radius: 14px;
+  background: radial-gradient(130% 150% at 100% 0%, color-mix(in srgb, var(--bai-accent) 7%, transparent) 0%, transparent 55%), var(--bai-surface);
+}
+.kv-gs[data-variant="settings"] { margin: 0; }
+.kv-gs[data-all-done="true"] {
+  border-color: color-mix(in srgb, var(--bai-ok) 30%, var(--bai-border));
+  background: radial-gradient(130% 150% at 100% 0%, color-mix(in srgb, var(--bai-ok) 9%, transparent) 0%, transparent 55%), var(--bai-surface);
+}
+
+/* Head: the name and count, the track, the actions. */
+.kv-gs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
+.kv-gs-headline { display: grid; gap: 2px; min-width: 0; }
+.kv-gs-title { margin: 0; color: var(--bai-text); font-family: var(--kv-font-name); font-size: 21px; font-weight: 500; letter-spacing: -0.005em; }
+.kv-gs-count { color: var(--bai-text-secondary); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.kv-gs[data-variant="settings"] .kv-gs-count { color: var(--bai-text); font-family: var(--kv-font-name); font-size: 19px; }
+.kv-gs-head-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.kv-gs-head-actions .kv-link { margin-right: 6px; font-size: 14px; }
+.kv-gs-more { padding: 6px 10px; font-size: 14px; }
+.kv-gs-more[aria-expanded="true"] .kv-gs-chevron { transform: rotate(180deg); }
+.kv-gs-chevron { flex: none; transition: transform 160ms ease; }
+.kv-gs-icon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--bai-text-tertiary); cursor: pointer; }
+.kv-gs-icon:hover { color: var(--bai-text); background: color-mix(in srgb, var(--bai-text) 7%, transparent); }
+.kv-gs-icon:focus-visible, .kv-gs-group-head:focus-visible, .kv-gs-switch:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 2px; }
+
+/* The track: a node per required step, its stage named under it; a link turns green once the step before is done. */
+.kv-gs-track { display: flex; align-items: flex-start; gap: 22px; }
+.kv-gs-stage { display: grid; justify-items: start; gap: 7px; }
+.kv-gs-nodes { display: flex; align-items: center; height: 14px; }
+.kv-gs-node {
+  position: relative;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bai-surface);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bai-text) 22%, transparent);
+}
+.kv-gs-node + .kv-gs-node { margin-left: 12px; }
+.kv-gs-node + .kv-gs-node::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 12px;
+  height: 2px;
+  margin-top: -1px;
+  background: color-mix(in srgb, var(--bai-text) 16%, transparent);
+}
+.kv-gs-node[data-state="done"] { background: var(--bai-ok); box-shadow: none; animation: kv-gs-light 420ms cubic-bezier(0.2, 1.3, 0.4, 1) both; animation-delay: calc(var(--kv-gs-i, 0) * 55ms); }
+.kv-gs-node[data-state="done"] + .kv-gs-node::before { background: var(--bai-ok); }
+.kv-gs-node[data-state="next"] { box-shadow: inset 0 0 0 2px var(--bai-accent), 0 0 0 4px color-mix(in srgb, var(--bai-accent) 20%, transparent); animation: kv-gs-pulse 2.4s ease-in-out infinite; }
+.kv-gs-stage-label { color: var(--bai-text-tertiary); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.kv-gs-stage[data-done="true"] .kv-gs-stage-label { color: var(--bai-ok); }
+.kv-gs-stage[data-current="true"] .kv-gs-stage-label { color: var(--bai-accent); }
+
+/* The next step: the only highlighted button on the card. */
+.kv-gs-next {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 20px;
+  padding: 14px 16px 15px;
+  border: 1px solid color-mix(in srgb, var(--bai-accent) 32%, var(--bai-border));
+  border-radius: 11px;
+  background: var(--bai-deep);
+  animation: kv-gs-in 220ms ease-out;
+}
+.kv-gs-next-eyebrow { grid-column: 1 / -1; color: var(--bai-accent); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.kv-gs-next-body { display: grid; gap: 3px; min-width: 0; }
+.kv-gs-next-title { color: var(--bai-text); font-size: 16.5px; font-weight: 600; }
+.kv-gs-next-line { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-gs-next-action { justify-self: end; }
+.kv-gs-next-action .kv-hint { margin: 0; font-size: 13.5px; }
+.kv-gs-next-action .kv-button-primary { padding: 9px 18px; }
+
+/* Every step done: a line, not a list. */
+.kv-gs-done { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; animation: kv-gs-in 220ms ease-out; }
+.kv-gs-done-mark { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--bai-accent-text); background: var(--bai-ok); animation: kv-gs-light 460ms cubic-bezier(0.2, 1.3, 0.4, 1) both; }
+.kv-gs-done-mark svg { width: 16px; height: 16px; }
+.kv-gs-done-text { display: grid; flex: 1 1 260px; gap: 2px; min-width: 0; }
+.kv-gs-done-text strong { color: var(--bai-text); font-size: 15px; font-weight: 600; }
+.kv-gs-done-text span { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-gs-done-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+
+/* The whole list, by stage; a finished stage folds to its line. */
+.kv-gs-list { display: grid; gap: 4px; animation: kv-gs-in 200ms ease-out; }
+.kv-gs-group { display: grid; gap: 2px; }
+.kv-gs-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--bai-text-tertiary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kv-gs-group-head:hover { color: var(--bai-text-secondary); background: color-mix(in srgb, var(--bai-text) 5%, transparent); }
+.kv-gs-group-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.kv-gs-group-count { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.kv-gs-group[data-complete="true"] .kv-gs-group-count { color: var(--bai-ok); }
+.kv-gs-group-head .kv-gs-chevron { margin-left: auto; }
+.kv-gs-group-head[aria-expanded="true"] .kv-gs-chevron { transform: rotate(180deg); }
+.kv-gs-steps { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.kv-gs-step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; }
+.kv-gs-step[data-state="next"] { background: var(--bai-deep); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bai-accent) 32%, var(--bai-border)); }
+.kv-gs-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; box-sizing: border-box; border: 1.5px solid color-mix(in srgb, var(--bai-text) 22%, transparent); border-radius: 50%; color: var(--bai-accent-text); }
+.kv-gs-step[data-state="done"] .kv-gs-mark { border-color: var(--bai-ok); background: var(--bai-ok); }
+.kv-gs-step[data-state="next"] .kv-gs-mark { border-color: var(--bai-accent); }
+.kv-gs-step[data-state="waiting"] .kv-gs-mark { border-style: dashed; }
+.kv-gs-text { display: grid; gap: 2px; min-width: 0; }
+.kv-gs-text strong { color: var(--bai-text); font-size: 14.5px; font-weight: 600; }
+.kv-gs-text > span { color: var(--bai-text-secondary); font-size: 13.5px; }
+.kv-gs-step[data-state="done"] .kv-gs-text strong { color: var(--bai-text-secondary); font-weight: 500; }
+.kv-gs-step[data-state="done"] .kv-gs-text > span { color: var(--bai-text-tertiary); }
+.kv-gs-step[data-state="waiting"] .kv-gs-text strong { color: var(--bai-text-secondary); }
+.kv-gs-action { display: inline-flex; align-items: center; gap: 8px; justify-self: end; }
+.kv-gs-action .kv-hint { margin: 0; font-size: 13px; }
+/* The other steps' actions: there, but quieter than the next one's. */
+.kv-gs-do { padding: 6px 12px; color: var(--bai-text-secondary); font-size: 13.5px; }
+.kv-gs-do:hover:not(:disabled) { color: var(--bai-text); border-color: color-mix(in srgb, var(--bai-text) 30%, transparent); }
+/* A step whose action sits under its line (the tools): the mark stays with the title, the commands span the row. */
+.kv-gs-step[data-inline] { align-items: start; }
+.kv-gs-step[data-inline] .kv-gs-mark { margin-top: 1px; }
+.kv-gs-inline-action { margin-top: 4px; }
+.kv-gs-step > .kv-gs-tools { grid-column: 2 / -1; }
+.kv-gs-tools { display: grid; gap: 8px; margin-top: 2px; }
+.kv-gs-tools .kv-hint { margin: 0; }
+/* Each command as a code block with its header: the tool and Copy on one line, the command whole below. */
+.kv-gs-tools .kv-code { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label copy" "value value"; align-items: center; row-gap: 6px; margin-top: 0; padding: 9px 10px 11px 12px; background: var(--bai-deep); }
+.kv-gs-tools .kv-code-label { grid-area: label; color: var(--bai-text-secondary); font-size: 13px; font-weight: 600; }
+.kv-gs-tools .kv-code > .kv-button { grid-area: copy; padding: 4px 12px; font-size: 13px; }
+.kv-gs-tools .kv-code-value { grid-area: value; color: var(--bai-text); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: break-word; }
+
+/* Settings: the front-page switch. */
+.kv-gs-pref { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-deep); }
+.kv-gs-pref-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.kv-gs-pref-title { color: var(--bai-text); font-size: 14.5px; font-weight: 600; }
+.kv-gs-pref-line { color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-gs-switch {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bai-text) 22%, transparent);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.kv-gs-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms ease;
+}
+.kv-gs-switch[aria-checked="true"] { background: var(--bai-accent); }
+.kv-gs-switch[aria-checked="true"]::after { transform: translateX(18px); }
+
+/* Hidden from the front page: say where it went, and offer it back. */
+.kv-gs-hidden {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 10px 14px;
+  border: 1px dashed var(--bai-border);
+  border-radius: 10px;
+  color: var(--bai-text-secondary);
+  font-size: 14px;
+  animation: kv-gs-in 220ms ease-out;
+}
+
+@media (max-width: 640px) {
+  .kv-gs-track { order: 3; width: 100%; }
+  .kv-gs-next { grid-template-columns: 1fr; }
+  .kv-gs-next-action { justify-self: start; }
+  .kv-gs-step { grid-template-columns: 22px minmax(0, 1fr); }
+  .kv-gs-action { grid-column: 2; justify-self: start; }
+}
+
+@keyframes kv-gs-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes kv-gs-light { from { opacity: 0.2; transform: scale(0.3); } to { opacity: 1; transform: none; } }
+@keyframes kv-gs-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 2px var(--bai-accent), 0 0 0 3px color-mix(in srgb, var(--bai-accent) 26%, transparent); }
+  50% { box-shadow: inset 0 0 0 2px var(--bai-accent), 0 0 0 6px color-mix(in srgb, var(--bai-accent) 6%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kv-gs-node, .kv-gs-next, .kv-gs-done, .kv-gs-done-mark, .kv-gs-list, .kv-gs-hidden { animation: none !important; }
+  .kv-gs-switch, .kv-gs-switch::after, .kv-gs-chevron { transition: none; }
+}

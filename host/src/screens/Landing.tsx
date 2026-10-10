@@ -368,6 +368,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
             storage={store}
             onModels={onModels}
             onNewVault={() => setShowForm(true)}
+            vaultFormOpen={firstRun || showForm}
             onOpenView={onOpenView ? openView : undefined}
             onWorkflows={onWorkflows}
             onGuide={onGuide}
