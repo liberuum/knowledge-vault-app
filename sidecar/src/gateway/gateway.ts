@@ -76,7 +76,11 @@ export function createGateway(deps: GatewayDeps) {
         if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
           return sendJson(res, 400, openAiError(400, "The request body must be a JSON object."), cors);
         }
-        if (typeof payload.model !== "string" || !payload.model.trim()) payload.model = settings.models.model;
+        // One model setting serves everything. A pipeline names the model its connection held when its run
+        // began, while the provider is read now: across a change of provider the old one's model went to the
+        // new one (ChatGPT refused an OpenRouter id). So a background request always gets the model set up
+        // now; the chat and the onboarding's check (interactive) may name their own.
+        if (!interactive || typeof payload.model !== "string" || !payload.model.trim()) payload.model = settings.models.model;
         // JSON asked for is JSON received, whatever the model: said in words too (json.ts).
         payload = withJsonInstruction(payload);
         if (settings.models.provider === "anthropic" && payload.response_format && key) {

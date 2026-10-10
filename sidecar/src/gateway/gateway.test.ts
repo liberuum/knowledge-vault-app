@@ -48,6 +48,20 @@ describe("gateway", () => {
     expect(seen).toEqual({ auth: "Bearer sk-test", body: { messages: [{ role: "user", content: "hello" }], model: "m-1" } });
   });
 
+  it("a background request (a pipeline) always gets the model set up now; an interactive one keeps the model it names", async () => {
+    const models: unknown[] = [];
+    const upstream = await listen(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      models.push((JSON.parse(Buffer.concat(chunks).toString()) as { model?: unknown }).model);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }));
+    });
+    const gw = await gatewayAt(() => settingsFor(`${upstream}/v1`, "gpt-6.1-sol"));
+    await ask(gw, { model: "nvidia/nemotron-3-super-120b-a12b:free", messages: [{ role: "user", content: "a run begun before the change" }] });
+    await ask(gw, { model: "chosen-in-the-chat", messages: [{ role: "user", content: "b" }] }, { "x-kv-priority": "interactive" });
+    expect(models).toEqual(["gpt-6.1-sol", "chosen-in-the-chat"]);
+  });
+
   it("streams server-sent events through as they arrive", async () => {
     const upstream = await listen((_req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
