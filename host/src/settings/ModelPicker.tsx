@@ -15,6 +15,8 @@ type Props = {
   load: () => Promise<CatalogResult>;
   /** Changes to this reload the list (the form's endpoint). */
   reloadKey?: string;
+  /** A key was just entered and is about to be asked: show the list as on its way, not as missing. */
+  pending?: boolean;
 };
 
 type Group = { label: string; models: CatalogModel[] };
@@ -24,7 +26,7 @@ type Group = { label: string; models: CatalogModel[] };
  * Grouped as "Recommended for processing" (what the pipeline needs, cheapest first), "Free" and
  * "All models"; typing filters every group; arrows, Enter and Escape work as in a combobox.
  */
-export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey, load, reloadKey }: Props) {
+export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey, load, reloadKey, pending = false }: Props) {
   const [catalog, setCatalog] = useState<CatalogResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -109,10 +111,11 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
     }
   };
 
-  const status = !hasKey
-    ? "Enter your API key to see the models it gives you."
-    : loading
-      ? "Listing your provider's models…"
+  const fetching = pending || (hasKey && loading);
+  const status = fetching
+    ? "Checking your key and fetching its models…"
+    : !hasKey
+      ? "Enter your API key to see the models it gives you."
       : catalog && !catalog.ok
         ? `Could not list models: ${catalog.detail}`
         : catalog?.ok
@@ -135,7 +138,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         onFocus={show}
         onClick={show}
         onKeyDown={onKeyDown}
-        placeholder={placeholder}
+        placeholder={fetching ? "Loading the models…" : placeholder}
         disabled={disabled}
         autoComplete="off"
         role="combobox"
@@ -200,7 +203,12 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         </div>
       )}
       </div>
-      {status && <p className="kv-hint" role="status">{status}</p>}
+      {status && (
+        <p className="kv-hint kv-picker-status" role="status" aria-busy={fetching || undefined}>
+          {fetching && <span className="kv-spinner" aria-hidden="true" />}
+          {status}
+        </p>
+      )}
       {current && catalog?.ok && (formatContext(current) || formatPrice(current)) && (
         <p className="kv-hint">
           {current.name !== current.id ? `${current.name} · ` : ""}

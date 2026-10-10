@@ -237,6 +237,7 @@ describe("Settings", () => {
     render(<Harness api={a} start="models" />);
     fireEvent.change(await screen.findByLabelText("Service"), { target: { value: "anthropic" } });
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-ant-test" } });
+    expect(screen.getByText("Checking your key and fetching its models…")).toBeTruthy(); // shown at once, while the key is checked
     await waitFor(() => expect(a.fetchModelCatalogFor).toHaveBeenCalledWith(info, { provider: "anthropic", endpoint: "", apiKey: "sk-ant-test" }), { timeout: 3000 });
     fireEvent.click(await screen.findByRole("button", { name: "Show the models" }));
     expect(screen.queryByRole("option", { name: /text-embedding-test/ })).toBeNull(); // not a chat model
@@ -244,6 +245,20 @@ describe("Settings", () => {
     expect((screen.getByLabelText("Model (required for processing)") as HTMLInputElement).value).toBe("claude-sonnet-5");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, expect.objectContaining({ models: expect.objectContaining({ provider: "anthropic", model: "claude-sonnet-5", apiKey: "sk-ant-test" }) })));
+  });
+
+  it("keeps a model with its service and key: another service starts empty, and Remove key clears it", async () => {
+    const a = api({ fetchSettings: vi.fn(async () => savedWith("anthropic", { model: "claude-opus-5-5", hasKey: true })) });
+    render(<Harness api={a} start="models" />);
+    const model = () => screen.getByLabelText("Model (required for processing)") as HTMLInputElement;
+    await waitFor(() => expect(model().value).toBe("claude-opus-5-5"));
+    fireEvent.change(screen.getByLabelText("Service"), { target: { value: "openai" } });
+    expect(model().value).toBe("");
+    fireEvent.change(screen.getByLabelText("Service"), { target: { value: "anthropic" } });
+    expect(model().value).toBe("claude-opus-5-5");
+    fireEvent.click(screen.getByRole("button", { name: "Remove key" }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { apiKey: "", model: "" } }));
+    await waitFor(() => expect(model().value).toBe(""));
   });
 
   it("asks nothing of the provider without a saved key and says why", async () => {
@@ -474,7 +489,7 @@ describe("Settings › Models tells the app when the model changes", () => {
     });
     render(<Harness api={a} start="models" />);
     fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
-    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { apiKey: "" } }));
+    await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { apiKey: "", model: "" } }));
     await waitFor(() => expect(heard).toHaveBeenCalledTimes(1));
   });
 

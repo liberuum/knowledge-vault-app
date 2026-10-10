@@ -477,3 +477,9 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-remote-option-name { font-weight: 500; color: var(--bai-text); overflow-wrap: anywhere; }
 .kv-remote-option-meta { font-size: 13px; color: var(--bai-text-tertiary); }
 
+/* A small spinner beside a status that is on its way (the models a key gives) */
+.kv-picker-status { display: flex; align-items: center; gap: 8px; }
+.kv-spinner { flex: none; width: 12px; height: 12px; box-sizing: border-box; border: 2px solid var(--bai-border); border-top-color: var(--bai-accent); border-radius: 50%; animation: kv-spin 0.8s linear infinite; }
+@keyframes kv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kv-spinner { animation: none; border-color: var(--bai-accent); } }
+

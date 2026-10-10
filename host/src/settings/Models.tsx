@@ -100,6 +100,16 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     [api, info, catalogEndpoint, listsTypedKey, listProvider, customEndpoint, typedKey],
   );
 
+  /** The model and the key belong to one service: another card or service starts empty, the saved one shows what was saved. */
+  function switchTo(c: Choice, s: ApiService) {
+    setChoice(c);
+    setService(s);
+    clearNotes();
+    setApiKey("");
+    const same = savedCard !== null && savedCard.choice === c && (c !== "apikey" || savedCard.service === s);
+    setModel(same && settings ? settings.models.model : "");
+  }
+
   /** Notes about the last action (Saved, a verdict, an error) belong to the card they were made on. */
   function clearNotes() {
     setSaved(false);
@@ -202,7 +212,9 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
     setBusy(true);
     setError(null);
     try {
-      setSettings(await api.saveSettings(info, { models: { apiKey: "" } }));
+      // The model goes with its key: without one, it cannot be used.
+      setSettings(await api.saveSettings(info, { models: { apiKey: "", model: "" } }));
+      setModel("");
       announceModelsChanged(); // a hosted model without its key is no longer one the chat can use
     } catch (err) {
       setError(`Could not remove the key: ${err instanceof Error ? err.message : String(err)}`);
@@ -234,19 +246,17 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
         <form className="kv-form" onSubmit={(e) => void submit(e)}>
           <ProviderChoice
             choice={choice}
-            onChoice={(c) => {
-              setChoice(c);
-              clearNotes();
-            }}
+            onChoice={(c) => switchTo(c, service)}
             service={service}
-            onService={(s) => {
-              setService(s);
-              clearNotes();
-            }}
+            onService={(s) => switchTo("apikey", s)}
             customEndpoint={customEndpoint}
             onCustomEndpoint={setCustomEndpoint}
             apiKey={apiKey}
-            onApiKey={setApiKey}
+            onApiKey={(v) => {
+              setApiKey(v);
+              // A model picked from a key just entered goes with that key.
+              if (!v.trim() && !keySaved) setModel("");
+            }}
             hasKey={keySaved}
             onOpenRouterSignIn={() => void signIn()}
             signingIn={signingIn}
@@ -269,7 +279,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
               canSave ? (
                 <>
                   <label htmlFor="models-model">Model (required for processing)</label>
-                  <ModelPicker id="models-model" value={model} onChange={setModel} placeholder={canList ? "Choose a model" : "The model’s name"} disabled={busy} hasKey={canList} load={loadCatalog} reloadKey={catalogEndpoint} />
+                  <ModelPicker id="models-model" value={model} onChange={setModel} placeholder={canList ? "Choose a model" : "The model’s name"} disabled={busy} hasKey={canList} load={loadCatalog} reloadKey={catalogEndpoint} pending={apiKey.trim() !== "" && apiKey.trim() !== typedKey} />
                 </>
               ) : undefined
             }

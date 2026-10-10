@@ -386,6 +386,8 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
             onApiKey={(v) => {
               setApiKey(v);
               setPhase(IDLE);
+              // A model picked from a key just entered goes with that key.
+              if (!v.trim() && !keySaved) setModel("");
             }}
             hasKey={keySaved}
             onOpenRouterSignIn={() => void signIn()}
@@ -409,6 +411,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
                   hasKey={canList}
                   load={loadCatalog}
                   reloadKey={catalogEndpoint}
+                  pending={apiKey.trim() !== "" && apiKey.trim() !== typedKey}
                 />
                 <p className="kv-hint">
                   {price ? `Costs ${price}; you pay ${payer} for what is processed. ` : ""}
