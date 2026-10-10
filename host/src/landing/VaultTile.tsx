@@ -30,10 +30,12 @@ type Props = {
   menu?: ReactNode;
   /** A vault on another server: named under the title. */
   remote?: { host: string };
+  /** Notes added since this page last showed the vault. */
+  newNotes?: number;
 };
 
 /** One vault: the open area is a single button; the constellation is the vault's own graph. */
-export function VaultTile({ vault, lead, opened, sample, full = null, saved, onOpen, menu, remote }: Props) {
+export function VaultTile({ vault, lead, opened, sample, full = null, saved, onOpen, menu, remote, newNotes = 0 }: Props) {
   const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (sample === null && full === null) return;
@@ -52,11 +54,23 @@ export function VaultTile({ vault, lead, opened, sample, full = null, saved, onO
           ) : (
             <Constellation sample={sample} saved={saved} seed={vault.id} width={width} height={height} settled={settled} />
           )}
+          {/* Memory: the tile is the door — said on hover and focus, where a pointer or Tab arrives. */}
+          <span className="kv-tile-open" aria-hidden="true">
+            Open
+            <svg viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </span>
         </div>
         <div className="kv-tile-body">
           <h3 className="kv-tile-name">{vault.name}</h3>
           {remote && <p className="kv-tile-remote">On {remote.host}</p>}
           <p className="kv-tile-meta">{tileSentence(vault, sample, opened)}</p>
+          {newNotes > 0 && (
+            <span className="kv-signal kv-tile-signal" data-kind="new" title="Since you last looked at this page">
+              +{number.format(newNotes)} new note{newNotes === 1 ? "" : "s"}
+            </span>
+          )}
         </div>
       </button>
       {menu && <div className="kv-tile-menu">{menu}</div>}

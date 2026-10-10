@@ -60,17 +60,21 @@ describe("Landing", () => {
     expect(a.createVault).toHaveBeenCalledWith(info, "Research notes");
   });
 
-  it("lists vaults as tiles, the most recently opened one leading, with a sentence of real numbers", async () => {
+  it("leads with the vault opened last — its numbers and one Open button — and lists the others as tiles with a sentence of real numbers", async () => {
     const storage = memoryStorage();
     storage.setItem("kv.recents", JSON.stringify({ v2: "2026-10-06T10:00:00Z" }));
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }, { id: "v2", slug: "b", name: "Team wiki", noteCount: 300 }]) });
     render(<Landing engine={{ state: "ready" }} info={info} api={a} storage={storage} />);
-    const lead = await screen.findByRole("button", { name: "Open Team wiki" });
-    expect(lead.closest(".kv-tile")!.getAttribute("data-lead")).toBe("true"); // the tile carries the lead flag; the button is its open area
-    expect(screen.getByRole("button", { name: "Open Alpha" }).closest(".kv-tile")!.getAttribute("data-lead")).toBe("false");
-    expect(await screen.findAllByText(/371 notes and 1,208 links, /)).toHaveLength(2);
-    expect(screen.getByText(/1,208 links, opened /)).toBeTruthy(); // Team wiki was opened
-    expect(screen.getByText(/1,208 links, not opened yet\./)).toBeTruthy(); // Alpha never was
+    const open = await screen.findByRole("button", { name: "Open vault Team wiki" });
+    const lead = open.closest(".kv-hero") as HTMLElement;
+    expect(within(lead).getByRole("heading", { name: "Team wiki" })).toBeTruthy();
+    expect(await within(lead).findByText("1,208")).toBeTruthy(); // links, from the graph sample
+    expect(within(lead).getByText("371")).toBeTruthy();
+    expect(within(lead).getByText(/^Opened /)).toBeTruthy();
+    expect(within(lead).getAllByRole("button").filter((b) => b.className.includes("kv-button-primary"))).toHaveLength(1);
+    const others = screen.getByRole("region", { name: "Other vaults" });
+    expect(within(others).getByRole("button", { name: "Open Alpha" }).closest(".kv-tile")!.getAttribute("data-lead")).toBe("false");
+    expect(await within(others).findByText(/371 notes and 1,208 links, not opened yet\./)).toBeTruthy(); // Alpha never was opened
     expect(a.fetchGraph).toHaveBeenCalledWith(info.origin, "v2", 48, undefined); // local vaults: no bearer
     expect(a.fetchGraph).toHaveBeenCalledWith(info.origin, "v1", 28, undefined);
     expect(screen.getByText("Ready")).toBeTruthy();
@@ -138,7 +142,7 @@ describe("Landing", () => {
     fireEvent.change(nameInput, { target: { value: "Alpha prime" } });
     fireEvent.submit(nameInput.closest("form")!);
     await waitFor(() => expect(a.renameVault).toHaveBeenCalledWith(info, "v1", "Alpha prime"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Open Alpha prime" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open vault Alpha prime" })).toBeTruthy()); // Alpha leads: no vault was opened, so by name
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Beta" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -183,9 +187,34 @@ describe("Landing", () => {
     await waitFor(() => expect(container.querySelector(".kv-minimap")).toBeTruthy());
     expect(a.fetchFullGraph).toHaveBeenCalledTimes(1);
     expect(a.fetchFullGraph).toHaveBeenCalledWith(info.origin, "laid", undefined);
-    const freshTile = screen.getByRole("button", { name: "Open Fresh" }).closest(".kv-tile")!;
-    expect(freshTile.querySelector(".kv-constellation")).toBeTruthy();
-    expect(freshTile.querySelector(".kv-minimap")).toBeNull();
+    // "Fresh" leads (by name, none opened yet) and has no saved layout: its sample is drawn.
+    const freshCard = screen.getByRole("button", { name: "Open vault Fresh" }).closest(".kv-hero")!;
+    expect(freshCard.querySelector(".kv-constellation")).toBeTruthy();
+    expect(freshCard.querySelector(".kv-minimap")).toBeNull();
+  });
+});
+
+describe("Landing — what changed since the last visit", () => {
+  it("names the notes new since the page last showed a vault, says when the lead is writing notes, and opens it straight on a view", async () => {
+    const storage = memoryStorage();
+    storage.setItem("kv.recents", JSON.stringify({ v2: "2026-10-06T10:00:00Z" }));
+    storage.setItem("kv.seen-notes", JSON.stringify({ v1: 371, v2: 280 }));
+    const onOpenView = vi.fn();
+    const a = api({
+      fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }, { id: "v2", slug: "b", name: "Team wiki", noteCount: 300 }]),
+      fetchPipeline: vi.fn(async () => ({ state: "ready" as const, workflowId: "w", connectionId: "c", lastRun: { id: "r", status: "RUNNING", startedAt: null, endedAt: null, error: null } })),
+    });
+    render(<Landing engine={{ state: "ready" }} info={info} api={a} storage={storage} onOpenView={onOpenView} />);
+    const lead = (await screen.findByRole("button", { name: "Open vault Team wiki" })).closest(".kv-hero") as HTMLElement;
+    expect(await within(lead).findByText("+91 new notes")).toBeTruthy(); // 371 shown now, 280 last time
+    expect(await within(lead).findByText("Writing notes…")).toBeTruthy();
+    expect(a.fetchPipeline).toHaveBeenCalledWith(info, "v2");
+    expect(within(screen.getByRole("region", { name: "Other vaults" })).queryByText(/new note/)).toBeNull(); // Alpha: nothing new
+    // The counts shown are what the next visit compares with.
+    await waitFor(() => expect(JSON.parse(storage.getItem("kv.seen-notes")!)).toEqual({ v1: 371, v2: 371 }));
+
+    fireEvent.click(within(within(lead).getByRole("group", { name: "Open Team wiki on" })).getByRole("button", { name: "Notes" }));
+    expect(onOpenView).toHaveBeenCalledWith(expect.objectContaining({ id: "v2", name: "Team wiki" }), "notes");
   });
 });
 

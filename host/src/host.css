@@ -121,6 +121,13 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-tile-main { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 0; text-align: left; border: 0; border-radius: inherit; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .kv-tile-main:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: -2px; }
 .kv-tile-menu { position: absolute; top: 8px; right: 8px; opacity: 0.55; }
+/* the tile's door: "Open →" on hover and focus, over the graph's corner */
+.kv-tile-sky { position: relative; }
+.kv-tile-open { position: absolute; right: 12px; bottom: 10px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--bai-deep) 82%, transparent); color: var(--bai-text); font-size: 12.5px; font-weight: 600; opacity: 0; transform: translateY(4px); transition: opacity 160ms ease, transform 160ms ease; pointer-events: none; }
+.kv-tile:hover .kv-tile-open, .kv-tile-main:focus-visible .kv-tile-open { opacity: 1; transform: none; }
+.kv-tile:hover { border-color: color-mix(in srgb, var(--bai-accent) 35%, var(--bai-border)); }
+.kv-tile-signal { align-self: flex-start; margin-top: 8px; }
+@media (prefers-reduced-motion: reduce) { .kv-tile-open { transition: none; } }
 .kv-tile:hover .kv-tile-menu, .kv-tile:focus-within .kv-tile-menu, .kv-tile-menu:has([aria-expanded="true"]) { opacity: 1; }
 .kv-tile-menu .kv-icon-button { background: color-mix(in srgb, var(--bai-deep) 70%, transparent); color: var(--bai-text-secondary); }
 .kv-menu { position: relative; }

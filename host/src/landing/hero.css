@@ -1,0 +1,83 @@
+/*
+ * The front page's lead vault (HeroVault.tsx): the graph on one side, on the other when it was opened, what is in
+ * it, what changed, and the one highlighted button. Stacks on a narrow window.
+ */
+.kv-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  min-height: 330px;
+  margin: 0 0 30px;
+  border: 1px solid var(--bai-border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bai-surface);
+  animation: kv-hero-in 280ms ease-out both;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+/* A lone vault fills more of the window: the page is about it. With others, it leaves them room above the fold. */
+.kv-hero[data-alone="true"] { min-height: clamp(330px, 46vh, 520px); }
+.kv-hero:hover { border-color: color-mix(in srgb, var(--bai-accent) 35%, var(--bai-border)); box-shadow: 0 10px 40px -18px color-mix(in srgb, var(--bai-accent) 45%, transparent); }
+.kv-hero-sky {
+  position: relative;
+  min-height: 280px;
+  background: radial-gradient(70% 80% at 50% 50%, color-mix(in srgb, var(--bai-accent) 10%, transparent) 0%, transparent 70%), var(--bai-deep);
+  cursor: pointer;
+}
+.kv-hero-sky > * { position: absolute; inset: 0; width: 100%; height: 100%; transition: transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.kv-hero:hover .kv-hero-sky > * { transform: scale(1.025); }
+.kv-hero-body { display: flex; flex-direction: column; justify-content: center; gap: 12px; min-width: 0; padding: 26px 28px 24px; border-left: 1px solid var(--bai-border); }
+.kv-hero-eyebrow { margin: 0; color: var(--bai-text-tertiary); font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.kv-hero-name { margin: -4px 0 0; padding-right: 30px; color: var(--bai-text); font-family: var(--kv-font-name); font-size: 36px; font-weight: 500; line-height: 1.08; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.kv-hero-body .kv-tile-remote { margin: -6px 0 0; }
+.kv-hero-empty { margin: 0; color: var(--bai-text-secondary); }
+
+/* What is in it: three numbers, the number first */
+.kv-hero-stats { display: flex; flex-wrap: wrap; gap: 8px 26px; margin: 2px 0 0; }
+.kv-hero-stats > div { display: flex; flex-direction: column-reverse; }
+.kv-hero-stats dd { margin: 0; color: var(--bai-text); font-family: var(--kv-font-name); font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.kv-hero-stats dt { color: var(--bai-text-tertiary); font-size: 12.5px; }
+
+/* What changed: small chips, the live one breathing */
+.kv-hero-signals { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.kv-signal { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+.kv-signal[data-kind="new"] { color: var(--bai-ok); background: color-mix(in srgb, var(--bai-ok) 13%, transparent); }
+.kv-signal[data-kind="live"] { color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 13%, transparent); }
+.kv-signal[data-kind="live"]::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: kv-hero-breathe 1.6s ease-in-out infinite; }
+
+/* The one highlighted button, and the views a click away */
+.kv-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-top: 10px; }
+.kv-hero-open { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; font-size: 15px; }
+.kv-hero-open svg { transition: transform 160ms ease; }
+.kv-hero-open:hover svg { transform: translateX(2px); }
+.kv-hero-jumps { display: inline-flex; flex-wrap: wrap; gap: 0; margin-left: -8px; }
+.kv-hero-jump { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--bai-text-secondary); font: inherit; font-size: 13.5px; cursor: pointer; }
+.kv-hero-jump svg { width: 16px; height: 16px; color: var(--bai-text-tertiary); transition: color 140ms ease; }
+.kv-hero-jump:hover { color: var(--bai-text); background: color-mix(in srgb, var(--bai-text) 6%, transparent); }
+.kv-hero-jump:hover svg { color: var(--bai-accent); }
+.kv-hero-jump:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 1px; }
+.kv-hero > .kv-tile-menu { top: 12px; right: 12px; }
+
+.kv-hero-skeleton { animation: none; }
+.kv-hero-skeleton .kv-hero-sky { cursor: default; }
+
+/* The other vaults, under their own heading */
+.kv-others-title { margin: 0 0 12px; color: var(--bai-text-tertiary); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+
+@media (max-width: 1100px) {
+  .kv-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .kv-hero-body { padding: 24px 22px 22px 24px; }
+}
+@media (max-width: 720px) {
+  .kv-hero { grid-template-columns: 1fr; }
+  .kv-hero-sky { min-height: 210px; }
+  .kv-hero-body { border-left: 0; border-top: 1px solid var(--bai-border); padding: 20px 20px 18px; }
+  .kv-hero-name { font-size: 30px; }
+}
+@keyframes kv-hero-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes kv-hero-breathe { 0%, 100% { opacity: 0.45; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .kv-hero, .kv-signal[data-kind="live"]::before { animation: none; }
+  .kv-hero, .kv-hero-sky > *, .kv-hero-open svg, .kv-hero-jump svg { transition: none; }
+  .kv-hero:hover .kv-hero-sky > * { transform: none; }
+}

@@ -3,7 +3,7 @@ import { fetchFullGraph, fetchVaultGraph, type FullGraph, type VaultGraphSample 
 import { createTokenProvider, type IdentityStatus } from "../api/identity.js";
 import { addRemoteVault, authorizedFetch, discoverRemoteVaults, fetchRemoteVaults, removeRemoteVault, type RemoteDiscovery, type RemoteVault } from "../api/remote.js";
 import type { SidecarInfo } from "../sidecar.js";
-import { createVault, deleteVault, fetchSettings, fetchStatus, fetchVaults, renameVault, type DriveRef, type ModelSettings, type VaultSummary } from "../vaults.js";
+import { createVault, deleteVault, fetchPipeline, fetchSettings, fetchStatus, fetchVaults, renameVault, type DriveRef, type ModelSettings, type PipelineStatus, type VaultSummary } from "../vaults.js";
 import { GettingStarted, type VaultView } from "../landing/GettingStarted.js";
 import { remember } from "../landing/getting-started.js";
 import { modelReady as isModelReady } from "../onboarding/onboarding-state.js";
@@ -16,7 +16,9 @@ import { loadSavedLayout, type XY } from "../landing/saved-layout.js";
 import { StatusStrip, type EngineState } from "../landing/StatusStrip.js";
 import { StartupProgress } from "../landing/StartupProgress.js";
 import type { Progress } from "../landing/startup-stages.js";
-import { SkeletonTile, VaultTile } from "../landing/VaultTile.js";
+import { VaultTile } from "../landing/VaultTile.js";
+import { HeroSkeleton, HeroVault } from "../landing/HeroVault.js";
+import { newSince, readSeen, rememberSeen } from "../landing/seen.js";
 import { VaultMenu } from "../landing/VaultMenu.js";
 import { Dialog } from "../shell/Dialog.js";
 import { Header } from "../shell/Header.js";
@@ -40,6 +42,8 @@ export type LandingApi = {
   tokenProvider?: (info: SidecarInfo) => () => Promise<string | undefined>;
   /** The app's model setting, for the getting-started checklist; without it the model step reads as not done. */
   fetchModels?: (info: SidecarInfo) => Promise<ModelSettings>;
+  /** The lead vault's processing, for its "Writing notes…" sign; without it the sign is never shown. */
+  fetchPipeline?: (info: SidecarInfo, vaultId: string) => Promise<PipelineStatus>;
 };
 
 export const realLandingApi: LandingApi = {
@@ -57,7 +61,11 @@ export const realLandingApi: LandingApi = {
   loadLayout: loadSavedLayout,
   tokenProvider: (info) => createTokenProvider(info),
   fetchModels: async (info) => (await fetchSettings(info)).models,
+  fetchPipeline,
 };
+
+/** How often the lead vault's processing is asked about while the front page is open. */
+const WRITING_POLL_MS = 10_000;
 
 /** Whole graphs already fetched this session, keyed by vault and graph size (a changed count refetches). */
 const fullGraphs = new Map<string, FullGraph>();
@@ -186,6 +194,49 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
 
   const all = useMemo<AnyVault[]>(() => [...(vaults ?? []).map((v) => ({ kind: "local" as const, ...v })), ...(remotes ?? [])], [vaults, remotes]);
   const ordered = useMemo(() => sortByRecency(all, recents), [all, recents]);
+  // The lead is the vault opened last; the others follow in the grid.
+  const lead = ordered[0];
+  const others = useMemo(() => ordered.slice(1), [ordered]);
+
+  // What is new since this page last showed each vault (Emotion: the vault grows while you are away).
+  const [seenBefore] = useState(() => readSeen(store));
+  const shownNotes = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const v of ordered) {
+      const n = samples[v.id]?.noteCount ?? (v.kind === "local" ? v.noteCount : undefined);
+      if (typeof n === "number") out[v.id] = n;
+    }
+    return out;
+  }, [ordered, samples]);
+  const fresh = useMemo(() => newSince(seenBefore, shownNotes), [seenBefore, shownNotes]);
+  useEffect(() => {
+    if (Object.keys(shownNotes).length) rememberSeen(store, shownNotes);
+  }, [store, shownNotes]);
+
+  // Whether the lead (local) vault is writing notes right now; asked again while the page is open.
+  const leadLocalId = lead?.kind === "local" ? lead.id : null;
+  const [writing, setWriting] = useState(false);
+  useEffect(() => {
+    setWriting(false);
+    if (!info || !leadLocalId || !api.fetchPipeline) return;
+    const ask = api.fetchPipeline;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const p = await ask(info, leadLocalId);
+        if (alive) setWriting(p.state === "ready" && p.lastRun?.status === "RUNNING");
+      } catch {
+        if (alive) setWriting(false);
+      }
+      if (alive) timer = setTimeout(() => void poll(), WRITING_POLL_MS);
+    };
+    void poll();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [api, info, leadLocalId]);
 
   // Each vault's sample and saved layout are asked for once; results land whenever they arrive
   // (a state update after unmount is harmless, and gating on a stale flag dropped results).
@@ -331,7 +382,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
               <button type="button" className="kv-button" onClick={() => setShowForm(true)} disabled={showForm} title="New vault (Ctrl+N)">
                 New vault
               </button>
-              <button type="button" className="kv-button" onClick={() => setConnecting(true)} title="A vault on a server: open ones need no sign-in">
+              <button type="button" className="kv-button kv-button-quiet" onClick={() => setConnecting(true)} title="A vault on a server: open ones need no sign-in">
                 Connect remote vault
               </button>
             </div>
@@ -376,43 +427,76 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           />
         )}
         {loading && (
-          <div className="kv-grid" role="status" aria-label="Loading vaults">
-            <SkeletonTile lead />
-            <SkeletonTile lead={false} />
-            <SkeletonTile lead={false} />
+          <div role="status" aria-label="Loading vaults">
+            <HeroSkeleton />
           </div>
         )}
-        {ready && ordered.length > 0 && (
-          <ul className="kv-grid" aria-labelledby="vaults-heading">
-            {ordered.map((v, i) => (
-              <li key={v.id} className="kv-grid-cell">
-                {v.kind === "remote" ? (
-                  <VaultTile
-                    vault={{ id: v.id, slug: v.slug, name: v.name, noteCount: samples[v.id]?.noteCount ?? 0 }}
-                    remote={{ host: new URL(v.switchboardUrl).host }}
-                    lead={i === 0}
-                    opened={recents[v.id]}
-                    sample={samples[v.id] ?? null}
-                    full={fulls[v.id] ?? null}
-                    saved={layouts[v.id] ?? null}
-                    onOpen={() => open(v)}
-                    menu={<VaultMenu name={v.name} onOpen={() => open(v)} onRemove={() => { setDialogError(null); setRemoving(v); }} />}
-                  />
-                ) : (
-                  <VaultTile
-                    vault={v}
-                    lead={i === 0}
-                    opened={recents[v.id]}
-                    sample={samples[v.id] ?? null}
-                    full={fulls[v.id] ?? null}
-                    saved={layouts[v.id] ?? null}
-                    onOpen={() => open(v)}
-                    menu={<VaultMenu name={v.name} onOpen={() => open(v)} onRename={() => { setDialogError(null); setRenaming(v); }} onDelete={() => { setDialogError(null); setDeleting(v); }} />}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
+        {ready && lead && (
+          lead.kind === "remote" ? (
+            <HeroVault
+              vault={{ id: lead.id, slug: lead.slug, name: lead.name, noteCount: samples[lead.id]?.noteCount ?? 0 }}
+              remote={{ host: new URL(lead.switchboardUrl).host }}
+              opened={recents[lead.id]}
+              sample={samples[lead.id] ?? null}
+              full={fulls[lead.id] ?? null}
+              saved={layouts[lead.id] ?? null}
+              onOpen={() => open(lead)}
+              newNotes={fresh[lead.id]}
+              alone={others.length === 0}
+              menu={<VaultMenu name={lead.name} onOpen={() => open(lead)} onRemove={() => { setDialogError(null); setRemoving(lead); }} />}
+            />
+          ) : (
+            <HeroVault
+              vault={lead}
+              opened={recents[lead.id]}
+              sample={samples[lead.id] ?? null}
+              full={fulls[lead.id] ?? null}
+              saved={layouts[lead.id] ?? null}
+              onOpen={() => open(lead)}
+              onOpenView={onOpenView ? (view) => openView(lead, view) : undefined}
+              newNotes={fresh[lead.id]}
+              alone={others.length === 0}
+              writing={writing}
+              menu={<VaultMenu name={lead.name} onOpen={() => open(lead)} onRename={() => { setDialogError(null); setRenaming(lead); }} onDelete={() => { setDialogError(null); setDeleting(lead); }} />}
+            />
+          )
+        )}
+        {ready && others.length > 0 && (
+          <section aria-labelledby="other-vaults-heading">
+            <h3 id="other-vaults-heading" className="kv-others-title">Other vaults</h3>
+            <ul className="kv-grid" aria-labelledby="other-vaults-heading">
+              {others.map((v) => (
+                <li key={v.id} className="kv-grid-cell">
+                  {v.kind === "remote" ? (
+                    <VaultTile
+                      vault={{ id: v.id, slug: v.slug, name: v.name, noteCount: samples[v.id]?.noteCount ?? 0 }}
+                      remote={{ host: new URL(v.switchboardUrl).host }}
+                      lead={false}
+                      opened={recents[v.id]}
+                      sample={samples[v.id] ?? null}
+                      full={fulls[v.id] ?? null}
+                      saved={layouts[v.id] ?? null}
+                      onOpen={() => open(v)}
+                      newNotes={fresh[v.id]}
+                      menu={<VaultMenu name={v.name} onOpen={() => open(v)} onRemove={() => { setDialogError(null); setRemoving(v); }} />}
+                    />
+                  ) : (
+                    <VaultTile
+                      vault={v}
+                      lead={false}
+                      opened={recents[v.id]}
+                      sample={samples[v.id] ?? null}
+                      full={fulls[v.id] ?? null}
+                      saved={layouts[v.id] ?? null}
+                      onOpen={() => open(v)}
+                      newNotes={fresh[v.id]}
+                      menu={<VaultMenu name={v.name} onOpen={() => open(v)} onRename={() => { setDialogError(null); setRenaming(v); }} onDelete={() => { setDialogError(null); setDeleting(v); }} />}
+                    />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </main>
       <StatusStrip engine={engine} version={version} onRetry={onRetry} />
