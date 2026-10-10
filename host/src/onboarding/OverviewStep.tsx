@@ -26,6 +26,7 @@ function processingLine(p: PipelineStatus | null, notes: number): string {
   if (!p) return "Checking the processing…";
   if (p.state === "unconfigured") return "Processing is not set up: choose an AI in Settings › Models.";
   if (p.state === "missing" || p.state === "stale") return "Processing needs setting up for this vault.";
+  if (p.state === "starting") return "Processing starts in a moment.";
   const run = p.lastRun;
   const so = notes > 0 ? ` ${notes} note${notes === 1 ? "" : "s"} so far.` : "";
   if (run?.status === "RUNNING") return `Writing notes from your sources…${so}`;

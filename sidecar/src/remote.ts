@@ -10,27 +10,37 @@ export class RemoteInputError extends Error {}
 export class RemoteAuthError extends Error {}
 export class RemoteAccessError extends Error {}
 export class RemoteNotFoundError extends Error {}
-/** The server predates the GraphQL argument names this app uses (`idOrSlug`, 6.2.3-dev.35). */
+/** The server predates the GraphQL this app's client sends (6.2.3-dev.49). */
 export class RemoteTooOldError extends Error {}
 
+/** The oldest Powerhouse a remote vault's server may run. */
+export const MIN_SERVER_STACK = "6.2.3-dev.49";
+
 /**
- * Spec §9: a server older than dev.35 has no `idOrSlug` argument on `document`; the
- * vault app would fail on its first query. A server that will not answer
- * introspection cannot be told apart, so it is not refused.
+ * Spec §9: the vault app fails on its first query against an older server. Before dev.35 the
+ * `document` query has no `idOrSlug` argument; before dev.49 a document has no `meta` field, which
+ * the browser client selects on every read since 6.2.3-dev.49 ("Cannot query field meta"). A server
+ * that will not answer introspection cannot be told apart, so it is not refused.
  */
 async function assertServerCurrent(origin: string, headers: Record<string, string>, fetchImpl: typeof fetch): Promise<void> {
-  let fields: { name: string; args?: { name: string }[] }[] | undefined;
+  type Fields = { name: string; args?: { name: string }[] }[];
+  let query: Fields | undefined;
+  let doc: Fields | undefined;
   try {
-    const res = await fetchImpl(`${origin}/graphql`, { method: "POST", headers, body: JSON.stringify({ query: `{ __type(name: "Query") { fields { name args { name } } } }` }) });
+    const body = JSON.stringify({ query: `{ query: __type(name: "Query") { fields { name args { name } } } document: __type(name: "PHDocument") { fields { name } } }` });
+    const res = await fetchImpl(`${origin}/graphql`, { method: "POST", headers, body });
     if (!res.ok) return;
-    const json = (await res.json()) as { data?: { __type?: { fields?: typeof fields } | null } };
-    fields = json.data?.__type?.fields ?? undefined;
+    const json = (await res.json()) as { data?: { query?: { fields?: Fields } | null; document?: { fields?: Fields } | null } };
+    query = json.data?.query?.fields ?? undefined;
+    doc = json.data?.document?.fields ?? undefined;
   } catch {
     return;
   }
-  const document = fields?.find((f) => f.name === "document");
-  if (document && !(document.args ?? []).some((a) => a.name === "idOrSlug")) {
-    throw new RemoteTooOldError("This vault's server is too old for this app (it needs Powerhouse 6.2.3-dev.35 or newer).");
+  const documentQuery = query?.find((f) => f.name === "document");
+  const noIdOrSlug = documentQuery !== undefined && !(documentQuery.args ?? []).some((a) => a.name === "idOrSlug");
+  const noMeta = doc !== undefined && !doc.some((f) => f.name === "meta");
+  if (noIdOrSlug || noMeta) {
+    throw new RemoteTooOldError(`This vault's server is too old for this app (it needs Powerhouse ${MIN_SERVER_STACK} or newer).`);
   }
 }
 

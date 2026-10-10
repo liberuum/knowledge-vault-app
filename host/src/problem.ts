@@ -16,6 +16,7 @@ export type ProblemKind =
   | "not-found"
   | "unreachable"
   | "server-error"
+  | "server-too-old"
   | "unreadable"
   | "unknown";
 
@@ -120,6 +121,9 @@ function kindOf(f: Facts, ctx: ProblemContext): ProblemKind {
   const server = f.server ?? "";
   if (f.network) return "unreachable";
   if (f.unreadable) return "unreadable";
+  // The server's schema lacks what this app's client asks for: it runs an older Powerhouse (the client
+  // selects PHDocument.meta and the new job fields since 6.2.3-dev.49, and `idOrSlug` since dev.35).
+  if (/Cannot query field "[^"]+" on type "(PHDocument|JobInfo)"|Unknown argument "idOrSlug"/.test(`${server}\n${f.text}`)) return "server-too-old";
   if (f.status === 401) {
     // The server verified the token, but Renown did not confirm the delegation behind it. Its lookup
     // reports any failure (Renown slow or down) the same way, so this is often transient.
@@ -225,6 +229,15 @@ export function describeProblem(error: unknown, ctx: ProblemContext = {}): Probl
         body: "It answered with an error instead of the vault.",
         steps: ["Try again in a moment.", remote ? "If it keeps happening, tell the vault's administrator." : "If it keeps happening, quit the app from the tray and open it again."],
         actions: ["retry"],
+        details,
+      };
+    case "server-too-old":
+      return {
+        kind,
+        title: `${remote ?? "This vault's server"} runs an older Powerhouse`,
+        body: "This app needs Powerhouse 6.2.3-dev.49 or newer on the vault's server, and this one is older, so the vault can't open here.",
+        steps: ["Ask the vault's administrator to update the server.", "Go back to your vaults in the meantime."],
+        actions: ["back"],
         details,
       };
     case "unreadable":

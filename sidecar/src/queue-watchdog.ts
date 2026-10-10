@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execute, gql, toActions } from "./reactor-gql.js";
+import { runtimeMissing } from "./pipelines.js";
 
 /**
  * The pipeline's trigger fires only for a PENDING task whose source exists and that it has not
@@ -229,21 +230,27 @@ export function startQueueWatchdog(opts: {
 }): () => void {
   const log = opts.log ?? ((line) => console.log(`[sidecar] ${line}`));
   let busy = false;
-  let first = true;
+  // A pipeline's start-up pass is its first one that succeeds: after an unclean exit the workflow
+  // runtime can come up a minute late, and a failed first pass must not lose the start-up repairs.
+  const startedUp = new Set<string>();
   const pass = async () => {
     if (busy) return;
     busy = true;
-    const startup = first;
-    first = false;
     try {
       for (const p of opts.pipelines()) {
+        const startup = !startedUp.has(p.vaultId);
         try {
           const r = await repairQueue(opts.deps, p.vaultId, p.workflowId, { startup, engineStartedAt: opts.engineStartedAt });
+          startedUp.add(p.vaultId);
           const touched = r.requeued.length + r.dropped.length + (r.reopened?.length ?? 0) + (r.queued?.length ?? 0);
           if (touched) log(`queue watchdog (${p.vaultId}${startup ? ", start-up" : ""}): queued again ${r.requeued.length + (r.queued?.length ?? 0)} (${[...r.requeued, ...(r.queued ?? [])].join(", ")}); dropped ${r.dropped.length} for a missing source; reopened ${r.reopened?.length ?? 0} marked extracted without claims`);
           if (r.caughtUp?.length) log(`queue watchdog (${p.vaultId}): caught up from the vault: ${r.caughtUp.join("; ")}`);
         } catch (error) {
-          log(`queue watchdog (${p.vaultId}) failed: ${error instanceof Error ? error.message : String(error)}`);
+          log(
+            runtimeMissing(error)
+              ? `queue watchdog (${p.vaultId}): the workflow runtime is not up yet (the previous engine's lease is running out); the start-up pass runs at the next check`
+              : `queue watchdog (${p.vaultId}) failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     } finally {

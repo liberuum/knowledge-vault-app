@@ -20,6 +20,14 @@ describe("describeProblem", () => {
     expect(describeProblem(err, { signedIn: true }).actions[0]).toBe("resignin");
   });
 
+  it("tells a server older than the app's client (dev.49) from any other failure", () => {
+    // What the 6.2.3-dev.52 client gets from a dev.48 Switchboard on its first document read.
+    const old = `GraphQL Error (Code: 400): {"response":{"errors":[{"message":"Cannot query field \\"meta\\" on type \\"PHDocument\\"."}],"status":400,"headers":{}},"request":{"query":"query GetDocument { document { id } }"}}`;
+    const p = describeProblem(new Error(old), { what: "this vault", host: "switchboard.knowledge-vault.vetra.io" });
+    expect(p.kind).toBe("server-too-old");
+    expect(p.title).toBe("switchboard.knowledge-vault.vetra.io runs an older Powerhouse");
+    expect(p.actions).toEqual(["back"]);
+  });
   it("names a missing grant, a deleted vault and an unreachable server", () => {
     const forbidden = Object.assign(new Error("x"), { response: { status: 200, errors: [{ message: 'Forbidden: insufficient permissions to execute operation "document"' }] } });
     expect(describeProblem(forbidden, { address: "0xadbA7C2F82139031D7564D18aC22D09B12A0BcA4" }).body).toContain("0xadbA…BcA4");

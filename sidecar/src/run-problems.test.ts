@@ -25,5 +25,10 @@ describe("classifyRunError", () => {
   });
   it("recognises a run the app's closing cut off", () => {
     expect(classifyRunError("Reactor stopped before the run finished; steps completed before then were journaled")?.kind).toBe("interrupted");
+    expect(classifyRunError("Reactor stopped before the matched trigger started its run; rerun it to fire the workflow with the same payload")?.kind).toBe("interrupted");
+    expect(classifyRunError('Step "extract" failed: Piece worker exited unexpectedly (code=null, signal=SIGKILL)')?.kind).toBe("interrupted");
+  });
+  it("tells the workflow's own time limit from a slow model", () => {
+    expect(classifyRunError("Run exceeded its runTimeoutSeconds and was cancelled")?.kind).toBe("deadline");
   });
 });

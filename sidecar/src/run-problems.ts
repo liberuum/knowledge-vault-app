@@ -4,7 +4,7 @@
  * `… The model provider refused to ask <model> (<status>): <message> …`.
  */
 export type RunProblem = {
-  kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused" | "interrupted";
+  kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused" | "interrupted" | "deadline";
   /** One sentence for the chip and the Models page. */
   message: string;
   model?: string;
@@ -16,6 +16,11 @@ export function classifyRunError(error: string | null | undefined): RunProblem |
   if (!error) return null;
   // Cut off when the app (and its engine) stopped: the watchdog queues the source again at the next start.
   if (/reactor stopped before the run finished/i.test(error)) return { kind: "interrupted", message: "The app was closed while this source was being processed; it is processed again on its own." };
+  // The engine stopping mid-step (the app closed or restarted) kills the piece's worker; the watchdog queues the source again.
+  if (/piece worker exited unexpectedly \(code=null, signal=SIGKILL\)/i.test(error)) return { kind: "interrupted", message: "Processing was cut off before it finished (the app closed or restarted); the source is processed again on its own." };
+  if (/reactor stopped before the matched trigger started its run/i.test(error)) return { kind: "interrupted", message: "The app was closed just as this source was about to be processed; it is processed again on its own." };
+  // The workflow's own time limit (its policy's runTimeoutSeconds), not the model's: checked before the timeouts below.
+  if (/exceeded its runTimeoutSeconds/i.test(error)) return { kind: "deadline", message: "The run took longer than the pipeline's time limit (set in Workflow Studio) and was stopped." };
   const m = MODEL.exec(error);
   const model = m?.[1];
   const status = m?.[2];

@@ -41,7 +41,7 @@ describe("checkRemoteVault", () => {
         if (!init?.headers?.authorization?.startsWith("Bearer ")) return new Response("{}", { status: 401 });
         return driveStatus === 200 ? new Response(JSON.stringify({ id: "c589", slug: "pk", name: "powerhouse-knowledge" })) : new Response("{}", { status: driveStatus });
       }
-      if (init?.body?.includes("__type")) return new Response(JSON.stringify({ data: { __type: { fields: [{ name: "document", args: [{ name: "idOrSlug" }, { name: "identifier" }] }] } } }));
+      if (init?.body?.includes("__type")) return new Response(JSON.stringify({ data: { query: { fields: [{ name: "document", args: [{ name: "idOrSlug" }, { name: "identifier" }] }] }, document: { fields: [{ name: "id" }, { name: "meta" }] } } }));
       return new Response(JSON.stringify({ data: { canExecuteOperation: canWrite } }));
     }) as unknown as typeof fetch;
   it("reports the drive and whether the user may write", async () => {
@@ -62,13 +62,16 @@ describe("checkRemoteVault — server version", () => {
       if (init?.body?.includes("__type")) return typeof introspection === "number" ? new Response("{}", { status: introspection }) : new Response(JSON.stringify(introspection));
       return new Response(JSON.stringify({ data: { canExecuteOperation: false } }));
     }) as unknown as typeof fetch;
-  it("refuses a server older than dev.35 — its document query has no idOrSlug argument", async () => {
-    const old = server({ data: { __type: { fields: [{ name: "document", args: [{ name: "identifier" }] }] } } });
-    await expect(checkRemoteVault("https://old.example.com", "pk", "tok", old)).rejects.toBeInstanceOf(RemoteTooOldError);
-    await expect(checkRemoteVault("https://old.example.com", "pk", "tok", old)).rejects.toThrow("This vault's server is too old for this app (it needs Powerhouse 6.2.3-dev.35 or newer).");
+  it("refuses a server older than dev.35 (no idOrSlug) and one older than dev.49 (a document has no meta)", async () => {
+    const dev34 = server({ data: { query: { fields: [{ name: "document", args: [{ name: "identifier" }] }] }, document: { fields: [{ name: "id" }] } } });
+    const dev48 = server({ data: { query: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] }, document: { fields: [{ name: "id" }, { name: "preferredEditor" }] } } });
+    for (const old of [dev34, dev48]) {
+      await expect(checkRemoteVault("https://old.example.com", "pk", "tok", old)).rejects.toBeInstanceOf(RemoteTooOldError);
+      await expect(checkRemoteVault("https://old.example.com", "pk", "tok", old)).rejects.toThrow("This vault's server is too old for this app (it needs Powerhouse 6.2.3-dev.49 or newer).");
+    }
   });
   it("accepts a current server, and one that does not answer introspection (it cannot be told, so it is not refused)", async () => {
-    expect((await checkRemoteVault("https://s.example.com", "pk", "tok", server({ data: { __type: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] } } }))).id).toBe("c589");
+    expect((await checkRemoteVault("https://s.example.com", "pk", "tok", server({ data: { query: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] }, document: { fields: [{ name: "meta" }] } } }))).id).toBe("c589");
     expect((await checkRemoteVault("https://s.example.com", "pk", "tok", server({ errors: [{ message: "introspection is disabled" }] }))).id).toBe("c589");
     expect((await checkRemoteVault("https://s.example.com", "pk", "tok", server(500))).id).toBe("c589");
   });
@@ -98,7 +101,7 @@ describe("discoverRemoteVaults", () => {
       if (url === `${SB}/graphql`) {
         const q = String(JSON.parse(String(init?.body)).query);
         if (q.includes("__typename")) return json(200, { data: { __typename: "Query" } });
-        if (q.includes("__type(")) return json(200, { data: { __type: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] } } });
+        if (q.includes("__type(")) return json(200, { data: { query: { fields: [{ name: "document", args: [{ name: "idOrSlug" }] }] }, document: { fields: [{ name: "meta" }] } } });
         if (q.includes("findDocuments")) return json(200, { data: { findDocuments: { items: reads ? Object.values(drives).map((d) => ({ id: d.id, name: d.slug, slug: d.slug, state: {} })) : [] } } });
       }
       if (url === `${SB}/api/@powerhousedao/knowledge-note/drives`) return listing.body === undefined ? new Response(null, { status: listing.status }) : json(listing.status, listing.body);

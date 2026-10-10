@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { skipSetupGuide } from "./fixtures/landing.js";
 
 /**
  * Plan 5: the engine stops under a running app and comes back; a backup and the delete-all
@@ -11,7 +12,8 @@ const auth = { authorization: "Bearer dev-token" };
 test.setTimeout(300_000);
 
 test("resilience: a crash is survived, a backup is made, and delete-all returns the app to its first run", async ({ page, request }) => {
-  // A vault to work in.
+  // A vault to work in (on its own, the spec skips the setup guide as the earlier ones do).
+  await skipSetupGuide(request);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
   // Earlier specs leave vaults behind: wait for the list (the "Add vault" button) or the first-run form, whichever comes.
@@ -33,7 +35,9 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
 
   // (b) Back up now: the engine restarts, makes the backup before it opens the store, and the list shows it.
   await page.getByRole("button", { name: "← Vaults" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
+  // On the vault list: inside a vault, "Vault reports and settings" also answers to "Settings".
+  await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Backup & restore" }).click();
   await page.getByRole("button", { name: "Back up now" }).click();
   await expect(page.getByText(/Making a clean copy of your vaults/)).toBeVisible();

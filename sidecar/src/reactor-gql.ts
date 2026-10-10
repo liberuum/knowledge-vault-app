@@ -6,7 +6,15 @@ export type ActionInput = { id: string; type: string; timestampUtcMs: string; in
 /** One GraphQL request; `path` selects the endpoint (the reactor at `/graphql`, the vault's graph subgraph at `/graphql/knowledgeGraph`). */
 export async function gql<T>(origin: string, query: string, variables: Record<string, unknown>, fetchImpl: typeof fetch, path = "/graphql"): Promise<T> {
   const res = await fetchImpl(`${origin}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ query, variables }) });
-  if (!res.ok) throw new Error(`The engine answered HTTP ${res.status}`);
+  if (!res.ok) {
+    // A query the engine cannot run (a field it lacks: `workflowRuntime` while another holder's lease
+    // runs out) comes back as HTTP 400 with the reason in the body. Keep the reason.
+    const reason = await res
+      .json()
+      .then((b) => (b as { errors?: Array<{ message?: string }> }).errors?.map((e) => e.message).filter(Boolean).join("; "))
+      .catch(() => undefined);
+    throw new Error(`The engine answered HTTP ${res.status}${reason ? `: ${reason}` : ""}`);
+  }
   const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
   if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join("; "));
   if (!json.data) throw new Error("The engine answered without data");
