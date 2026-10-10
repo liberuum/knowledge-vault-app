@@ -5,7 +5,7 @@ import { declareDesktopHost, type HostIdentity } from "../bootstrap.js";
 import { activate } from "../reactor.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { AppBar } from "../shell/AppBar.js";
-import { WorkspaceScreen } from "./WorkspaceScreen.js";
+import { WorkspaceScreen, type WorkspaceAuth } from "./WorkspaceScreen.js";
 import { useRemoteHealth } from "../state/use-remote-health.js";
 
 /**
@@ -18,6 +18,7 @@ export function RemoteWorkspaceScreen({
   info,
   vault,
   identity,
+  auth,
   onBack,
   onSettings,
   probeFetch,
@@ -26,6 +27,8 @@ export function RemoteWorkspaceScreen({
   info: SidecarInfo;
   vault: RemoteVault;
   identity: HostIdentity | undefined;
+  /** The sign-in, for the error card's actions (sign in, sign in again). */
+  auth?: WorkspaceAuth;
   onBack: () => void;
   onSettings?: () => void;
   /** For tests: the reachability probe's fetch and interval. */
@@ -48,6 +51,11 @@ export function RemoteWorkspaceScreen({
     </div>
   );
   const tokenProvider = useMemo(() => createTokenProvider(info), [info]);
+  // A changed sign-in invalidates the cached token: it was minted under the previous one.
+  const authKey = auth?.key;
+  useEffect(() => {
+    tokenProvider.invalidate();
+  }, [tokenProvider, authKey]);
   const [client, setClient] = useState<ReturnType<typeof activate> | null>(null);
   // Activation is keyed on the target only; the declaration follows the identity as well, so a
   // sign-in landing after mount re-declares without ever flipping the client to the local engine.
@@ -75,7 +83,17 @@ export function RemoteWorkspaceScreen({
   return (
     <>
       {offline}
-      <WorkspaceScreen client={client} driveId={vault.id} appId="knowledge-vault" fallbackTitle={vault.name} onBack={onBack} onSettings={onSettings} />
+      <WorkspaceScreen
+        client={client}
+        driveId={vault.id}
+        appId="knowledge-vault"
+        fallbackTitle={vault.name}
+        onBack={onBack}
+        onSettings={onSettings}
+        remoteHost={host}
+        beforeRetry={() => tokenProvider.invalidate()}
+        {...(auth ? { auth } : {})}
+      />
     </>
   );
 }

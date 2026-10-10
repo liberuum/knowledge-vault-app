@@ -7,6 +7,7 @@ import { handFiles } from "./pending-files.js";
 import { describeDrop, dropAddresses } from "./drop-addresses.js";
 import { rememberGuide } from "./progress.js";
 import { ensureAutoPublish, vaultIntake } from "./vault-intake.js";
+import { plainError } from "../problem.js";
 
 type Props = { info: SidecarInfo; vaultId?: string; onBack: () => void; onStarted: (vaultId: string) => void };
 
@@ -219,7 +220,7 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
       </div>
       {dropNote && <p role="status" className={dropNote.startsWith("Reading") ? "kv-quiet" : "kv-error"}>{dropNote}</p>}
       {!target && <p className="kv-error">Create a vault first: go back one step.</p>}
-      {error && <p role="alert" className="kv-error">{error}</p>}
+      {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       <div className="kv-onb-actions">
         <button type="button" className="kv-button" onClick={onBack} disabled={busy}>Back</button>
         <button type="button" className="kv-button kv-button-primary" onClick={() => void start()} disabled={busy || !target}>{label}</button>

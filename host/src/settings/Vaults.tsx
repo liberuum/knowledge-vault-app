@@ -7,6 +7,7 @@ import { shortAddress, type IdentityController } from "../state/use-identity.js"
 import type { LocalProtection, VaultSummary } from "../vaults.js";
 import { MaintenanceCards } from "./Maintenance.js";
 import { invokeIfTauri, isTauri } from "../shell/tauri.js";
+import { plainError } from "../problem.js";
 
 const number = new Intl.NumberFormat("en-US");
 const RESTART_GRACE_MS = 90_000;
@@ -103,7 +104,7 @@ function ProtectionCard({ info, api, identity, pollMs, onRestarted }: { info: Si
         </>
       )}
       {restarting && <p role="status" className="kv-identity-waiting">Restarting the engine with the new setting…</p>}
-      {error && <p role="alert" className="kv-error">{error}</p>}
+      {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
     </section>
   );
 }
@@ -182,7 +183,7 @@ export function VaultsSection({
   return (
     <div className="kv-settings-body">
       <p className="kv-settings-lead">Vaults live in the engine's store on this computer. Renaming keeps everything; deleting removes the vault with all its notes, maps and sources.</p>
-      {error && <p role="alert" className="kv-error">Could not load the vaults: {error}</p>}
+      {error && <p role="alert" className="kv-error">Could not load the vaults: {plainError(error)}</p>}
       {vaults && vaults.length === 0 && <p className="kv-quiet">No vaults yet.</p>}
       {vaults && vaults.length > 0 && (
         <ul className="kv-settings-list" aria-label="Vaults">

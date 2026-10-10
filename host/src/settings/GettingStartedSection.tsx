@@ -5,6 +5,7 @@ import { modelReady } from "../onboarding/onboarding-state.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { VaultSummary } from "../vaults.js";
+import { plainError } from "../problem.js";
 
 /** Settings › Getting started: the front page's list, always here, so what is left can be seen and the list brought back. */
 export function GettingStartedSection({
@@ -46,7 +47,7 @@ export function GettingStartedSection({
   return (
     <div className="kv-settings-body">
       <p className="kv-settings-lead">The steps that make Knowledge Vault useful, ticked as you do them. Close the list on the front page any time; it stays here.</p>
-      {error && <p role="alert" className="kv-error">{error}</p>}
+      {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       {vaults === null || ready === null ? (
         !error && <p className="kv-quiet" role="status">Loading…</p>
       ) : (

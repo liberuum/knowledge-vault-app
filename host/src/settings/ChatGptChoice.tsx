@@ -5,6 +5,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import type { ModelSettings } from "../vaults.js";
 import { ChatGptConnect } from "./ChatGptConnect.js";
 import { defaultChatGptModel } from "./chatgpt-default.js";
+import { plainError } from "../problem.js";
 
 /**
  * The ChatGPT card's body (Settings › Models and the setup guide): Continue with ChatGPT, and once signed in with plan
@@ -134,7 +135,7 @@ export function ChatGptChoice({
           </p>
         </div>
       )}
-      {error && <p role="alert" className="kv-error">{error}</p>}
+      {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
     </div>
   );
 }

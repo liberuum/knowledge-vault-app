@@ -1,0 +1,50 @@
+/* A screen that could not open (ProblemCard): one calm card, the way back as buttons. */
+.kv-problem {
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--kv-gutter, 24px));
+  max-width: 560px;
+  margin: 56px auto 24px;
+  padding: 24px 24px 20px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 16px;
+  border: 1px solid var(--bai-border);
+  border-radius: 12px;
+  background: var(--bai-surface);
+}
+.kv-problem-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--bai-status-draft);
+  background: color-mix(in srgb, var(--bai-status-draft) 14%, transparent);
+}
+.kv-problem[data-tone="accent"] .kv-problem-icon { color: var(--bai-accent); background: var(--bai-accent-soft); }
+.kv-problem h2 { margin: 7px 0 0; font-size: 18px; font-weight: 600; line-height: 1.35; color: var(--bai-text); }
+.kv-problem-body { margin: 8px 0 0; color: var(--bai-text-secondary); line-height: 1.55; }
+.kv-problem-steps { margin: 14px 0 0; padding-left: 20px; list-style: decimal; color: var(--bai-text); line-height: 1.55; }
+.kv-problem-steps li { display: list-item; }
+.kv-problem-steps li::marker { color: var(--bai-text-tertiary); }
+.kv-problem-steps li + li { margin-top: 4px; }
+.kv-problem-status { margin: 14px 0 0; color: var(--bai-text-secondary); font-size: 14px; }
+.kv-problem-actions { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.kv-problem-details { margin-top: 18px; font-size: 13px; color: var(--bai-text-tertiary); }
+.kv-problem-details summary { cursor: pointer; width: fit-content; }
+.kv-problem-details summary:hover { color: var(--bai-text-secondary); }
+.kv-problem-details code {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bai-deep);
+  color: var(--bai-text-secondary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  .kv-problem { grid-template-columns: minmax(0, 1fr); margin-top: 32px; }
+  .kv-problem-icon { margin-bottom: 4px; }
+}

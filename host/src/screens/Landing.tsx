@@ -20,6 +20,7 @@ import { SkeletonTile, VaultTile } from "../landing/VaultTile.js";
 import { VaultMenu } from "../landing/VaultMenu.js";
 import { Dialog } from "../shell/Dialog.js";
 import { Header } from "../shell/Header.js";
+import { plainError } from "../problem.js";
 
 export type LandingApi = {
   fetchVaults: (info: SidecarInfo) => Promise<VaultSummary[]>;
@@ -318,7 +319,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
         ) : (
           !ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>
         )}
-        {error && !showForm && !firstRun && <p role="alert" className="kv-error">{error}</p>}
+        {error && !showForm && !firstRun && <p role="alert" className="kv-error">{plainError(error)}</p>}
         {firstRun && (
           <>
             <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
@@ -397,7 +398,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
         <Dialog open title={`Remove “${removing.name}” from this app?`} onClose={() => setRemoving(null)}>
           <div className="kv-dialog-form">
             <p>The vault stays on {new URL(removing.switchboardUrl).host} exactly as it is; only this app forgets it.</p>
-            {dialogError && <p role="alert" className="kv-error">{dialogError}</p>}
+            {dialogError && <p role="alert" className="kv-error">{plainError(dialogError)}</p>}
             <div className="kv-dialog-actions">
               <button type="button" className="kv-button" onClick={() => setRemoving(null)} disabled={busy}>Cancel</button>
               <button type="button" className="kv-button kv-button-primary" onClick={() => void forget(removing)} disabled={busy}>{busy ? "Removing…" : "Remove"}</button>

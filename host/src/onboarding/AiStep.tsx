@@ -24,6 +24,7 @@ import {
 } from "../vaults.js";
 import { checkModel } from "./api.js";
 import { modelReady } from "./onboarding-state.js";
+import { plainError } from "../problem.js";
 
 /** A model on this computer or the network; `typed` when it came from an address the person entered. */
 type Pick = { endpoint: string; model: string; typed?: boolean };
@@ -361,7 +362,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
     <section aria-labelledby="onb-title">
       <h2 id="onb-title" className="kv-onb-title" tabIndex={-1}>Choose the AI that writes your notes</h2>
       <p className="kv-onb-lead">It reads each source and writes the notes, and the vault's chat uses it too. You can change it any time in Settings.</p>
-      {loadError && <p role="alert" className="kv-error">{loadError}</p>}
+      {loadError && <p role="alert" className="kv-error">{plainError(loadError)}</p>}
       {settings === null && !loadError && <p role="status" className="kv-quiet">Loading…</p>}
       {settings && (
         <form
@@ -427,7 +428,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
               </p>
             )}
             {phase.kind === "ready" && <p role="status" className="kv-onb-ok">{phase.message}</p>}
-            {phase.kind === "failed" && <p role="alert" className="kv-error">{phase.message}</p>}
+            {phase.kind === "failed" && <p role="alert" className="kv-error">{plainError(phase.message)}</p>}
           </div>
           <p className="kv-hint">{privacy}</p>
           <div className="kv-onb-actions">

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { RemoteDiscovery, RemoteVault } from "../api/remote.js";
 import { Dialog } from "../shell/Dialog.js";
+import { plainError } from "../problem.js";
 
 export type ConnectRemoteApi = {
   discover: (url: string) => Promise<RemoteDiscovery>;
@@ -80,7 +81,7 @@ export function ConnectRemoteDialog({ api, onAdded, onClose }: { api: ConnectRem
           <label htmlFor="remote-url">Vault server</label>
           <input id="remote-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://switchboard.example.com" autoFocus autoComplete="off" spellCheck={false} disabled={busy !== null} />
           <p className="kv-remote-hint">Its address is enough: with or without /graphql, or a link to one of its vaults.</p>
-          {error && <p role="alert" className="kv-error">{error}</p>}
+          {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
           <div className="kv-dialog-actions">
             <button type="button" className="kv-button" onClick={onClose} disabled={busy !== null}>Cancel</button>
             <button type="submit" className="kv-button kv-button-primary" disabled={busy !== null || !url.trim()}>{busy === "find" ? "Looking for vaults…" : "Find vaults"}</button>
@@ -109,7 +110,7 @@ export function ConnectRemoteDialog({ api, onAdded, onClose }: { api: ConnectRem
               {open.length === 0 && <p role="status">All of them are already in your vaults.</p>}
             </>
           )}
-          {error && <p role="alert" className="kv-error">{error}</p>}
+          {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
           <div className="kv-dialog-actions">
             <button type="button" className="kv-button" onClick={() => { setFound(null); setError(null); }} disabled={busy !== null}>Back</button>
             <button type="button" className="kv-button kv-button-primary" onClick={() => void add()} disabled={busy !== null || picked.size === 0}>

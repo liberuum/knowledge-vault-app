@@ -4,6 +4,7 @@ import { Dialog } from "../shell/Dialog.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { ActionResult, BackupInfo } from "../vaults.js";
 import { requestGoHome } from "../shell/go-home.js";
+import { plainError } from "../problem.js";
 
 const RESTART_GRACE_MS = 120_000;
 
@@ -126,7 +127,7 @@ export function MaintenanceCards({ info, api, pollMs, onRestarted }: { info: Sid
             ))}
           </ul>
         )}
-        {error && <p role="alert" className="kv-error">{error}</p>}
+        {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       </section>
 
       <section className="kv-identity-card" aria-labelledby="kv-delete-all-title">

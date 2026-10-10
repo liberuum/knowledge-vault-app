@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../reactor.js", () => ({ activate: vi.fn(() => ({})) }));
 vi.mock("../bootstrap.js", () => ({ declareDesktopHost: vi.fn() }));
 vi.mock("./WorkspaceScreen.js", () => ({ WorkspaceScreen: () => <div>the vault app</div> }));
-vi.mock("../api/identity.js", () => ({ createTokenProvider: () => async () => "jwt" }));
+vi.mock("../api/identity.js", () => ({ createTokenProvider: () => Object.assign(async () => "jwt", { invalidate: () => {} }) }));
 import { RemoteWorkspaceScreen } from "./RemoteWorkspaceScreen.js";
 
 const info = { origin: "http://127.0.0.1:4201", graphqlUrl: "http://127.0.0.1:4201/graphql", controlOrigin: "http://127.0.0.1:4202", controlToken: "t" };

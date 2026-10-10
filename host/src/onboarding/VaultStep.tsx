@@ -3,6 +3,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import { fetchVaults, type VaultSummary } from "../vaults.js";
 import { createGuideVault } from "./api.js";
 import { rememberGuide } from "./progress.js";
+import { plainError } from "../problem.js";
 
 type Props = { info: SidecarInfo; vaultId?: string; onBack: () => void; onReady: (vaultId: string) => void };
 
@@ -60,7 +61,7 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
       {vaults === null && <p role="status" className="kv-quiet">Loading…</p>}
       {notReady && (
         <>
-          <p role="alert" className="kv-error">{notReady.reason}</p>
+          <p role="alert" className="kv-error">{plainError(notReady.reason)}</p>
           <div className="kv-onb-actions">
             <button type="button" className="kv-button" onClick={() => use(notReady.id)}>Continue anyway</button>
             <button type="button" className="kv-button kv-button-primary" onClick={onBack}>Back to choosing the AI</button>
@@ -97,7 +98,7 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
             <label htmlFor="onb-vault-name" className="kv-onb-label">{vaults.length > 0 ? "Or create a new vault" : "Name"}</label>
             <input id="onb-vault-name" className="kv-onb-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} disabled={busy} autoFocus={vaults.length === 0} />
             {!name.trim() && <p className="kv-hint">A vault needs a name, for example the subject it is about.</p>}
-            {error && <p role="alert" className="kv-error">{error}</p>}
+            {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
             <div className="kv-onb-actions">
               <button type="button" className="kv-button" onClick={onBack} disabled={busy}>Back</button>
               <button type="submit" className="kv-button kv-button-primary" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create vault"}</button>

@@ -42,10 +42,12 @@ export function followDrive(
   onError: (error: Error) => void = () => {},
   /** Shared across follows of one drive, so swapping the cache does not republish an unchanged drive. */
   memo: { last?: string } = {},
+  /** A retry after a failed read: ask the server again instead of the cache. */
+  refetch = false,
 ): () => void {
   let stopped = false;
   const read = (first: boolean) =>
-    cache.get(driveId).then(
+    cache.get(driveId, first && refetch).then(
       (drive) => {
         if (stopped) return;
         const now = signature(drive);

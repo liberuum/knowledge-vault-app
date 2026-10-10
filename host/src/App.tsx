@@ -13,9 +13,12 @@ import { declareDesktopHost, setHostModel } from "./bootstrap.js";
 import { MODELS_CHANGED_EVENT, modelDeclaration, openModelSettings } from "./model-declaration.js";
 import { Landing } from "./screens/Landing.js";
 import { RemoteWorkspaceScreen } from "./screens/RemoteWorkspaceScreen.js";
+import { ProblemCard } from "./components/ProblemCard.js";
+import { AppBar } from "./shell/AppBar.js";
+import { describeProblem, type Problem } from "./problem.js";
 import { Settings } from "./screens/Settings.js";
 import { WorkflowsScreen } from "./screens/WorkflowsScreen.js";
-import { WorkspaceScreen } from "./screens/WorkspaceScreen.js";
+import { WorkspaceScreen, type WorkspaceAuth } from "./screens/WorkspaceScreen.js";
 import { useRoute } from "./shell/router.js";
 import { matchShortcut } from "./shell/shortcuts.js";
 import type { SidecarInfo } from "./sidecar.js";
@@ -53,6 +56,24 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   const hostIdentity = useMemo(
     () => (identity.status?.authenticated && identity.status.address ? { address: identity.status.address, ...(identity.status.did ? { did: identity.status.did } : {}) } : undefined),
     [identity.status?.authenticated, identity.status?.address, identity.status?.did],
+  );
+  // The vault screens' error cards: who is signed in, and the ways to sign in (again).
+  const signIn = identity.signIn;
+  const signOut = identity.signOut;
+  const workspaceAuth = useMemo<WorkspaceAuth>(
+    () => ({
+      signedIn: Boolean(identity.status?.authenticated),
+      ...(identity.status?.address ? { address: identity.status.address } : {}),
+      key: identity.status?.authenticated ? (identity.status.authenticatedAt ?? "signed-in") : "signed-out",
+      signingIn: Boolean(identity.status?.pending),
+      signIn: () => void signIn(),
+      reSignIn: () =>
+        void (async () => {
+          await signOut();
+          await signIn();
+        })(),
+    }),
+    [identity.status?.authenticated, identity.status?.address, identity.status?.authenticatedAt, identity.status?.pending, signIn, signOut],
   );
   // A sign-in completed on Settings › Identity: back to the landing.
   useReturnHomeAfterSignIn(identity.status?.authenticated, route.name === "settings" && route.section === "identity", toVaults);
@@ -116,13 +137,13 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   let screen;
   switch (route.name) {
     case "vault":
-      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" onBack={toVaults} onSettings={toSettings} onGuide={guideProgress()?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
+      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} onGuide={guideProgress()?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
       break;
     case "workflows":
       screen = <WorkflowsScreen info={info} client={client} onBack={toVaults} onSettings={toSettings} />;
       break;
     case "remote":
-      screen = <RemoteRoute info={info} id={route.id} identity={hostIdentity} onBack={toVaults} onSettings={toSettings} />;
+      screen = <RemoteRoute info={info} id={route.id} identity={hostIdentity} auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} />;
       break;
     case "welcome":
       screen = (
@@ -199,25 +220,56 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
 }
 
 /** Looks the remote vault up by id (the list is the engine's), then mounts it. */
-function RemoteRoute({ info, id, identity, onBack, onSettings }: { info: SidecarInfo; id: string; identity: { address: string; did?: string } | undefined; onBack: () => void; onSettings: () => void }) {
+function RemoteRoute({
+  info,
+  id,
+  identity,
+  auth,
+  onBack,
+  onSettings,
+}: {
+  info: SidecarInfo;
+  id: string;
+  identity: { address: string; did?: string } | undefined;
+  auth: WorkspaceAuth;
+  onBack: () => void;
+  onSettings: () => void;
+}) {
   const [vault, setVault] = useState<RemoteVault | null | undefined>(undefined);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
     fetchRemoteVaults(info)
-      .then((list) => alive && setVault(list.find((v) => v.id === id) ?? null))
-      .catch(() => alive && setVault(null));
+      .then((list) => {
+        if (!alive) return;
+        setFailure(null);
+        setVault(list.find((v) => v.id === id) ?? null);
+      })
+      .catch((e: unknown) => alive && setFailure(e));
     return () => {
       alive = false;
     };
-  }, [info, id]);
-  if (vault === undefined) return <p role="status" className="kv-quiet kv-main">Opening…</p>;
-  if (vault === null) {
+  }, [info, id, attempt]);
+  if (failure !== null || vault === null) {
+    const problem: Problem =
+      failure !== null
+        ? describeProblem(failure, { what: "this vault" })
+        : {
+            kind: "not-found",
+            title: "This vault isn't in your list any more",
+            body: "It was removed from this app, maybe in another window.",
+            steps: ["Go back to your vaults. To use it again, connect it from there."],
+            actions: ["back"],
+            details: `Remote vault ${id}`,
+          };
     return (
-      <div className="kv-main">
-        <p role="alert" className="kv-error">This remote vault is no longer in the app's list.</p>
-        <button type="button" className="kv-button" onClick={onBack}>← Vaults</button>
+      <div className="kv-vault-screen">
+        <AppBar title="Vault" onBack={onBack} onSettings={onSettings} />
+        <ProblemCard problem={problem} handlers={{ back: onBack, retry: () => setAttempt((n) => n + 1) }} />
       </div>
     );
   }
-  return <RemoteWorkspaceScreen info={info} vault={vault} identity={identity} onBack={onBack} onSettings={onSettings} />;
+  if (vault === undefined) return <p role="status" className="kv-quiet kv-main">Opening…</p>;
+  return <RemoteWorkspaceScreen info={info} vault={vault} identity={identity} auth={auth} onBack={onBack} onSettings={onSettings} />;
 }

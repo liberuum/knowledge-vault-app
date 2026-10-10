@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { AppSettings, ConversionMode, ConverterComponent, ConverterStatus, InstallJob } from "../vaults.js";
+import { plainError } from "../problem.js";
 
 const STATE_LABEL: Record<ConverterStatus["state"], string> = {
   off: "Stopped",
@@ -173,7 +174,7 @@ export function ConversionSection({ info, api }: { info: SidecarInfo; api: Setti
             {status.mode === "remote" && status.url && <span className="kv-quiet">{status.url}</span>}
           </div>
           <p className="kv-converter-reads">{describeHealth(status)}</p>
-          {status.error && <p role="alert" className="kv-error">{status.error}</p>}
+          {status.error && <p role="alert" className="kv-error">{plainError(status.error)}</p>}
           {status.state === "down" && (
             <p className="kv-hint">
               Log: <code>{status.logPath}</code>
@@ -251,7 +252,7 @@ export function ConversionSection({ info, api }: { info: SidecarInfo; api: Setti
             </button>
             {saved && <span className="kv-form-saved" role="status">Saved</span>}
           </div>
-          {error && <p role="alert" className="kv-error">{error}</p>}
+          {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
         </form>
       )}
     </div>
@@ -287,7 +288,7 @@ function ComponentRow({ name, what, installed, installedNote, unavailable, job, 
             <span>{job.message}</span>
           </div>
         )}
-        {job?.phase === "failed" && <p role="alert" className="kv-error">{job.error}</p>}
+        {job?.phase === "failed" && <p role="alert" className="kv-error">{plainError(job.error)}</p>}
         {!running && installed && <span className="kv-quiet">{installedNote}</span>}
         {!running && !installed && unavailable && <span className="kv-quiet">{unavailable}</span>}
       </div>

@@ -5,6 +5,7 @@ import type { EngineStatus } from "../vaults.js";
 import { redact } from "../redact.js";
 import { invokeIfTauri, isTauri } from "../shell/tauri.js";
 import { CopyBlock } from "../shell/CopyBlock.js";
+import { plainError } from "../problem.js";
 
 /** The engineering view: what runs where, and how to point the CLI, the plugin and agents at this engine. */
 /** What "Copy diagnostics" puts on the clipboard: versions, ports, the data folder and the redacted tail — never a credential. */
@@ -50,7 +51,7 @@ export function DiagnosticsSection({ info, api }: { info: SidecarInfo; api: Sett
   }
   return (
     <div className="kv-settings-body">
-      {error && <p role="alert" className="kv-error">Could not read the engine's status: {error}</p>}
+      {error && <p role="alert" className="kv-error">Could not read the engine's status: {plainError(error)}</p>}
       {status && (
         <>
           <dl className="kv-facts">

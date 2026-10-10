@@ -3,26 +3,37 @@ import { useEffect, useState } from "react";
 import type { SidecarInfo } from "../sidecar.js";
 import { fetchWorkflowsDrive, type DriveRef } from "../vaults.js";
 import { AppBar } from "../shell/AppBar.js";
+import { ProblemCard } from "../components/ProblemCard.js";
+import { describeProblem } from "../problem.js";
 import { WorkspaceScreen } from "./WorkspaceScreen.js";
 
 /** Workflow Studio, full view, on the Workflows drive the engine keeps (created on first use). */
 export function WorkflowsScreen({ info, client, onBack, onSettings }: { info: SidecarInfo; client: GraphQLReactorClient; onBack: () => void; onSettings?: () => void }) {
   const [drive, setDrive] = useState<DriveRef | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
     fetchWorkflowsDrive(info)
-      .then((d) => alive && setDrive(d))
-      .catch((e: Error) => alive && setError(e.message));
+      .then((d) => {
+        if (!alive) return;
+        setError(null);
+        setDrive(d);
+      })
+      .catch((e: unknown) => alive && setError(e));
     return () => {
       alive = false;
     };
-  }, [info]);
+  }, [info, attempt]);
   if (!drive) {
     return (
       <div className="kv-vault-screen">
         <AppBar title="Workflows" onBack={onBack} onSettings={onSettings} />
-        {error ? <p role="alert" className="kv-error kv-main">Could not open Workflow Studio: {error}</p> : <p role="status" className="kv-quiet kv-main">Opening…</p>}
+        {error !== null ? (
+          <ProblemCard problem={describeProblem(error, { what: "Workflow Studio" })} handlers={{ retry: () => setAttempt((n) => n + 1), back: onBack }} />
+        ) : (
+          <p role="status" className="kv-quiet kv-main">Opening…</p>
+        )}
       </div>
     );
   }

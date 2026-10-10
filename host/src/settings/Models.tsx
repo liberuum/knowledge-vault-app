@@ -10,6 +10,7 @@ import { announceModelsChanged } from "../model-declaration.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { discoverLocalModels, type AppSettings, type ModelSettings, type SettingsPatch } from "../vaults.js";
+import { plainError } from "../problem.js";
 
 type Selection = { choice: Choice; service: ApiService; customEndpoint: string };
 
@@ -297,7 +298,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
           )}
           {verdict && <p role="status" className={verdict.ok ? "kv-form-saved" : "kv-error"}>{verdict.detail}</p>}
           {verdict?.warning && <p className="kv-hint">{verdict.warning}</p>}
-          {error && <p role="alert" className="kv-error">{error}</p>}
+          {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
         </form>
       )}
     </div>

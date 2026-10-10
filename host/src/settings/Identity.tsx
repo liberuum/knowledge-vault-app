@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { shortAddress, type IdentityController } from "../state/use-identity.js";
+import { plainError } from "../problem.js";
 
 /**
  * Sign in with Renown: the engine opens the system browser, the user signs with
@@ -61,7 +62,7 @@ export function IdentitySection({ identity }: { identity: IdentityController }) 
             <button type="button" className="kv-button" onClick={() => void signOut()}>Sign out</button>
           </div>
         </div>
-        {error && <p role="alert" className="kv-error">{error}</p>}
+        {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       </div>
     );
   }

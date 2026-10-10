@@ -2,6 +2,7 @@ import { useTheme } from "@powerhousedao/reactor-browser";
 import { useEffect, useState } from "react";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
+import { plainError } from "../problem.js";
 
 const OPTIONS = [
   { value: "dark", label: "Dark", hint: "The default — the vault's own theme." },
@@ -53,7 +54,7 @@ export function AppearanceSection({ info, api }: { info: SidecarInfo; api: Setti
         Keep the engine running when the window closes
       </label>
       <p className="kv-hint">The app stays in the tray, so the Switchboard CLI, the plugin and agents keep working. Quit from the tray to stop everything.</p>
-      {error && <p role="alert" className="kv-error">{error}</p>}
+      {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
     </div>
   );
 }
