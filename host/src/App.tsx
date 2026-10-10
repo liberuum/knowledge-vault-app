@@ -14,6 +14,7 @@ import { MODELS_CHANGED_EVENT, modelDeclaration, openModelSettings } from "./mod
 import { Landing } from "./screens/Landing.js";
 import { RemoteWorkspaceScreen } from "./screens/RemoteWorkspaceScreen.js";
 import { ProblemCard } from "./components/ProblemCard.js";
+import { VaultLoader } from "./components/VaultLoader.js";
 import { AppBar } from "./shell/AppBar.js";
 import { describeProblem, type Problem } from "./problem.js";
 import { Settings } from "./screens/Settings.js";
@@ -272,6 +273,14 @@ function RemoteRoute({
       </div>
     );
   }
-  if (vault === undefined) return <p role="status" className="kv-quiet kv-main">Opening…</p>;
+  if (vault === undefined) {
+    // The same frame the vault opens in, so nothing jumps when it does.
+    return (
+      <div className="kv-vault-screen">
+        <AppBar title="Vault" onBack={onBack} onSettings={onSettings} />
+        <VaultLoader label="Opening the vault…" slow="This is taking longer than usual." />
+      </div>
+    );
+  }
   return <RemoteWorkspaceScreen info={info} vault={vault} identity={identity} auth={auth} onBack={onBack} onSettings={onSettings} />;
 }

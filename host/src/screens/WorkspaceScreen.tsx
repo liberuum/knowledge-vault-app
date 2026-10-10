@@ -11,6 +11,7 @@ import {
 import { Suspense, useEffect, useRef, useState } from "react";
 import { DocumentEditorContainer } from "../components/DocumentEditorContainer.js";
 import { ProblemCard } from "../components/ProblemCard.js";
+import { VaultLoader } from "../components/VaultLoader.js";
 import { AppBar } from "../shell/AppBar.js";
 import { PipelineChip } from "../components/PipelineChip.js";
 import { describeProblem, type ProblemContext } from "../problem.js";
@@ -147,6 +148,12 @@ export function WorkspaceScreen(props: {
     setAttempt((n) => n + 1);
   };
   const problem = error === null ? null : describeProblem(error, context);
+  // One wording for the whole wait, from the drive's first answer to the app on screen.
+  const opening = {
+    label: title ? `Opening ${title}…` : "Opening the vault…",
+    detail: props.remoteHost ? `from ${props.remoteHost}` : undefined,
+    slow: props.remoteHost ? `Still waiting for ${props.remoteHost} to answer.` : "This is taking longer than usual.",
+  };
   const status = retrying ? "Trying again…" : props.auth?.signingIn ? "Finish signing in in your browser; this opens by itself when you're done." : undefined;
   return (
     <div className="kv-vault-screen">
@@ -165,24 +172,24 @@ export function WorkspaceScreen(props: {
           busy={retrying}
         />
       ) : ready ? (
-        <AppContainer engine={props.engine} />
+        <AppContainer engine={props.engine} opening={opening} />
       ) : (
-        <p role="status" className="kv-quiet kv-main">Opening…</p>
+        <VaultLoader {...opening} />
       )}
     </div>
   );
 }
 
 /** Connect's AppContainer, reduced: the drive app renders, with the selected document's editor as its children. */
-function AppContainer({ engine }: { engine?: SidecarInfo }) {
+function AppContainer({ engine, opening }: { engine?: SidecarInfo; opening: Parameters<typeof VaultLoader>[0] }) {
   const [selectedDrive] = useSelectedDriveSafe();
   const selectedDocumentId = useSelectedDocumentId();
   const app = useAppModuleById(selectedDrive?.header.meta?.preferredEditor);
-  if (!selectedDrive) return <p role="status">Opening…</p>;
+  if (!selectedDrive) return <VaultLoader {...opening} />;
   if (!app) return <p role="alert">This drive has no app to show it with.</p>;
   const AppComponent = app.Component;
   return (
-    <Suspense fallback={<p role="status">Loading the app…</p>}>
+    <Suspense fallback={<VaultLoader {...opening} />}>
       <div className="kv-app">
         <AppComponent>{selectedDocumentId ? <DocumentEditorContainer {...(engine ? { fillConnection: (id: string, token: boolean) => fillConnection(engine, id, token) } : {})} /> : null}</AppComponent>
       </div>

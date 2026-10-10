@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { LoadingLine } from "../components/VaultLoader.js";
 import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import type { AppSettings, ConversionMode, ConverterComponent, ConverterStatus, InstallJob } from "../vaults.js";
@@ -165,7 +166,7 @@ export function ConversionSection({ info, api }: { info: SidecarInfo; api: Setti
         Files you add — PDF, Word, slides, spreadsheets, Markdown — are turned into text on this computer before they become sources. Nothing leaves this
         computer unless you choose another server.
       </p>
-      {status === null && !error && <p className="kv-quiet" role="status">Loading…</p>}
+      {status === null && !error && <LoadingLine>Checking the converter…</LoadingLine>}
       {status && (
         <div className="kv-converter" data-state={dotState(status)}>
           <div className="kv-converter-head">

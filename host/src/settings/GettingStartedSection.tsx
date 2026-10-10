@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LoadingLine } from "../components/VaultLoader.js";
 import { GettingStarted, type VaultView } from "../landing/GettingStarted.js";
 import { readRecents, sortByRecency } from "../landing/recents.js";
 import { modelReady } from "../onboarding/onboarding-state.js";
@@ -49,7 +50,7 @@ export function GettingStartedSection({
       <p className="kv-settings-lead">The steps that make Knowledge Vault useful, ticked as you do them. Close the list on the front page any time; it stays here.</p>
       {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       {vaults === null || ready === null ? (
-        !error && <p className="kv-quiet" role="status">Loading…</p>
+        !error && <LoadingLine>Checking your steps…</LoadingLine>
       ) : (
         <GettingStarted info={info} vaults={vaults} modelReady={ready} storage={storage} onModels={onModels} onNewVault={onNewVault} onOpenView={onOpenView} onWorkflows={onWorkflows} onGuide={onGuide} variant="settings" />
       )}

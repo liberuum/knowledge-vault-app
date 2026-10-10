@@ -4,6 +4,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import { fetchWorkflowsDrive, type DriveRef } from "../vaults.js";
 import { AppBar } from "../shell/AppBar.js";
 import { ProblemCard } from "../components/ProblemCard.js";
+import { VaultLoader } from "../components/VaultLoader.js";
 import { describeProblem } from "../problem.js";
 import { WorkspaceScreen } from "./WorkspaceScreen.js";
 
@@ -32,7 +33,7 @@ export function WorkflowsScreen({ info, client, onBack, onSettings }: { info: Si
         {error !== null ? (
           <ProblemCard problem={describeProblem(error, { what: "Workflow Studio" })} handlers={{ retry: () => setAttempt((n) => n + 1), back: onBack }} />
         ) : (
-          <p role="status" className="kv-quiet kv-main">Opening…</p>
+          <VaultLoader label="Opening Workflow Studio…" slow="This is taking longer than usual." />
         )}
       </div>
     );

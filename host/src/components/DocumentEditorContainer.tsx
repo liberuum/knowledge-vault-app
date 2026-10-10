@@ -11,6 +11,7 @@ import {
 import { Suspense, useMemo, useState } from "react";
 import type { FillResult } from "../api/connections.js";
 import { ConnectionAssist } from "./ConnectionAssist.js";
+import { VaultLoader } from "./VaultLoader.js";
 
 function defaultScope(scopes: readonly string[]): string {
   return scopes.includes("global") ? "global" : (scopes[0] ?? "global");
@@ -65,7 +66,7 @@ export function DocumentEditorContainer({ fillConnection }: { /** Studio's conne
       ) : (
         <>
           {fillConnection && documentType === "powerhouse/connection" && <ConnectionAssist key={documentId} document={document} fill={fillConnection} />}
-          <Suspense fallback={<p role="status">Loading…</p>}>
+          <Suspense fallback={<VaultLoader label="Opening document…" />}>
             <Editor key={documentId} document={document} />
           </Suspense>
         </>

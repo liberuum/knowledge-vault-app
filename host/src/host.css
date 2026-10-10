@@ -288,23 +288,23 @@ body, #root { margin: 0; min-height: 100vh; }
 /* ---- start-up stages (the landing while the engine starts) ---- */
 /* Centred in the page while the engine starts: the main area becomes a column and the panel floats to its middle. */
 .kv-landing[data-engine="starting"] .kv-main { display: flex; flex-direction: column; }
-.kv-startup { margin: auto; width: 100%; max-width: 460px; padding: 24px 26px 22px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); box-sizing: border-box; }
-.kv-startup-head { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.kv-startup-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--bai-text); }
+/* the engine starting: the app's loading graph (components/loader.css), what is starting, and the checklist under it */
+.kv-startup { margin: auto; width: 100%; max-width: 460px; padding: 0 0 4vh; display: flex; flex-direction: column; align-items: center; box-sizing: border-box; }
+.kv-startup-title { margin: 18px 0 0; font-size: 15px; font-weight: 500; color: var(--bai-text-secondary); text-align: center; }
 .kv-spinner { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bai-border); border-top-color: var(--bai-accent); }
 @media (prefers-reduced-motion: no-preference) {
   .kv-spinner { animation: kv-spin 0.9s linear infinite; }
   @keyframes kv-spin { to { transform: rotate(360deg); } }
   .kv-startup-stage[data-state="current"] .kv-startup-mark { animation: kv-pulse 1.2s ease-in-out infinite; }
 }
-.kv-startup-stages { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; }
+.kv-startup-stages { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 6px; }
 .kv-startup-stage { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--bai-text-tertiary); }
 .kv-startup-stage[data-state="done"] { color: var(--bai-text-secondary); }
 .kv-startup-stage[data-state="current"] { color: var(--bai-text); font-weight: 500; }
 .kv-startup-mark { display: inline-block; width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .kv-startup-stage[data-state="done"] .kv-startup-mark { color: var(--bai-status-canonical); }
 .kv-startup-stage[data-state="current"] .kv-startup-mark { color: var(--bai-accent); }
-.kv-startup-latest { margin: 14px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--bai-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kv-startup-latest { align-self: stretch; text-align: center; margin: 16px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--bai-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- the model picker (Settings › Models) ---- */
 .kv-picker { position: relative; display: flex; flex-direction: column; gap: 8px; }

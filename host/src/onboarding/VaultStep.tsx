@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { LoadingLine } from "../components/VaultLoader.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { fetchVaults, type VaultSummary } from "../vaults.js";
 import { createGuideVault } from "./api.js";
@@ -58,7 +59,7 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
     <section aria-labelledby="onb-title">
       <h2 id="onb-title" className="kv-onb-title" tabIndex={-1}>Create your first vault</h2>
       <p className="kv-onb-lead">A vault holds your sources and the notes written from them. Many people keep one per subject or project; you can add more later.</p>
-      {vaults === null && <p role="status" className="kv-quiet">Loading…</p>}
+      {vaults === null && <LoadingLine>Looking for your vaults…</LoadingLine>}
       {notReady && (
         <>
           <p role="alert" className="kv-error">{plainError(notReady.reason)}</p>

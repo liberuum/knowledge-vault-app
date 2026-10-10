@@ -5,6 +5,7 @@ import { declareDesktopHost, type HostIdentity } from "../bootstrap.js";
 import { activate } from "../reactor.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { AppBar } from "../shell/AppBar.js";
+import { VaultLoader } from "../components/VaultLoader.js";
 import { WorkspaceScreen, type WorkspaceAuth } from "./WorkspaceScreen.js";
 import { useRemoteHealth } from "../state/use-remote-health.js";
 
@@ -76,7 +77,7 @@ export function RemoteWorkspaceScreen({
       <div className="kv-vault-screen">
         <AppBar title={vault.name} onBack={onBack} onSettings={onSettings} />
         {offline}
-        <p role="status" className="kv-quiet kv-main">Connecting…</p>
+        <VaultLoader label={`Opening ${vault.name}…`} detail={`from ${host}`} slow={`Still waiting for ${host} to answer.`} />
       </div>
     );
   }
