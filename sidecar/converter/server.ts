@@ -1902,8 +1902,39 @@ const lanes: Record<
 };
 const runningJobs = new Map<string, Running>();
 const JOB_ID = /^[\w-]{1,80}$/;
+
+/**
+ * Cancels that arrived before their conversion did. A proxy that reads the
+ * whole upload before forwarding it — the vault's Switchboard does — can deliver
+ * a client's DELETE first; the POST that follows is then refused at once instead
+ * of starting a conversion nobody waits for, which would hold its lane.
+ */
+const cancelledEarly = new Map<string, number>();
+const EARLY_CANCEL_TTL_MS = 10 * 60_000;
+const EARLY_CANCEL_MAX = 10_000;
+
+function rememberEarlyCancel(id: string): void {
+  const now = Date.now();
+  for (const [key, expires] of cancelledEarly)
+    if (expires <= now) cancelledEarly.delete(key);
+  while (cancelledEarly.size >= EARLY_CANCEL_MAX) {
+    const oldest = cancelledEarly.keys().next().value;
+    if (oldest === undefined) break;
+    cancelledEarly.delete(oldest);
+  }
+  cancelledEarly.set(id, now + EARLY_CANCEL_TTL_MS);
+}
+
+/** Whether `id` was cancelled before it arrived; consumes the mark. */
+function takeEarlyCancel(id: string | null): boolean {
+  if (id === null) return false;
+  const expires = cancelledEarly.get(id);
+  if (expires === undefined) return false;
+  cancelledEarly.delete(id);
+  return expires > Date.now();
+}
 const SELF = fileURLToPath(import.meta.url);
-const CANCELLED: Settled = {
+const CANCELLED: { status: number; body: Record<string, unknown> } = {
   status: 409,
   body: { error: "the conversion was cancelled", code: "CONVERSION_CANCELLED" },
 };
@@ -2121,6 +2152,11 @@ async function handleConvertRequest(
     sendJson(res, 400, { error: "filename query parameter is required" });
     return;
   }
+  if (takeEarlyCancel(url.searchParams.get("job"))) {
+    req.resume();
+    sendJson(res, CANCELLED.status, CANCELLED.body);
+    return;
+  }
   const lane = await laneFor(filename);
   const pool = lanes[lane];
   // The slot is taken before the upload is read: a caller that would be turned
@@ -2327,6 +2363,8 @@ function startCoordinator(): void {
           }
           const entry = runningJobs.get(id);
           if (!entry) {
+            // Not running — finished, or not arrived yet: if it arrives, it is refused.
+            rememberEarlyCancel(id);
             sendJson(res, 404, { cancelled: false });
             return;
           }
