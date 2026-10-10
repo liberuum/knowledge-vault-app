@@ -103,8 +103,10 @@ cross-building from Linux.
 
 ## Releases
 
-A release is made on purpose: bump the version in `package.json`, `src-tauri/Cargo.toml` and
-`src-tauri/tauri.conf.json` (a version that already has a release is refused), commit, then push a tag:
+A release is made on purpose. First refresh the model catalog the engine ships (`bun run update:models`: it
+tells the model picker which OpenAI, Anthropic, Gemini and xAI models fit processing, and what they cost) and commit
+`sidecar/src/model-knowledge.data.ts` if it changed. Then bump the version in `package.json`, `src-tauri/Cargo.toml`
+and `src-tauri/tauri.conf.json` (a version that already has a release is refused), commit, and push a tag:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0

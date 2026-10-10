@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { filterModels, fitForProcessing, formatContext, formatPrice, freeModels, offerableModels, recommendedModels, type CatalogModel } from "./model-picker.js";
+import { defaultModel, filterModels, fitForProcessing, formatContext, formatPrice, freeModels, offerableModels, recommendedModels, type CatalogModel } from "./model-picker.js";
 
 export type CatalogResult = { ok: true; models: CatalogModel[] } | { ok: false; detail: string };
 
@@ -17,6 +17,11 @@ type Props = {
   reloadKey?: string;
   /** A key was just entered and is about to be asked: show the list as on its way, not as missing. */
   pending?: boolean;
+  /**
+   * When the key's list arrives and no model it offers is chosen, choose the best fit for the
+   * user (defaultModel) — no click needed; they pick another only if they want to.
+   */
+  autoChoose?: boolean;
 };
 
 type Group = { label: string; models: CatalogModel[] };
@@ -26,8 +31,12 @@ type Group = { label: string; models: CatalogModel[] };
  * Grouped as "Recommended for processing" (what the pipeline needs, cheapest first), "Free" and
  * "All models"; typing filters every group; arrows, Enter and Escape work as in a combobox.
  */
-export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey, load, reloadKey, pending = false }: Props) {
+export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey, load, reloadKey, pending = false, autoChoose = false }: Props) {
   const [catalog, setCatalog] = useState<CatalogResult | null>(null);
+  // The model chosen for the user from the last list (shown as such until they pick another).
+  const [chosenForYou, setChosenForYou] = useState<string | null>(null);
+  const latest = useRef({ value, onChange, autoChoose });
+  latest.current = { value, onChange, autoChoose };
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -45,7 +54,18 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
     let alive = true;
     setLoading(true);
     load()
-      .then((c) => alive && setCatalog(c))
+      .then((c) => {
+        if (!alive) return;
+        setCatalog(c);
+        // A key's list arrived: unless the current model is one it offers, choose the best fit.
+        const { value: current, onChange: change, autoChoose: auto } = latest.current;
+        if (!auto || !c.ok || c.models.some((m) => m.id === current && fitForProcessing(m).ok !== false)) return;
+        const pick = defaultModel(c.models);
+        if (pick) {
+          change(pick.id);
+          setChosenForYou(pick.id);
+        }
+      })
       .catch((e: unknown) => alive && setCatalog({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
       .finally(() => alive && setLoading(false));
     return () => {
@@ -119,7 +139,7 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
       : catalog && !catalog.ok
         ? `Could not list models: ${catalog.detail}`
         : catalog?.ok
-          ? `${offerableModels(catalog.models, "").length} of the ${catalog.models.length} models your key gives you can do the vault's work (text in, JSON out) — type to search, or pick from the list.${catalog.models.some((m) => m.quality !== undefined) ? " Recommended ones are ranked by the quality score the provider reports." : ""}`
+          ? `${offerableModels(catalog.models, "").length} of the ${catalog.models.length} models your key gives you can do the vault's work (text in, JSON out) — type to search, or pick from the list.${catalog.models.some((m) => m.quality !== undefined) ? " Recommended ones are ranked by their quality score." : ""}`
           : null;
   const current = catalog?.ok ? catalog.models.find((m) => m.id === value) : undefined;
   let index = -1;
@@ -192,8 +212,17 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
                       {m.name !== m.id && <span>{m.name}</span>}
                       {ctx && <span>{ctx}</span>}
                       {price && <span>{price}</span>}
-                      {fit.ok === true && <span className="kv-picker-badge" data-kind="ok" title="Answers in JSON, text only, takes a whole source: the pipeline can use it">fits processing</span>}
-                      {fit.ok === false && <span className="kv-picker-badge" data-kind="warn" title="The pipeline would fail with this model">not for processing: {fit.reason}</span>}
+                      {fit.ok === true && (
+                        <span className="kv-picker-badge" data-kind="ok" title={`Answers in JSON, text only, takes a whole source: the pipeline can use it${m.describedBy === "catalog" ? " (from the model catalog the app ships)" : ""}`}>
+                          fits processing
+                        </span>
+                      )}
+                      {fit.ok === false && <span className="kv-picker-badge" data-kind="warn" title="The pipeline would fail with this model">won't work: {fit.reason}</span>}
+                      {fit.ok === null && (
+                        <span className="kv-picker-badge" data-kind="unknown" title="Nothing describes this model, so the app can't tell whether processing works with it">
+                          unchecked
+                        </span>
+                      )}
                     </span>
                   </div>
                 );
@@ -207,6 +236,11 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
         <p className="kv-hint kv-picker-status" role="status" aria-busy={fetching || undefined}>
           {fetching && <span className="kv-spinner" aria-hidden="true" />}
           {status}
+        </p>
+      )}
+      {chosenForYou !== null && chosenForYou === value && current && (
+        <p className="kv-hint kv-picker-chosen">
+          Chosen for you: among the models that fit processing, the best one at a fair price. Pick another from the list if you like.
         </p>
       )}
       {current && catalog?.ok && (formatContext(current) || formatPrice(current)) && (

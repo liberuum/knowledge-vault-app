@@ -280,7 +280,7 @@ export function ModelsSection({ info, api }: { info: SidecarInfo; api: SettingsA
               canSave ? (
                 <>
                   <label htmlFor="models-model">Model (required for processing)</label>
-                  <ModelPicker id="models-model" value={model} onChange={setModel} placeholder={canList ? "Choose a model" : "The model’s name"} disabled={busy} hasKey={canList} load={loadCatalog} reloadKey={catalogEndpoint} pending={apiKey.trim() !== "" && apiKey.trim() !== typedKey} />
+                  <ModelPicker id="models-model" autoChoose value={model} onChange={setModel} placeholder={canList ? "Choose a model" : "The model’s name"} disabled={busy} hasKey={canList} load={loadCatalog} reloadKey={catalogEndpoint} pending={apiKey.trim() !== "" && apiKey.trim() !== typedKey} />
                 </>
               ) : undefined
             }

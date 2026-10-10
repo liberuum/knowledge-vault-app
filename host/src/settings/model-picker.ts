@@ -12,6 +12,8 @@ export type CatalogModel = {
   inputs?: string[];
   maxOutput?: number;
   quality?: number;
+  /** The provider only named this model; its facts come from the catalog the app ships. */
+  describedBy?: "catalog";
 };
 
 /** Case-insensitive, every word of the query must appear in the id or the name. */
@@ -37,11 +39,25 @@ export type Fit = { ok: true } | { ok: false; reason: string } | { ok: null };
  * whole source (64k+ context) and give a long reply (16k+). `ok: null` when the provider's list
  * says too little to tell (OpenAI, a local server).
  */
-/** What a service lists beside its chat models when it says nothing about them: embeddings, speech, transcription, images, video. */
-const NOT_CHAT = /(embed|tts|whisper|transcri|dall-e|davinci|babbage|moderation|realtime|audio|image|veo|lyria|sora|computer-use|\baqa\b)/i;
+/**
+ * What a service lists beside its chat models, told by name when nothing describes them: the
+ * reason the vault cannot use each kind.
+ */
+const NOT_FOR_PROCESSING: readonly (readonly [RegExp, string])[] = [
+  [/embed/i, "embeddings, not a chat model"],
+  [/tts|native-audio|transcri|whisper|speech|realtime|translate|-live(-|$)|audio/i, "speech or live audio, not a text model"],
+  [/veo|sora|video/i, "makes video, not a text model"],
+  [/lyria|music/i, "makes music, not a text model"],
+  [/image|imagen|dall-e|nano-banana/i, "makes images, not a text model"],
+  [/computer-use|antigravity|deep-research|robotics/i, "an agent model, not for chat or processing"],
+  [/moderation|davinci|babbage|\baqa\b/i, "not a chat model"],
+];
 
 export function fitForProcessing(m: CatalogModel): Fit {
-  if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) return NOT_CHAT.test(m.id) ? { ok: false, reason: "not a chat model" } : { ok: null };
+  if (m.jsonOutput === undefined && m.outputs === undefined && m.contextLength === undefined) {
+    const rule = NOT_FOR_PROCESSING.find(([pattern]) => pattern.test(m.id));
+    return rule ? { ok: false, reason: rule[1] } : { ok: null };
+  }
   if (m.jsonOutput === false) return { ok: false, reason: "no JSON output" };
   if (m.inputs && !m.inputs.includes("text")) return { ok: false, reason: "does not take text input" };
   if (m.textOutput === false) return { ok: false, reason: "does not produce text" };
@@ -71,6 +87,26 @@ export function recommendedModels(models: readonly CatalogModel[], limit = 8): C
     )
     .sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0) || (a.promptPrice ?? Infinity) - (b.promptPrice ?? Infinity) || a.id.localeCompare(b.id))
     .slice(0, limit);
+}
+
+/** How close to the best model's quality score a cheaper one must be to be chosen instead. */
+const NEAR_BEST = 0.85;
+
+/**
+ * The model to choose for someone who has not: among the models recommended for processing, the
+ * cheapest whose quality is near the best one's (review I5: not the dearest — but never a much
+ * weaker model just because it is cheap); else the best-rated model that fits. A model nothing
+ * describes is never chosen for anyone.
+ */
+export function defaultModel(models: readonly CatalogModel[]): CatalogModel | undefined {
+  const cost = (m: CatalogModel) => (m.promptPrice ?? Infinity) + (m.completionPrice ?? Infinity);
+  const ranked = recommendedModels(models, 8);
+  const best = ranked[0]?.quality ?? 0;
+  const value = ranked.filter((m) => (m.quality ?? 0) >= NEAR_BEST * best).sort((a, b) => cost(a) - cost(b) || (b.quality ?? 0) - (a.quality ?? 0))[0];
+  if (value) return value;
+  return models
+    .filter((m) => fitForProcessing(m).ok === true && !m.id.endsWith(":batch"))
+    .sort((a, b) => (b.quality ?? -1) - (a.quality ?? -1) || cost(a) - cost(b) || a.id.localeCompare(b.id))[0];
 }
 
 /** Free models, the ones that fit processing first. */

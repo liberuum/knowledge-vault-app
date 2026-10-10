@@ -1,5 +1,6 @@
 import { privateHostAllow } from "./egress.js";
 import { chatModelId, modelsUrl, providerHeaders, refusesKey } from "./provider-auth.js";
+import { describeFromKnowledge } from "./model-knowledge.js";
 
 /**
  * Settings › Models › Validate: list the provider's models with the saved key —
@@ -62,6 +63,8 @@ export type CatalogModel = {
   maxOutput?: number;
   /** Artificial Analysis' intelligence index, as OpenRouter relays it — the picker ranks "recommended" by it. */
   quality?: number;
+  /** The provider only named this model; its facts come from the catalog the app ships (model-knowledge.ts). */
+  describedBy?: "catalog";
 };
 export type ModelCatalog = { ok: true; models: CatalogModel[] } | { ok: false; detail: string };
 
@@ -121,7 +124,7 @@ export async function fetchModelCatalog(endpoint: string, key: string, fetchImpl
     return { ok: false, detail: refusesKey(res.status, message) ? `The provider refused the key: ${message}` : `The provider answered HTTP ${res.status}: ${message}` };
   }
   const data = body && typeof body === "object" ? (body as { data?: unknown }).data : undefined;
-  return { ok: true, models: normaliseCatalog(data).map((m) => ({ ...m, id: chatModelId(endpoint, m.id) })) };
+  return { ok: true, models: describeFromKnowledge(endpoint, normaliseCatalog(data).map((m) => ({ ...m, id: chatModelId(endpoint, m.id), name: m.name === m.id ? chatModelId(endpoint, m.id) : m.name }))) };
 }
 
 export type LocalProbe = { ok: true; endpoint: string; models: string[] } | { ok: false; endpoint: string; detail: string };

@@ -74,3 +74,25 @@ describe("the model picker's logic", () => {
     expect(offerableModels(listed, "").map((m) => m.id)).toEqual(["gpt-6-luna", "claude-sonnet-5", "grok-4"]);
   });
 });
+
+describe("named reasons and the default model", () => {
+  it("says why a model nothing describes cannot do the work, and leaves the rest unchecked", async () => {
+    const { fitForProcessing } = await import("./model-picker.js");
+    const bare = (id: string) => ({ id, name: id, free: false });
+    expect(fitForProcessing(bare("antigravity-preview-09-2026"))).toEqual({ ok: false, reason: "an agent model, not for chat or processing" });
+    expect(fitForProcessing(bare("gemini-3.8-flash-tts"))).toEqual({ ok: false, reason: "speech or live audio, not a text model" });
+    expect(fitForProcessing(bare("gemini-pro-latest"))).toEqual({ ok: null });
+  });
+
+  it("chooses the best value among the recommended, else the best-rated fit, never an unchecked one", async () => {
+    const { defaultModel } = await import("./model-picker.js");
+    const fit = { free: false, jsonOutput: true, textOutput: true, outputs: ["text"], contextLength: 200_000, maxOutput: 32_000 };
+    const dear = { ...fit, id: "dear", name: "dear", quality: 70, promptPrice: 10, completionPrice: 50 };
+    const cheap = { ...fit, id: "cheap", name: "cheap", quality: 60, promptPrice: 0.3, completionPrice: 2.5 };
+    expect(defaultModel([dear, cheap])?.id).toBe("cheap");
+    const weak = { ...fit, id: "weak", name: "weak", quality: 20, promptPrice: 0.05, completionPrice: 0.2 };
+    expect(defaultModel([dear, weak])?.id).toBe("dear");
+    expect(defaultModel([{ ...fit, id: "unpriced", name: "unpriced", quality: 50 }])?.id).toBe("unpriced");
+    expect(defaultModel([{ id: "mystery", name: "mystery", free: false }])).toBeUndefined();
+  });
+});

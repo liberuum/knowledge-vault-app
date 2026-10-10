@@ -8,6 +8,7 @@
     "sidecar"
   ],
   "scripts": {
+    "update:models": "node scripts/update-model-knowledge.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:vault": "node scripts/dev.mjs --vault ../bai-knowledge-note",
     "dev:host": "bun run --cwd host dev",

@@ -5,7 +5,7 @@ import { announceModelsChanged } from "../model-declaration.js";
 import { DEFAULT_LOCAL_ENDPOINT } from "../settings/LocalModel.js";
 import { ModelPicker } from "../settings/ModelPicker.js";
 import { useDebounced } from "../settings/use-debounced.js";
-import { formatPrice, recommendedModels, type CatalogModel } from "../settings/model-picker.js";
+import { defaultModel, formatPrice, type CatalogModel } from "../settings/model-picker.js";
 import { ProviderChoice, type ApiService, type Choice } from "../settings/ProviderChoice.js";
 import { ChatGptChoice } from "../settings/ChatGptChoice.js";
 import {
@@ -83,11 +83,6 @@ function bestFound(d: LocalDiscovery | null): Found | null {
   return [...all].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
 
-/** The default hosted model (review I5): among the ones recommended for processing, the best value — not the dearest. */
-function goodValue(models: readonly CatalogModel[]): CatalogModel | undefined {
-  const cost = (m: CatalogModel) => (m.promptPrice ?? Infinity) + (m.completionPrice ?? Infinity);
-  return [...recommendedModels(models, 8)].sort((a, b) => cost(a) - cost(b))[0];
-}
 
 /**
  * Choose the AI (spec §5, step 2): what this computer runs comes first and preselected; OpenRouter and an API key
@@ -182,7 +177,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
       .then((c) => {
         if (!alive || !c.ok) return;
         setCatalog(c.models);
-        const best = goodValue(c.models)?.id;
+        const best = defaultModel(c.models)?.id;
         if (best) setModel((m) => m || best);
       })
       .catch(() => undefined);
@@ -244,7 +239,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
         if (!next.models.model.trim()) {
           // A key, no model yet: the best value the key can use for processing.
           const c = await fetchModelCatalog(info);
-          const best = c.ok ? goodValue(c.models)?.id : undefined;
+          const best = c.ok ? defaultModel(c.models)?.id : undefined;
           if (!best) return setPhase({ kind: "failed", message: c.ok ? "Choose a model for processing." : `Could not list the models: ${c.detail}` });
           next = await saveSettings(info, { models: { model: best } });
         }
