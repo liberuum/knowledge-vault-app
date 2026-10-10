@@ -10,7 +10,19 @@ export type SidecarConfig = {
   adminAddress: string | undefined;
   appVersion: string;
   logLevel: string;
+  /** The Powerhouse registry Workflow Studio lists and installs pieces from; empty (the default) when off. */
+  registryUrl: string;
 };
+
+/**
+ * Workflow Studio's Registry tab: the pieces published to the Powerhouse registry. Off unless
+ * KV_REGISTRY_URL names one (this one, say). With a registry, the workflow runtime fetches the exact
+ * piece version a pipeline was pinned to instead of running the one the app ships — and leaves the
+ * trigger unarmed when the registry lacks it (seen: a 6.2.3-dev.52 runtime, a pipeline pinned to the
+ * previous release's piece, 404). Every app update ships a new piece version, so every existing
+ * pipeline would stop. Also, registry.vetra.io answered its catalog in a shape dev.52 rejects.
+ */
+export const DEFAULT_REGISTRY_URL = "https://registry.vetra.io";
 
 type Env = Record<string, string | undefined>;
 
@@ -41,6 +53,7 @@ export function readSidecarConfig(env: Env): SidecarConfig {
     adminAddress,
     appVersion: env.KV_APP_VERSION || "dev",
     logLevel: env.KV_LOG_LEVEL || "info",
+    registryUrl: env.KV_REGISTRY_URL ?? "",
   };
 }
 
@@ -74,6 +87,9 @@ export function switchboardEnv(cfg: SidecarConfig, secrets: EngineSecrets, openM
     PH_ATTACHMENT_URL_SIGNING_SECRET: secrets.attachmentSigning,
     // Loopback always (the engine itself, a local model server); plus the saved model endpoint when it is on the local network.
     PH_WORKFLOWS_EGRESS_ALLOW_ADDRESSES: ["127.0.0.1/32", "::1/128", ...egressAllow].join(","),
+    // Every commit is fsynced since 6.2.3-dev.45; PH_PGLITE_FSYNC=0 is upstream's escape hatch (power-loss
+    // durability off), passed on only when the user set it — environment.ts drops PH_* otherwise.
+    ...(process.env.PH_PGLITE_FSYNC ? { PH_PGLITE_FSYNC: process.env.PH_PGLITE_FSYNC } : {}),
     SWITCHBOARD_APP_NAME: "knowledge-vault-app",
     MCP_ENABLED: "true",
     LOG_LEVEL: cfg.logLevel,

@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPipelineManager, readPipelines, templateDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
-import type { PipelineTemplate } from "./templates.js";
+import { createPipelineManager, readPipelines, templateDigest, templatePolicy, templatePollSeconds, workflowDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
+import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
 type Call = { query: string; variables: Record<string, unknown> };
@@ -359,5 +359,111 @@ describe("pipelines and the model gateway", () => {
     expect(secretCalls(engine.calls, "deleteSecret")).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toMatch(/vault1.*refused the write to conn-1/);
+  });
+});
+
+describe("pipeline manager — the template's run policy and queue check, kept current in place", () => {
+  it("brings every pipeline up to the template's policy and 15 s queue check in place; leaves current ones and unpublished Studio edits alone", async () => {
+    const policy = { concurrency: "PARALLEL", runTimeoutSeconds: 0, onFailure: "NOTIFY" };
+    const trigger = (config: Record<string, unknown>) => ({ type: "SET_TRIGGER", input: { id: "trig", pieceName: "p", config } });
+    const publish = { type: "PUBLISH_WORKFLOW", input: { publishedAt: "{{NOW}}" } };
+    const current = { ...template, workflow: { ...template.workflow, operations: [trigger({ drive: "d", pollEverySeconds: 15 }), { type: "SET_POLICY", input: policy }, publish] } } as PipelineTemplate;
+    const older = { ...template, workflow: { ...template.workflow, operations: [trigger({ drive: "d" }), publish] } } as PipelineTemplate;
+    // Both are kept current in place, so adding them to the template asks nobody to set a pipeline up again.
+    expect(templateDigest(current)).toBe(templateDigest(older));
+    expect(templatePolicy(current)).toEqual(policy);
+    expect(templatePolicy(older)).toBeUndefined();
+    expect(templatePollSeconds(current)).toBe(15);
+    expect(templatePollSeconds(older)).toBeUndefined();
+
+    const defaults = { concurrency: "QUEUE", runTimeoutSeconds: 3600, onFailure: "PARK" };
+    const binding = (config: Record<string, unknown>) => ({ id: "trig", pieceName: "p", pieceVersion: "1.0.0", triggerName: "new-pipeline-task", connectionId: "conn", reactorConnectionId: null, config, propertySettings: [{ prop: "include_backlog", mode: "MANUAL", schema: null }], lastTest: null, updatedAt: "2026-10-01T00:00:00.000Z" });
+    const wf = (version: number, publishedVersion: number, policyNow: Record<string, unknown>, config: Record<string, unknown>) => ({
+      version,
+      trigger: binding(config),
+      published: { version: publishedVersion, policy: policyNow, trigger: binding(config) },
+    });
+    const workflows: Record<string, unknown> = {
+      "wf-old": wf(3, 3, defaults, { drive: "d" }), // made before both
+      "wf-poll": wf(4, 4, { ...defaults, ...policy }, { drive: "d" }), // has the policy, checks every 60 s
+      "wf-current": wf(2, 2, { ...defaults, ...policy }, { drive: "d", pollEverySeconds: 15 }),
+      "wf-edited": wf(5, 4, defaults, { drive: "d" }), // unpublished edits in Studio
+    };
+    const executed: Array<{ id: string; types: string[]; inputs: unknown[] }> = [];
+    let lastWrite = 0;
+    const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
+      const body = JSON.parse(String(init?.body)) as { query: string; variables: { id: string; a?: Array<{ type: string; input: unknown }> } };
+      const reply = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
+      if (body.query.includes("execute(")) {
+        lastWrite = body.variables.a!.length;
+        executed.push({ id: body.variables.id, types: body.variables.a!.map((a) => a.type), inputs: body.variables.a!.map((a) => a.input) });
+        return reply({ execute: { id: body.variables.id } });
+      }
+      if (body.query.includes("operations(")) return reply({ document: { document: { operations: { items: Array.from({ length: lastWrite }, (_, i) => ({ index: 10 + i, error: null, action: { type: "X" } })) } } } });
+      if (body.query.includes("document { state }")) return reply({ document: { document: { state: { global: workflows[body.variables.id] } } } });
+      throw new Error(`unexpected query: ${body.query}`);
+    }) as unknown as typeof fetch;
+    const { manager, dataDir } = deps({ template: current, fetchImpl });
+    const record = (workflowId: string): PipelineRecord => ({ workflowId, connectionId: `c-${workflowId}`, secretRefs: { token: "t", llm: "l" }, createdAt: "2026-10-01T00:00:00.000Z" });
+    writePipelines(dataDir, { old: record("wf-old"), poll: record("wf-poll"), current: record("wf-current"), edited: record("wf-edited"), off: { ...record("wf-off"), disabled: "the model key was removed" } });
+
+    expect(await manager.followTemplate()).toEqual({ updated: ["old", "poll"], skipped: ["edited"], failed: [] });
+    const setTrigger = { id: "trig", pieceName: "p", pieceVersion: "1.0.0", triggerName: "new-pipeline-task", connectionId: "conn", config: { drive: "d", pollEverySeconds: 15 }, propertySettings: [{ prop: "include_backlog", mode: "MANUAL", schema: null }] };
+    const published = { publishedAt: "2026-10-07T10:00:00.000Z" };
+    expect(executed).toEqual([
+      { id: "wf-old", types: ["SET_POLICY", "SET_TRIGGER", "PUBLISH_WORKFLOW"], inputs: [policy, setTrigger, published] },
+      { id: "wf-poll", types: ["SET_TRIGGER", "PUBLISH_WORKFLOW"], inputs: [setTrigger, published] },
+    ]);
+  });
+});
+
+describe("pipeline manager — a workflow runtime that is not up yet", () => {
+  it("reads starting, not an error, while the engine answers without its workflow runtime (HTTP 400)", async () => {
+    // After an unclean exit the engine boots without the runtime until the previous lease runs out (6.2.3-dev.51).
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ errors: [{ message: 'Cannot query field "workflowRuntime" on type "Query".' }] }) })) as unknown as typeof fetch;
+    const { manager, dataDir } = deps({ fetchImpl });
+    writePipelines(dataDir, { vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "t", llm: "l" }, createdAt: "2026-10-07T10:00:00.000Z", templateDigest: templateDigest(template) } });
+    expect(await manager.status("vault1")).toEqual({ state: "starting" });
+  });
+});
+
+describe("pipeline manager — the Reweave notes workflow", () => {
+  const reweaveTemplate = { version: 1, exportedAt: "x", placeholders: [], workflow: { documentType: "powerhouse/workflow", operations: [{ type: "SET_WORKFLOW_NAME", input: { name: "{{WORKFLOW_NAME}}" } }] } } as unknown as WorkflowTemplate;
+
+  it("is made with the pipeline on its connection, added to vaults set up before it, remade from a newer template (still off if it was off) and removed with the vault", async () => {
+    let made = 0;
+    const instantiateReweave = vi.fn(async () => ({ workflowId: `rw-${++made}` }));
+    const { manager, dataDir, engine, d } = deps({ reweaveTemplate, instantiateReweave });
+    // The old workflow of vault2 reads as switched off in Studio.
+    const engineFetch = d.fetchImpl;
+    d.fetchImpl = (async (u: unknown, init?: { body?: unknown }) => {
+      const body = JSON.parse(String(init?.body)) as Call;
+      if (body.query.includes("document { state }") && body.variables.id === "rw-old") return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { status: "DISABLED" } } } } } }) };
+      return engineFetch(u as string, init as RequestInit);
+    }) as unknown as typeof fetch;
+    const managerWithStatus = createPipelineManager(d);
+
+    // A new pipeline gets its Reweave notes workflow on the same connection.
+    expect((await manager.ensure("vault1")).state).toBe("ready");
+    expect(instantiateReweave).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Research — Reweave notes", driveId: "vault1", connectionId: "conn-1", workflowsDriveId: "wfdrive", pieceVersion: "1.0.54-dev.23" }));
+    expect(readPipelines(dataDir).vault1?.reweave).toEqual({ workflowId: "rw-1", digest: workflowDigest(reweaveTemplate) });
+
+    // At start: current ones are left alone, a vault set up before it gets one, an older one is remade and switched off again.
+    const base: PipelineRecord = { workflowId: "wf-2", connectionId: "conn-2", secretRefs: { token: "secret://v1:8", llm: "secret://v1:9" }, createdAt: "2026-10-01T00:00:00.000Z" };
+    writePipelines(dataDir, { ...readPipelines(dataDir), vault2: { ...base, reweave: { workflowId: "rw-old", digest: "older" } }, vault3: { ...base, connectionId: "conn-3", workflowId: "wf-3" }, vault4: { ...base, disabled: "the model key was removed" } });
+    expect(await managerWithStatus.followReweave()).toEqual({ created: ["vault2", "vault3"], failed: [] });
+    const records = readPipelines(dataDir);
+    expect(records.vault1?.reweave?.workflowId).toBe("rw-1");
+    expect(records.vault2?.reweave?.workflowId).toBe("rw-2");
+    expect(records.vault3?.reweave).toEqual({ workflowId: "rw-3", digest: workflowDigest(reweaveTemplate) });
+    expect(records.vault4?.reweave).toBeUndefined();
+    const deleted = engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id);
+    expect(deleted).toContain("rw-old");
+    const offAgain = engine.calls.filter((c) => c.query.includes("execute(") && c.variables.id === "rw-2");
+    expect(JSON.stringify(offAgain)).toContain("DISABLED");
+
+    // Removing the vault removes its Reweave notes workflow too.
+    await manager.remove("vault1");
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id)).toContain("rw-1");
   });
 });

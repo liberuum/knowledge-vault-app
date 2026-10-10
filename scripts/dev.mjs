@@ -48,7 +48,9 @@ const BASE_ENV = {
   KV_CONTROL_PORT: "4202",
   KV_CONTROL_TOKEN: TOKEN,
   KV_HOST_ORIGIN: "http://127.0.0.1:4200",
-  KV_APP_VERSION: "dev",
+  // The app's own version, as the shell passes it in a build: the update notice then offers only
+  // releases newer than this checkout (scripts/check-versions.mjs keeps package.json in step).
+  KV_APP_VERSION: JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
 };
 let sidecar;
 let stopping = false;

@@ -3,7 +3,6 @@ import { ensureStoreId } from "./store-id.js";
 import { initVaultStructure } from "./vault-structure.js";
 import { addVaultSource, findSourceByTitle } from "./vault-sources.js";
 import { checkModel } from "./model-check.js";
-import { register } from "node:module";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createUpdateDownloader, downloadsDir } from "./app-update.js";
@@ -16,7 +15,7 @@ import { converterEnvironment, createConverterManager } from "./converter.js";
 import { createIdentity, DEFAULT_RENOWN_URL, defaultIdentityDeps } from "./identity.js";
 import { bindLoopbackOnly } from "./loopback.js";
 import { checkRemoteVault, discoverRemoteVaults, parseRemoteVaultInput, readRemoteVaults, RemoteInputError, writeRemoteVaults } from "./remote.js";
-import { prepareDataDir } from "./data-dir.js";
+import { prepareDataDir, setAsideStaleSnapshots } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
 import { packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
@@ -55,17 +54,12 @@ function requestStop(): void {
 const ENGINE_STARTED_AT = new Date().toISOString();
 import { privateHostAllow, isLocalEndpoint, resolvesPrivate } from "./egress.js";
 import { isIP } from "node:net";
-import type { PipelineTemplate } from "./templates.js";
+import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
 import { createRequire } from "node:module";
 import { createProtectionSwitch } from "./protection.js";
 import { authorizedFetch, createEngineTokenProvider } from "./authorized-fetch.js";
 import { ensureKyselyMigrationTables } from "./auth-tables.js";
 import { createVaultDrive, deleteVaultDrive, ensureWorkflowsDrive, listVaultDrives, NotAVaultError, renameVaultDrive } from "./vaults.js";
-
-// The data-dir storage swap must be registered before the Switchboard (and
-// through it @powerhousedao/pglite-fs) is imported — hence the dynamic import below.
-// KV_PGLITE_SNAPSHOT_FS=1 keeps the Switchboard's own snapshot filesystem (diagnostics; costs memory).
-if (process.env.KV_PGLITE_SNAPSHOT_FS !== "1") register(new URL("./nodefs-hooks.mjs", import.meta.url));
 
 /**
  * The two packages the engine loads, as directories (spec §4.1). The loader
@@ -82,6 +76,14 @@ function packageVersion(dir: string): string {
     return (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version?: string }).version ?? "unknown";
   } catch {
     return "unknown";
+  }
+}
+/** The Reweave notes workflow the vault package ships beside the pipeline; a package that predates it yields none. */
+function loadReweaveTemplate(): WorkflowTemplate | undefined {
+  try {
+    return createRequire(import.meta.url)("@powerhousedao/knowledge-note/pieces/knowledge-vault/templates/reweave.json") as WorkflowTemplate;
+  } catch {
+    return undefined;
   }
 }
 /** The pipeline template the vault package ships (spec §7.5); a package that predates it yields none. */
@@ -220,8 +222,10 @@ async function main(): Promise<void> {
   for (const dir of PACKAGE_DIRS) {
     if (!existsSync(dir)) throw new Error(`package directory missing: ${dir} (run \`bun install\` in sidecar/)`);
   }
+  // A snapshot.bin beside a store would replace it on open (the Switchboard treats one as authoritative).
+  for (const aside of setAsideStaleSnapshots(cfg.dataDir)) console.warn(`[sidecar] set aside a stale database snapshot: ${aside}`);
   // Spec §4.4: a store first opened without authentication lacks the auth migrator's tables (auth-tables.ts).
-  if (cfg.protected && process.env.KV_PGLITE_SNAPSHOT_FS !== "1") {
+  if (cfg.protected) {
     const prepared = await ensureKyselyMigrationTables(join(cfg.dataDir, "read-model"));
     if (prepared.created) console.log("[sidecar] prepared the read-model database for the authorization tables (the store was first opened without authentication)");
   }
@@ -300,6 +304,7 @@ async function main(): Promise<void> {
     origin,
     fetchImpl: engineFetch,
     template,
+    reweaveTemplate: loadReweaveTemplate(),
     gateway: { url: () => `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, key: gatewayKey },
     pieceVersion: VAULT_PACKAGE_VERSION,
     readSettings: () => readSettings(cfg.dataDir),
@@ -518,7 +523,21 @@ async function main(): Promise<void> {
       if (moved.length) console.log(`[sidecar] ${moved.length} pipeline(s) now reach their model through the gateway`);
       if (failed.length) console.warn(`[sidecar] ${failed.length} pipeline(s) could not be moved to the gateway and keep their previous settings: ${failed.join(", ")}`);
     })
-    .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`));
+    .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`))
+    // Pipelines made before the template's run policy (enforced since 6.2.3-dev.50) or its 15 s queue check get them.
+    .then(() => pipelines.followTemplate())
+    .then((r) => {
+      if (r.updated.length) console.log(`[sidecar] ${r.updated.length} pipeline(s) now publish the template's run policy and queue check`);
+      if (r.skipped.length) console.warn(`[sidecar] ${r.skipped.length} pipeline(s) have unpublished edits in Workflow Studio and were left as they are: ${r.skipped.join(", ")}`);
+    })
+    .catch((e: unknown) => console.warn(`[sidecar] could not bring the pipelines up to the template: ${e instanceof Error ? e.message : String(e)}`))
+    // Each vault's Reweave notes workflow: vaults set up before it existed get one; a newer template replaces it.
+    .then(() => pipelines.followReweave())
+    .then((r) => {
+      if (r.created.length) console.log(`[sidecar] ${r.created.length} vault(s) got their Reweave notes workflow`);
+      if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} vault(s) could not get their Reweave notes workflow; tried again at the next start: ${r.failed.join(", ")}`);
+    })
+    .catch((e: unknown) => console.warn(`[sidecar] could not set up the Reweave notes workflows: ${e instanceof Error ? e.message : String(e)}`));
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
 
   // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).

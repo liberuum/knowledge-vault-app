@@ -42,8 +42,10 @@ const OTEL_UNUSED = [
  * Whole packages the engine never imports (top level only — a nested copy is someone's real dependency).
  *  - typescript: only an optional peer of viem, ox, abitype and cosmiconfig; cosmiconfig loads it lazily for a
  *    .ts config file, on codegen paths reached only in dev mode.
- *  - onnxruntime-node: knowledge-note's embedder bundles its binding with a path relative to the bundle, so the
- *    native load always fails and it runs on onnxruntime-web (the log says "Model loaded (wasm onnxruntime)").
+ *  - onnxruntime-node: dropped for size (the native binding of every platform). Built with ph-cli 6.2.3-dev.51 or
+ *    later, knowledge-note imports @huggingface/transformers by name instead of bundling it, so the native load
+ *    reaches this package and fails on its absence; the embedder then runs on onnxruntime-web, as it always has
+ *    here (the log says "Model loaded (wasm onnxruntime)"). Keeping it per platform would make embedding native.
  *  - the dev toolchain: switchboard imports vite (and with it rolldown, esbuild, lightningcss) and vetra (and with
  *    it codegen, ts-morph, oxfmt) only when `dev` is set; the sidecar starts it with dev: false.
  */

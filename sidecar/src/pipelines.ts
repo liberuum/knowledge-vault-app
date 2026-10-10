@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
 import { SettingsError, type AppSettings } from "./settings.js";
-import { instantiatePipeline, type PipelineTemplate } from "./templates.js";
+import { instantiatePipeline, instantiateWorkflow, type PipelineTemplate, type WorkflowTemplate } from "./templates.js";
 import { classifyRunError, type RunProblem } from "./run-problems.js";
 
 /**
@@ -31,10 +31,14 @@ export type PipelineRecord = {
   templateDigest?: string;
   /** The connection's key is the model gateway's: the pipeline reaches its model through the engine's gateway. */
   gatewayKeyed?: true;
+  /** The vault's Reweave notes workflow, on this pipeline's connection, and the template digest it was made from. */
+  reweave?: { workflowId: string; digest: string };
 };
 export type PipelineStatus =
   | { state: "unconfigured" }
   | { state: "missing" }
+  /** The workflow runtime is not up yet: after an unclean exit the engine waits out the previous one's lease (up to a minute). */
+  | { state: "starting" }
   | { state: "stale"; reason: string; workflowId: string; connectionId: string }
   | {
       state: "ready";
@@ -68,6 +72,9 @@ export type PipelineManagerDeps = {
   fetchImpl: typeof fetch;
   /** The template the installed vault package ships; absent when the package predates it. */
   template: PipelineTemplate | undefined;
+  /** The Reweave notes workflow the installed vault package ships (reweave.json); absent when the package predates it. */
+  reweaveTemplate?: WorkflowTemplate;
+  instantiateReweave?: typeof instantiateWorkflow;
   pieceVersion: string;
   readSettings: () => AppSettings;
   readModelKey: () => string | undefined;
@@ -85,10 +92,49 @@ export type PipelineManagerDeps = {
 /** The bearer the piece uses lasts long enough to be forgotten about; re-creating the pipeline mints a new one. */
 /** What a local model server is sent as its "key": llama.cpp, Ollama and LM Studio ignore it. */
 export const LOCAL_PLACEHOLDER_KEY = "local";
-/** A short fingerprint of a pipeline template: what a recorded pipeline was made from. */
+/** The runtime's per-trigger poll interval, kept in the trigger's config (it never reaches the piece). */
+const POLL_KEY = "pollEverySeconds";
+type TriggerInput = { config?: Record<string, unknown> } & Record<string, unknown>;
+const withoutPollInterval = (op: { type: string; input: unknown }) => {
+  const input = op.input as TriggerInput;
+  if (op.type !== "SET_TRIGGER" || !input?.config || !(POLL_KEY in input.config)) return op;
+  const { [POLL_KEY]: _dropped, ...config } = input.config;
+  return { ...op, input: { ...input, config } };
+};
+
+/**
+ * A short fingerprint of a pipeline template: what a recorded pipeline was made from. The run policy
+ * (SET_POLICY) and the trigger's poll interval are left out: start-up keeps both current on every
+ * pipeline in place (followTemplate), so a change to them alone never asks the user to set the
+ * pipeline up again. A template with neither hashes exactly as before.
+ */
 export function templateDigest(template: PipelineTemplate | undefined): string | undefined {
-  return template ? createHash("sha256").update(JSON.stringify(template)).digest("hex").slice(0, 16) : undefined;
+  if (!template) return undefined;
+  const operations = template.workflow.operations.filter((o) => o.type !== "SET_POLICY").map(withoutPollInterval);
+  const hashed = { ...template, workflow: { ...template.workflow, operations } };
+  return createHash("sha256").update(JSON.stringify(hashed)).digest("hex").slice(0, 16);
 }
+
+/** The run policy the template publishes with (its SET_POLICY): undefined for a template from before 6.2.3-dev.50. */
+export function templatePolicy(template: PipelineTemplate | undefined): Record<string, unknown> | undefined {
+  const op = template?.workflow.operations.find((o) => o.type === "SET_POLICY");
+  return op && typeof op.input === "object" && op.input !== null ? (op.input as Record<string, unknown>) : undefined;
+}
+
+/** How often the template's trigger checks the queue (its last SET_TRIGGER's pollEverySeconds), if it says. */
+export function templatePollSeconds(template: PipelineTemplate | undefined): number | undefined {
+  const op = template?.workflow.operations.filter((o) => o.type === "SET_TRIGGER").at(-1);
+  const value = (op?.input as TriggerInput | undefined)?.config?.[POLL_KEY];
+  return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/** A short fingerprint of the Reweave notes template: a recorded workflow made from another is made again. */
+export function workflowDigest(template: WorkflowTemplate): string {
+  return createHash("sha256").update(JSON.stringify(template)).digest("hex").slice(0, 16);
+}
+
+/** The engine answered without its workflow runtime: it boots without one while another holder's lease runs out. */
+export const runtimeMissing = (error: unknown) => /Cannot query field "workflowRuntime"/.test(error instanceof Error ? error.message : String(error));
 
 const ENGINE_TOKEN_SECONDS = 90 * 86_400;
 /** A token this close to its end reads as stale, so the user updates before runs start failing. */
@@ -121,6 +167,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   const f = deps.fetchImpl;
   const now = () => (deps.now ?? (() => new Date().toISOString()))(); // read each time: tests move the clock
   const instantiate = deps.instantiate ?? instantiatePipeline;
+  const instantiateReweave = deps.instantiateReweave ?? instantiateWorkflow;
 
   async function createSecret(value: string, label: string): Promise<string> {
     const data = await gql<{ workflowRuntime: { createSecret: { ref: string } } }>(
@@ -128,12 +175,14 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       `mutation($v: String!, $l: String) { workflowRuntime { createSecret(value: $v, label: $l) { ref } } }`,
       { v: value, l: label },
       f,
-    );
+    ).catch((error: unknown) => {
+      throw runtimeMissing(error) ? new Error("Processing is still starting up. Try again in a minute.") : error;
+    });
     return data.workflowRuntime.createSecret.ref;
   }
   const deleteSecret = (ref: string) => gql(deps.origin, `mutation($ref: String!) { workflowRuntime { deleteSecret(ref: $ref) } }`, { ref }, f).catch(() => undefined);
   async function discard(record: PipelineRecord): Promise<void> {
-    for (const id of [record.workflowId, record.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
+    for (const id of [...(record.reweave ? [record.reweave.workflowId] : []), record.workflowId, record.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
     for (const ref of [record.secretRefs.token, record.secretRefs.llm]) await deleteSecret(ref);
   }
   const engineToken = () => mintEngineToken(deps.identity, deps.engineProtected === true, now);
@@ -156,6 +205,69 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       if (left < TOKEN_RENEW_BEFORE_MS) return "the engine token expires soon";
     }
     return undefined;
+  }
+
+  /** Change one vault's record as it is on disk now (another step may have written it meanwhile); a vault without one is left alone. */
+  function save(vaultId: string, change: (record: PipelineRecord) => PipelineRecord): void {
+    const records = readPipelines(deps.dataDir);
+    const current = records[vaultId];
+    if (!current) return;
+    records[vaultId] = change(current);
+    writePipelines(deps.dataDir, records);
+  }
+
+  /** A workflow's status, or null when it no longer exists (deleted in Studio). */
+  async function workflowStatus(workflowId: string): Promise<string | null> {
+    const data = await gql<{ document: { document: { state: { global: { status?: string } } } | null } | null }>(
+      deps.origin,
+      `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+      { id: workflowId },
+      f,
+    ).catch(() => null);
+    const doc = data?.document?.document;
+    return doc ? (doc.state.global.status ?? "UNKNOWN") : null;
+  }
+
+  /**
+   * The vault's Reweave notes workflow, on its pipeline's connection: made when the record has none (a
+   * vault set up before it existed, or an earlier try failed) and made again from a newer template —
+   * switched off again when it had been switched off. One deleted in Studio stays deleted until the
+   * pipeline is set up again. Never throws: the pipeline works without it.
+   */
+  async function ensureReweave(vaultId: string): Promise<"created" | "current" | "skipped" | "failed"> {
+    const template = deps.reweaveTemplate;
+    const record = readPipelines(deps.dataDir)[vaultId];
+    if (!template || !record || record.disabled) return "skipped";
+    const digest = workflowDigest(template);
+    try {
+      let wasDisabled = false;
+      if (record.reweave) {
+        if (record.reweave.digest === digest) return "current";
+        const old = record.reweave.workflowId;
+        const status = await workflowStatus(old);
+        if (status === null) {
+          save(vaultId, (r) => ({ ...r, reweave: { workflowId: old, digest } }));
+          return "skipped";
+        }
+        wasDisabled = status === "DISABLED";
+        await deleteDocument(deps.origin, old, f).catch(() => undefined);
+        save(vaultId, ({ reweave: _gone, ...r }) => r);
+      }
+      const { id: workflowsDriveId } = await deps.workflowsDrive();
+      const name = `${await deps.vaultName(vaultId)} — Reweave notes`;
+      const { workflowId } = await instantiateReweave({ origin: deps.origin, template, name, driveId: vaultId, connectionId: record.connectionId, workflowsDriveId, pieceVersion: deps.pieceVersion, now, fetchImpl: f });
+      if (wasDisabled) await execute(deps.origin, workflowId, toActions([{ type: "SET_WORKFLOW_STATUS", input: { status: "DISABLED" } }], now), f).catch(() => undefined);
+      if (readPipelines(deps.dataDir)[vaultId]?.connectionId !== record.connectionId) {
+        // The pipeline was set up again, or removed, meanwhile: this workflow belongs to nothing.
+        await deleteDocument(deps.origin, workflowId, f).catch(() => undefined);
+        return "skipped";
+      }
+      save(vaultId, (r) => ({ ...r, reweave: { workflowId, digest } }));
+      return "created";
+    } catch (error) {
+      console.warn(`[pipelines] could not set up the Reweave notes workflow of vault ${vaultId}: ${error instanceof Error ? error.message : String(error)}`);
+      return "failed";
+    }
   }
 
   /** Create (or re-create) this vault's pipeline. Nothing happens without a model key and a model. */
@@ -207,6 +319,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             gatewayKeyed: true,
           },
         });
+        await ensureReweave(vaultId);
         return { state: "ready", workflowId, connectionId };
       } catch (error) {
         // A failed instantiatePipeline removed its own documents. Once it has returned they are ours: the
@@ -293,6 +406,82 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     },
 
     /**
+     * At start: every pipeline publishes the template's run policy and the trigger's poll interval.
+     * Since 6.2.3-dev.50 the runtime enforces the policy, and a pipeline made before the template carried
+     * one runs with the workflow model's default (QUEUE, a one-hour deadline, PARK on the first failure);
+     * one made before the 15 s interval checks the queue every 60 s. Each is patched in place —
+     * SET_POLICY and/or SET_TRIGGER, then PUBLISH_WORKFLOW, since the runtime reads the published
+     * workflow; publishing also lifts a park — keeping its runs and history. One with unpublished edits
+     * from Workflow Studio is left alone (publishing would publish them too) and reported in `skipped`.
+     */
+    async followTemplate(): Promise<{ updated: string[]; skipped: string[]; failed: string[] }> {
+      const out = { updated: [] as string[], skipped: [] as string[], failed: [] as string[] };
+      const want = templatePolicy(deps.template);
+      const wantPoll = templatePollSeconds(deps.template);
+      if (!want && wantPoll === undefined) return out;
+      type Binding = { id: string; pieceName: string; pieceVersion: string; triggerName: string; connectionId?: string | null; reactorConnectionId?: string | null; config?: Record<string, unknown>; propertySettings?: unknown[] | null };
+      type Published = { version?: number; policy?: Record<string, unknown>; trigger?: Binding | null };
+      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
+        if (record.disabled) continue; // set up again from the template when it is enabled
+        try {
+          const data = await gql<{ document: { document: { state: { global: { version?: number; trigger?: Binding | null; published?: Published | null } } } } }>(
+            deps.origin,
+            `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+            { id: record.workflowId },
+            f,
+          ).catch(() => null);
+          if (!data) continue; // the workflow was deleted in Studio
+          const global = data.document.document.state.global;
+          const published = global.published?.policy ?? {};
+          const policyStale = want !== undefined && !Object.entries(want).every(([k, v]) => published[k] === v);
+          const trigger = global.trigger;
+          const pollStale = wantPoll !== undefined && !!trigger && global.published?.trigger?.config?.[POLL_KEY] !== wantPoll;
+          if (!policyStale && !pollStale) continue;
+          if (global.published && global.version !== global.published.version) {
+            out.skipped.push(vaultId);
+            continue;
+          }
+          const ops: Array<{ type: string; input: unknown }> = [];
+          if (policyStale) ops.push({ type: "SET_POLICY", input: want });
+          if (pollStale && trigger) {
+            const { id, pieceName, pieceVersion, triggerName, connectionId, reactorConnectionId, config, propertySettings } = trigger;
+            ops.push({
+              type: "SET_TRIGGER",
+              input: {
+                id,
+                pieceName,
+                pieceVersion,
+                triggerName,
+                ...(connectionId ? { connectionId } : {}),
+                ...(reactorConnectionId ? { reactorConnectionId } : {}),
+                config: { ...(config ?? {}), [POLL_KEY]: wantPoll },
+                ...(propertySettings ? { propertySettings } : {}),
+              },
+            });
+          }
+          ops.push({ type: "PUBLISH_WORKFLOW", input: { publishedAt: now() } });
+          await execute(deps.origin, record.workflowId, toActions(ops, now), f);
+          out.updated.push(vaultId);
+        } catch (error) {
+          console.warn(`[pipelines] could not bring vault ${vaultId}'s pipeline up to the template: ${error instanceof Error ? error.message : String(error)}`);
+          out.failed.push(vaultId);
+        }
+      }
+      return out;
+    },
+
+    /** At start: every vault's pipeline gets its Reweave notes workflow, or one from a newer template (ensureReweave). */
+    async followReweave(): Promise<{ created: string[]; failed: string[] }> {
+      const out = { created: [] as string[], failed: [] as string[] };
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) {
+        const result = await ensureReweave(vaultId);
+        if (result === "created") out.created.push(vaultId);
+        if (result === "failed") out.failed.push(vaultId);
+      }
+      return out;
+    },
+
+    /**
      * Settings › Models changed: every pipeline follows. One whose steps defer to the connection gets
      * its connection's config rewritten in place (runs and history kept); an older one, with the model
      * baked into its steps, is set up again. Disabled pipelines stay disabled.
@@ -325,7 +514,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     async disableAll(reason: string): Promise<void> {
       const records = readPipelines(deps.dataDir);
       for (const [vaultId, record] of Object.entries(records)) {
-        await execute(deps.origin, record.workflowId, toActions([{ type: "SET_WORKFLOW_STATUS", input: { status: "DISABLED" } }], now), f).catch(() => undefined);
+        for (const id of [record.workflowId, ...(record.reweave ? [record.reweave.workflowId] : [])]) {
+          await execute(deps.origin, id, toActions([{ type: "SET_WORKFLOW_STATUS", input: { status: "DISABLED" } }], now), f).catch(() => undefined);
+        }
         await deleteSecret(record.secretRefs.llm);
         records[vaultId] = { ...record, disabled: reason };
       }
@@ -343,17 +534,23 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       if (!record) return { state: "missing" };
       const stale = staleReason(record, settings);
       if (stale) return { state: "stale", reason: stale, workflowId: record.workflowId, connectionId: record.connectionId };
-      const data = await gql<{
+      let data: {
         workflowRuntime: {
           triggerStates: Array<{ workflowId: string; status: string; lastPollAt: string | null; lastError: string | null }>;
           runsPage: { items: Array<{ id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null }> };
         };
-      }>(
-        deps.origin,
-        `query($w: String!) { workflowRuntime { triggerStates { workflowId status lastPollAt lastError } runsPage(workflowId: $w, paging: { limit: 1 }) { items { id status startedAt endedAt error } } } }`,
-        { w: record.workflowId },
-        f,
-      );
+      };
+      try {
+        data = await gql(
+          deps.origin,
+          `query($w: String!) { workflowRuntime { triggerStates { workflowId status lastPollAt lastError } runsPage(workflowId: $w, paging: { limit: 1 }) { items { id status startedAt endedAt error } } } }`,
+          { w: record.workflowId },
+          f,
+        );
+      } catch (error) {
+        if (runtimeMissing(error)) return { state: "starting" };
+        throw error;
+      }
       const trigger = data.workflowRuntime.triggerStates.find((t) => t.workflowId === record.workflowId);
       const run = data.workflowRuntime.runsPage.items[0];
       return {

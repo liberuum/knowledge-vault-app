@@ -21,9 +21,12 @@ const INSTALL_IN_S = 3;
 
 type Phase = "hidden" | "card" | "pill" | "downloading" | "installing" | "done" | "ready" | "failed";
 
-/** The version of the app that is running — what an update replaces. In development there is none, so every release is newer. */
+/**
+ * The version of the app that is running — what an update replaces. The shell's own version, or the
+ * engine's; in development both are this checkout's (the dev loop passes package.json's), so a dev
+ * build is offered only a release newer than itself.
+ */
 async function runningVersion(info: SidecarInfo): Promise<string> {
-  if (import.meta.env.DEV) return "0.0.0-dev";
   if (isTauri()) {
     try {
       const { getVersion } = await import("@tauri-apps/api/app");

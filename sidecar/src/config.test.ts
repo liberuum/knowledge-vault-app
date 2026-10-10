@@ -25,7 +25,9 @@ describe("readSidecarConfig", () => {
       adminAddress: undefined,
       appVersion: "0.1.0",
       logLevel: "info",
+      registryUrl: "", // off unless asked for (config.ts)
     });
+    expect(readSidecarConfig({ ...base, KV_REGISTRY_URL: "https://registry.vetra.io" }).registryUrl).toBe("https://registry.vetra.io");
   });
   it("refuses to start without a data dir or token", () => {
     expect(() => readSidecarConfig({ ...base, KV_DATA_DIR: "" })).toThrow(/KV_DATA_DIR/);

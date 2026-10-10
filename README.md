@@ -143,7 +143,10 @@ settings and your sign-in. The app does not collect usage data and has no analyt
 - the text sent to the **AI model provider** you configured (none, if you use a model on this computer), or to
   ChatGPT when you use your ChatGPT plan;
 - your requests to a **shared team vault**, if you connect one;
-- signing in with **[Renown](https://renown.id)**, the identity used for shared vaults.
+- signing in with **[Renown](https://renown.id)**, the identity used for shared vaults;
+- browsing connectors in **Workflow Studio**: the block picker downloads the public catalogue of
+  [Activepieces](https://www.activepieces.com), and a connector you add is downloaded from there. The request carries
+  nothing about you or your vaults.
 
 The app also asks GitHub when it starts, and every 90 minutes while it is open, whether a new version is out. That
 request carries nothing about you or your vaults.

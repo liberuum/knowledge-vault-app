@@ -25,6 +25,9 @@ describe("switchboardOptions", () => {
     expect(o.strictPort).toBe(true);
     expect(o.mcp).toBe(true);
     expect(o.workflows).toEqual({ enabled: true });
+    // Workflow Studio's Registry tab: off by default (config.ts), on when KV_REGISTRY_URL names a registry.
+    expect("registryUrl" in o).toBe(false);
+    expect(switchboardOptions({ ...cfg, registryUrl: "https://registry.vetra.io" }, "/c.json", PACKAGE_DIRS).registryUrl).toBe("https://registry.vetra.io");
   });
   it("keeps the engine's identity keypair under the data dir's secrets, never beside the code", () => {
     const o = switchboardOptions(cfg, "/app/sidecar/powerhouse.config.json", PACKAGE_DIRS, "https://www.renown.id");

@@ -15,6 +15,9 @@ export function switchboardOptions(cfg: SidecarConfig, configFile: string, packa
     // Package directories, not names: the loader resolves names from cwd, and the engine runs with cwd = the data dir.
     packages: [...packages],
     disableLocalPackages: true,
+    // Only when KV_REGISTRY_URL names one (config.ts says why it is off): Workflow Studio's Registry tab
+    // lists its pieces and installs one when picked (into <data dir>/.ph, the engine's cwd).
+    ...(cfg.registryUrl ? { registryUrl: cfg.registryUrl } : {}),
     remoteDrives: [] as string[],
     fatalErrorShutdown: true,
     // The engine's signing identity (spec §4.4). Open mode: an app keypair in the data dir's

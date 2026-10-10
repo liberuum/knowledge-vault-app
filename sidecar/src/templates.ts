@@ -34,7 +34,7 @@ export type PipelineTemplate = {
 };
 
 /** Substitute inside the serialised input (values JSON-escaped), then refuse any `{{UPPER_CASE}}` that survived. */
-export function fillPlaceholders(input: unknown, values: PlaceholderValues): unknown {
+export function fillPlaceholders(input: unknown, values: Partial<PlaceholderValues>): unknown {
   let text = JSON.stringify(input);
   for (const [placeholder, value] of Object.entries(values)) text = text.split(placeholder).join(JSON.stringify(value).slice(1, -1));
   const left = /\{\{[A-Z_]+\}\}/.exec(text);
@@ -99,6 +99,57 @@ export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ w
     return { workflowId, connectionId };
   } catch (error) {
     for (const id of created) await deleteDocument(opts.origin, id, f).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * A workflow that runs on a connection made for another: the vault's *Reweave notes* workflow
+ * (reweave.json in the vault package) on the vault pipeline's connection, so both share one model and key.
+ */
+export type WorkflowTemplate = {
+  version: 1;
+  exportedAt: string;
+  placeholders: string[];
+  workflow: { documentType: "powerhouse/workflow"; operations: TemplateOp[] };
+};
+
+export type InstantiateWorkflowOptions = {
+  origin: string;
+  template: WorkflowTemplate;
+  /** The workflow's name, in Studio and in the Workflows drive. */
+  name: string;
+  driveId: string;
+  connectionId: string;
+  workflowsDriveId: string;
+  pieceVersion: string;
+  now?: () => string;
+  fetchImpl?: typeof fetch;
+};
+
+/**
+ * Create one workflow in the Workflows drive and replay its operations on an existing connection. Its steps
+ * leave the model empty, so the connection's applies. A placeholder this cannot fill (a secret, a base URL)
+ * aborts before anything is created; a rejected operation deletes the workflow again.
+ */
+export async function instantiateWorkflow(opts: InstantiateWorkflowOptions): Promise<{ workflowId: string }> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => new Date().toISOString());
+  const values: Partial<PlaceholderValues> = {
+    "{{DRIVE_ID}}": opts.driveId,
+    "{{CONNECTION_ID}}": opts.connectionId,
+    "{{LLM_MODEL}}": "",
+    "{{PIECE_VERSION}}": opts.pieceVersion,
+    "{{WORKFLOW_NAME}}": opts.name,
+    "{{NOW}}": now(),
+  };
+  const actions = toActions(opts.template.workflow.operations.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, values) })), now);
+  const workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, opts.name, opts.workflowsDriveId, f);
+  try {
+    await execute(opts.origin, workflowId, actions, f);
+    return { workflowId };
+  } catch (error) {
+    await deleteDocument(opts.origin, workflowId, f).catch(() => undefined);
     throw error;
   }
 }
