@@ -85,6 +85,8 @@ Get the latest version from the **[Releases page](https://github.com/liberuum/kn
 | **Windows** | `Knowledge-Vault_<version>_Windows_x64-setup.exe` | Windows 10 or 11 (64-bit). The installer is not signed yet: if SmartScreen warns you, choose **More info › Run anyway**. The first start after installing or updating takes a little longer while the app unpacks its engine. |
 
 The app brings everything it needs. You do not need to install anything else.
+From 0.2.2 on it also tells you about new releases and installs them for you: a notice drops from the top of the
+window, and **Update** does the rest.
 
 #### Opening it on macOS
 
