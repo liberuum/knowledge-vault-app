@@ -7,7 +7,7 @@ import { createVault, deleteVault, fetchPipeline, fetchSettings, fetchStatus, fe
 import { GettingStarted, type VaultView } from "../landing/GettingStarted.js";
 import { remember } from "../landing/getting-started.js";
 import { modelReady as isModelReady } from "../onboarding/onboarding-state.js";
-import { ConnectRemoteDialog } from "../landing/ConnectRemoteDialog.js";
+import { AddVaultDialog, type AddMode } from "../landing/AddVaultDialog.js";
 import { DeleteVaultDialog } from "../landing/DeleteVaultDialog.js";
 import { NewVaultForm } from "../landing/NewVaultForm.js";
 import { readRecents, rememberOpened, sortByRecency, type Recents } from "../landing/recents.js";
@@ -121,8 +121,8 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
   const [layouts, setLayouts] = useState<Record<string, Map<string, XY> | null>>({});
   const [fulls, setFulls] = useState<Record<string, FullGraph | null>>({});
   const [version, setVersion] = useState<string | undefined>();
-  const [showForm, setShowForm] = useState(newVault);
-  const [connecting, setConnecting] = useState(false);
+  /** The Add a vault dialog, open on one of its two choices (Ctrl+N arrives with Create). */
+  const [adding, setAdding] = useState<AddMode | null>(newVault ? "create" : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<VaultSummary | null>(null);
@@ -134,7 +134,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
   const tokenProvider = useMemo(() => (info && api.tokenProvider ? api.tokenProvider(info) : undefined), [api, info]);
   const localFetch = useMemo(() => (localBearer ? authorizedFetch(localBearer) : undefined), [localBearer]);
 
-  useEffect(() => setShowForm(newVault), [newVault]);
+  useEffect(() => setAdding(newVault ? "create" : null), [newVault]);
   useEffect(() => {
     if (!info || engine.state !== "ready") return;
     if (!api.fetchModels) return setModelReady(false);
@@ -148,7 +148,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
     };
   }, [api, info, engine.state]);
   const closeForm = () => {
-    setShowForm(false);
+    setAdding(null);
     if (newVault) onNewVaultDone?.();
   };
 
@@ -379,11 +379,11 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           <h2 id="vaults-heading">Vaults</h2>
           {ready && !firstRun && vaults !== null && (
             <div className="kv-actions">
-              <button type="button" className="kv-button" onClick={() => setShowForm(true)} disabled={showForm} title="New vault (Ctrl+N)">
-                New vault
-              </button>
-              <button type="button" className="kv-button kv-button-quiet" onClick={() => setConnecting(true)} title="A vault on a server: open ones need no sign-in">
-                Connect remote vault
+              <button type="button" className="kv-button kv-add-vault" onClick={() => setAdding("create")} title="Create a vault, or connect one on a server (Ctrl+N)">
+                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Add vault
               </button>
             </div>
           )}
@@ -393,13 +393,13 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
         ) : (
           !ready && <p className="kv-quiet">Your vaults appear here once the engine is ready.</p>
         )}
-        {error && !showForm && !firstRun && <p role="alert" className="kv-error">{plainError(error)}</p>}
+        {error && !adding && !firstRun && <p role="alert" className="kv-error">{plainError(error)}</p>}
         {firstRun && (
           <>
             <NewVaultForm firstRun busy={busy} error={error} onCreate={(n) => void create(n)} />
             <p className="kv-hint">
               Already have a vault on a server?{" "}
-              <button type="button" className="kv-link" onClick={() => setConnecting(true)}>Connect a remote vault</button>.
+              <button type="button" className="kv-link" onClick={() => setAdding("connect")}>Connect a remote vault</button>.
               {!signedIn && onIdentity && (
                 <>
                   {" If its server asks who you are, "}
@@ -409,7 +409,6 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
             </p>
           </>
         )}
-        {ready && !firstRun && showForm && <NewVaultForm firstRun={false} busy={busy} error={error} onCreate={(n) => void create(n)} onCancel={closeForm} />}
         {ready && info && vaults !== null && remotes !== null && modelReady !== null && (
           // The steps that make the app useful (design §5), with the setup guide one click away.
           <GettingStarted
@@ -418,8 +417,8 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
             modelReady={modelReady}
             storage={store}
             onModels={onModels}
-            onNewVault={() => setShowForm(true)}
-            vaultFormOpen={firstRun || showForm}
+            onNewVault={() => setAdding("create")}
+            vaultFormOpen={firstRun}
             onOpenView={onOpenView ? openView : undefined}
             onWorkflows={onWorkflows}
             onGuide={onGuide}
@@ -514,11 +513,17 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           </div>
         </Dialog>
       )}
-      {connecting && info && (
-        <ConnectRemoteDialog
-          api={{ discover: (u) => api.discoverRemote(info, u), add: (u, d) => api.addRemote(info, u, d) }}
+      {adding && info && (
+        <AddVaultDialog
+          initial={adding}
+          onCreate={(n) => void create(n)}
+          creating={busy}
+          createError={error}
+          connect={{ discover: (u) => api.discoverRemote(info, u), add: (u, d) => api.addRemote(info, u, d) }}
           onAdded={(added) => setRemotes((prev) => [...(prev ?? []).filter((x) => !added.some((v) => v.id === x.id)), ...added])}
-          onClose={() => setConnecting(false)}
+          signedIn={signedIn}
+          onSignIn={onIdentity}
+          onClose={closeForm}
         />
       )}
     </div>

@@ -81,15 +81,43 @@ describe("Landing", () => {
     expect(await screen.findByText("0.1.0")).toBeTruthy();
   });
 
-  it("'New vault' reveals the inline form; Escape puts it away", async () => {
+  it("'Add vault' opens one dialog on Create — a name, an idea, Enter — with Connect as the other choice", async () => {
+    const onOpen = vi.fn();
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 0 }]) });
-    render(<Landing engine={{ state: "ready" }} info={info} api={a} storage={memoryStorage()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "New vault" }));
-    const input = screen.getByLabelText("Name");
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.queryByLabelText("Name")).toBeNull();
-    // Signed out, the button still works: an open server needs no sign-in.
-    expect(screen.getByRole("button", { name: "Connect remote vault" }).hasAttribute("disabled")).toBe(false);
+    render(<Landing engine={{ state: "ready" }} info={info} api={a} onOpen={onOpen} storage={memoryStorage()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add vault" }));
+    const dialog = screen.getByRole("dialog", { name: "Add a vault" });
+    const create = within(dialog).getByRole("tab", { name: /Create a new vault/ });
+    expect(create.getAttribute("aria-selected")).toBe("true");
+    // An idea fills the name; the field stays editable.
+    fireEvent.click(within(within(dialog).getByRole("group", { name: "Name ideas" })).getByRole("button", { name: "Research" }));
+    const name = within(dialog).getByLabelText("Name") as HTMLInputElement;
+    expect(name.value).toBe("Research");
+    // The other choice: a server's address; and back.
+    fireEvent.click(within(dialog).getByRole("tab", { name: /Connect one on a server/ }));
+    expect(within(dialog).getByLabelText("Server address")).toBeTruthy();
+    expect(within(dialog).queryByLabelText("Name")).toBeNull();
+    fireEvent.keyDown(within(dialog).getByRole("tab", { name: /Connect one on a server/ }), { key: "ArrowLeft" });
+    const again = within(dialog).getByLabelText("Name") as HTMLInputElement;
+    fireEvent.change(again, { target: { value: "Reading notes" } });
+    fireEvent.submit(again.closest("form")!);
+    await waitFor(() => expect(a.createVault).toHaveBeenCalledWith(info, "Reading notes"));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ name: "Reading notes" })));
+  });
+
+  it("closes the Add a vault dialog with Cancel, and opens it on Connect from the first run's hint", async () => {
+    const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 0 }]) });
+    const { unmount } = render(<Landing engine={{ state: "ready" }} info={info} api={a} storage={memoryStorage()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add vault" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    unmount();
+    render(<Landing engine={{ state: "ready" }} info={info} api={api()} storage={memoryStorage()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Connect a remote vault" }));
+    const dialog = screen.getByRole("dialog", { name: "Add a vault" });
+    expect(within(dialog).getByRole("tab", { name: /Connect one on a server/ }).getAttribute("aria-selected")).toBe("true");
+    // Signed out: said before it is tried, and an open server still needs nothing.
+    expect(within(dialog).getByText(/Some servers ask who you are/)).toBeTruthy();
   });
 
   it("shows the engine starting, and an exit with its code, in the same frame without touching the engine", () => {
@@ -160,17 +188,16 @@ describe("Landing", () => {
     const a = api({ fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }]) });
     const signedOut = { authenticated: false, appDid: "did:key:z", renownUrl: "https://www.renown.id", pending: null };
     render(<Landing engine={{ state: "ready" }} info={info} identity={signedOut} api={a} storage={memoryStorage()} />);
-    // An open server needs no sign-in, so the button does not wait for one.
-    const connect = (await screen.findByRole("button", { name: "Connect remote vault" }, { timeout: 5000 })) as HTMLButtonElement;
-    expect(connect.disabled).toBe(false);
-    fireEvent.click(connect);
-    fireEvent.change(screen.getByLabelText("Vault server"), { target: { value: "switchboard.knowledge-vault.vetra.io" } });
+    // An open server needs no sign-in, so nothing waits for one.
+    fireEvent.click(await screen.findByRole("button", { name: "Add vault" }, { timeout: 5000 }));
+    fireEvent.click(screen.getByRole("tab", { name: /Connect one on a server/ }));
+    fireEvent.change(screen.getByLabelText("Server address"), { target: { value: "switchboard.knowledge-vault.vetra.io" } });
     fireEvent.click(screen.getByRole("button", { name: "Find vaults" }));
     // The server's only vault is preselected.
     const option = (await screen.findByRole("checkbox", { name: /powerhouse-knowledge/ }, { timeout: 5000 })) as HTMLInputElement;
     expect(option.checked).toBe(true);
     expect(a.discoverRemote).toHaveBeenCalledWith(info, "switchboard.knowledge-vault.vetra.io");
-    fireEvent.click(screen.getByRole("button", { name: "Add vault" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect vault" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Open powerhouse-knowledge" })).toBeTruthy(), { timeout: 5000 });
     expect(a.addRemote).toHaveBeenCalledWith(info, "https://switchboard.knowledge-vault.vetra.io", "c589");
     expect(screen.getByText("On switchboard.knowledge-vault.vetra.io")).toBeTruthy();

@@ -13,12 +13,12 @@ export async function skipSetupGuide(request: APIRequestContext): Promise<void> 
 }
 
 /**
- * A vault made on the landing: the first-run form, or "New vault" once vaults exist. The heading shows before the
- * vault list has loaded, so wait for one of the two before choosing.
+ * A vault made on the landing: the first-run form, or "Add vault" (its dialog opens on Create) once vaults exist.
+ * The heading shows before the vault list has loaded, so wait for one of the two before choosing.
  */
 export async function createVaultOnLanding(page: Page, name: string, submit: "button" | "enter" = "button"): Promise<void> {
   const field = page.getByRole("textbox", { name: "Name", exact: true });
-  const newVault = page.getByRole("button", { name: "New vault" });
+  const newVault = page.getByRole("button", { name: "Add vault" });
   await expect(field.or(newVault).first()).toBeVisible({ timeout: 60_000 });
   if (!(await field.isVisible())) await newVault.click();
   await field.fill(name);

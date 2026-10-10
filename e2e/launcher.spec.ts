@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { createVaultOnLanding, skipSetupGuide } from "./fixtures/landing.js";
 
-// Self-contained: creates its own vault (first-run form, or "New vault" when vaults already exist).
+// Self-contained: creates its own vault (first-run form, or "Add vault" when vaults already exist).
 test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sections, Workflow Studio reachable, typed delete", async ({ page, request }) => {
   await skipSetupGuide(request);
   await page.goto("/");

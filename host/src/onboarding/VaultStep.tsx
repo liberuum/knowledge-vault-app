@@ -5,11 +5,9 @@ import { fetchVaults, type VaultSummary } from "../vaults.js";
 import { createGuideVault } from "./api.js";
 import { rememberGuide } from "./progress.js";
 import { plainError } from "../problem.js";
+import { NameIdeas } from "../landing/NameIdeas.js";
 
 type Props = { info: SidecarInfo; vaultId?: string; onBack: () => void; onReady: (vaultId: string) => void };
-
-/** Names to start from (Decision: a blank name is a small blank page); one click fills the field, which stays editable. */
-export const NAME_IDEAS = ["Research", "Work", "Reading notes", "Learning"] as const;
 
 /**
  * The first vault: a name, already filled in. Coming back shows the vault the guide made; opened with vaults
@@ -109,13 +107,8 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
           <form onSubmit={(e) => void create(e)}>
             <label htmlFor="onb-vault-name" className="kv-onb-label">{vaults.length > 0 ? "Or create a new vault" : "Name"}</label>
             <input id="onb-vault-name" className="kv-onb-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} disabled={busy} autoFocus={vaults.length === 0} />
-            <div className="kv-onb-ideas" role="group" aria-label="Name ideas">
-              <span className="kv-onb-ideas-label">Ideas:</span>
-              {NAME_IDEAS.map((idea) => (
-                <button key={idea} type="button" className="kv-onb-chip" aria-pressed={name === idea} onClick={() => setName(idea)} disabled={busy}>
-                  {idea}
-                </button>
-              ))}
+            <div className="kv-onb-ideas">
+              <NameIdeas value={name} onPick={setName} disabled={busy} />
             </div>
             {!name.trim() && <p className="kv-hint">A vault needs a name, for example the subject it is about.</p>}
             {error && <p role="alert" className="kv-error">{plainError(error)}</p>}

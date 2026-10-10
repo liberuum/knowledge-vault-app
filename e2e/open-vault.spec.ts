@@ -14,7 +14,7 @@ test("create a vault on the landing and open the Knowledge Vault app against the
   expect(await page.evaluate(() => document.documentElement.dataset.baiTheme)).toBe("dark");
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe("rgb(30, 30, 46)");
   await page.screenshot({ path: "test-results/landing-dark.png" });
-  // First run shows the form; with vaults already present (another spec ran first) "New vault" opens it.
+  // First run shows the form; with vaults already present (another spec ran first) "Add vault" opens it.
   // Keyboard only: type the name, Enter creates and opens (spec §5.7 — nothing else is required).
   await createVaultOnLanding(page, "E2E vault", "enter");
 

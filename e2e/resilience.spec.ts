@@ -14,8 +14,8 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   // A vault to work in.
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
-  // Earlier specs leave vaults behind: wait for the list (the "New vault" button) or the first-run form, whichever comes.
-  const newVault = page.getByRole("button", { name: "New vault" });
+  // Earlier specs leave vaults behind: wait for the list (the "Add vault" button) or the first-run form, whichever comes.
+  const newVault = page.getByRole("button", { name: "Add vault" });
   const name = page.getByRole("textbox", { name: "Name", exact: true });
   await expect(newVault.or(name).first()).toBeVisible({ timeout: 60_000 });
   if (await newVault.isVisible()) await newVault.click();

@@ -175,13 +175,8 @@
 .kv-onb-vault-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv-onb-card .kv-onb-vault-use { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--bai-text-tertiary); font-size: 14px; font-weight: 500; transition: color 140ms ease, transform 140ms ease; }
 .kv-onb-vault:hover .kv-onb-vault-use, .kv-onb-vault:focus-visible .kv-onb-vault-use { color: var(--bai-accent); transform: translateX(2px); }
-/* names to start from */
-.kv-onb-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
-.kv-onb-ideas-label { margin-right: 2px; color: var(--bai-text-tertiary); font-size: 13px; }
-.kv-onb-chip { padding: 4px 11px; border: 1px solid var(--bai-border); border-radius: 999px; background: none; color: var(--bai-text-secondary); font: inherit; font-size: 13px; cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background 120ms ease; }
-.kv-onb-chip:hover:not(:disabled) { border-color: color-mix(in srgb, var(--bai-accent) 55%, var(--bai-border)); color: var(--bai-text); }
-.kv-onb-chip[aria-pressed="true"] { border-color: var(--bai-accent); color: var(--bai-text); background: color-mix(in srgb, var(--bai-accent) 14%, transparent); }
-.kv-onb-chip:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 1px; }
+/* the name ideas (landing/NameIdeas.tsx) under the field */
+.kv-onb-ideas { margin-top: 10px; }
 
 /* the overview's cards: the view's mark, then its name and what it does */
 .kv-onb-cards .kv-onb-card { grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; row-gap: 3px; }
@@ -189,4 +184,4 @@
 .kv-onb-card .kv-onb-card-icon { grid-row: 1 / span 2; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 13%, transparent); }
 .kv-onb-card:disabled .kv-onb-card-icon { color: var(--bai-text-tertiary); background: color-mix(in srgb, var(--bai-text) 8%, transparent); }
 
-@media (prefers-reduced-motion: reduce) { .kv-onb-vault-use, .kv-onb-chip { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .kv-onb-vault-use { transition: none; } }

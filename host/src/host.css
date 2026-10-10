@@ -53,6 +53,8 @@ body, #root { margin: 0; min-height: 100vh; }
 .kv-create { max-width: 640px; margin: 0 0 28px; }
 .kv-create-first { margin-top: 8px; }
 .kv-create-heading { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+.kv-create .kv-name-ideas { margin-top: 12px; }
+.kv-add-vault { display: inline-flex; align-items: center; gap: 7px; }
 .kv-create-first .kv-create-heading { font-size: 24px; letter-spacing: -0.015em; }
 .kv-new-vault { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .kv-new-vault label { font-weight: 500; }

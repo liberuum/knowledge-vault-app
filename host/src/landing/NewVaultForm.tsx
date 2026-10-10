@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { NameIdeas } from "./NameIdeas.js";
 import { validateVaultName } from "./vault-name.js";
 import { plainError } from "../problem.js";
 
@@ -46,6 +47,7 @@ export function NewVaultForm({ firstRun, busy, error, onCreate, onCancel }: Prop
           </button>
         )}
       </form>
+      <NameIdeas value={name} onPick={setName} disabled={busy} />
       {reason && <p id="vault-name-reason" className="kv-reason">{reason}</p>}
       {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
     </section>

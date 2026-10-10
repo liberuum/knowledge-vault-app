@@ -1,0 +1,8 @@
+/* NameIdeas.tsx: names to start from, as small chips; the chosen one lit. */
+.kv-name-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kv-name-ideas-label { margin-right: 2px; color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-name-idea { padding: 4px 11px; border: 1px solid var(--bai-border); border-radius: 999px; background: none; color: var(--bai-text-secondary); font: inherit; font-size: 13px; line-height: 1.4; cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background 120ms ease; }
+.kv-name-idea:hover:not(:disabled) { border-color: color-mix(in srgb, var(--bai-accent) 55%, var(--bai-border)); color: var(--bai-text); }
+.kv-name-idea[aria-pressed="true"] { border-color: var(--bai-accent); color: var(--bai-text); background: color-mix(in srgb, var(--bai-accent) 14%, transparent); }
+.kv-name-idea:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .kv-name-idea { transition: none; } }
