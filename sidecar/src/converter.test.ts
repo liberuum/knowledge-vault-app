@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -30,6 +30,7 @@ function harness(over: Partial<ConverterDeps> = {}) {
   const children: FakeChild[] = [];
   const spawns: { cmd: string; args: string[]; env: Record<string, string> }[] = [];
   const urls: (string | null)[] = [];
+  const renices: [number, number][] = [];
   let clock = 1_000_000;
   const deps: ConverterDeps = {
     dataDir,
@@ -51,6 +52,10 @@ function harness(over: Partial<ConverterDeps> = {}) {
     pickPort: async () => 5999,
     platformName: "linux",
     toolsMissing: () => [],
+    // Never the real machine's: no `nice` unless a test says so, and a renice only recorded (pid 4242 is fake).
+    cores: 16,
+    niceExists: () => false,
+    setPriority: (pid, priority) => renices.push([pid, priority]),
     readyIntervalMs: 2,
     readyTimeoutMs: 500,
     restartWindowMs: 30_000,
@@ -60,11 +65,55 @@ function harness(over: Partial<ConverterDeps> = {}) {
     ...over,
   };
   const manager = createConverterManager(deps);
-  return { manager, children, spawns, urls, dataDir, advance: (ms: number) => (clock += ms) };
+  return { manager, children, spawns, urls, renices, dataDir, advance: (ms: number) => (clock += ms) };
 }
 const tick = () => new Promise((r) => setTimeout(r, 15));
 
 describe("converter manager", () => {
+  it("starts the helper through nice, on half the cores, so a long PDF leaves the computer usable", async () => {
+    const h = harness({ niceExists: (p) => p === "/usr/bin/nice" });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(h.spawns[0]).toMatchObject({ cmd: "/usr/bin/nice", args: ["-n", "10", "/usr/bin/node", "--import", expect.stringMatching(/converter-hooks\.mjs$/), "/app/sidecar/converter/server.ts"] });
+    expect(h.spawns[0]!.env).toMatchObject({
+      DOCLING_RS_PDF_THREADS: "8",
+      DOCLING_RS_TF_INTRA: "2",
+      DOCLING_RS_NO_ARENA: "1",
+      CONVERT_OCR_JOBS: "8",
+      DOCLING_RS_GRAPH_CACHE_DIR: join(h.dataDir, "converter", "graph-cache"),
+    });
+    expect(existsSync(join(h.dataDir, "converter", "graph-cache"))).toBe(true);
+    // no models yet: TableFormer keeps whatever the binding picks
+    expect(h.spawns[0]!.env.DOCLING_TABLEFORMER_DECODER).toBeUndefined();
+    expect(h.renices).toEqual([]); // started niced; nothing to lower afterwards
+    await h.manager.stop();
+  });
+
+  it("points TableFormer at the KV-cache decoder once the models carry it", async () => {
+    const h = harness();
+    const tf = join(h.dataDir, "converter", "models", ".models", "tableformer");
+    mkdirSync(tf, { recursive: true });
+    writeFileSync(join(tf, "decoder_kv.onnx"), "");
+    writeFileSync(join(tf, "decoder_kv.onnx.data"), "");
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(h.spawns[0]!.env.DOCLING_TABLEFORMER_DECODER).toBe(join(tf, "decoder_kv.onnx"));
+    await h.manager.stop();
+  });
+
+  it("lowers the priority right after the spawn where there is no nice (Windows), and starts even if that is refused", async () => {
+    const win = harness({ platformName: "win32" });
+    await win.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(win.spawns[0]!.cmd).toBe("/usr/bin/node");
+    expect(win.renices).toEqual([[4242, 10]]);
+    await win.manager.stop();
+
+    const lines: string[] = [];
+    const refused = harness({ log: (l) => lines.push(l), setPriority: () => { throw new Error("EACCES"); } });
+    await refused.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(refused.urls).toEqual(["http://127.0.0.1:5999"]);
+    expect(lines.some((l) => l.includes("could not lower the converter's priority: EACCES"))).toBe(true);
+    await refused.manager.stop();
+  });
+
   it("starts the vendored service on a free loopback port, logs it, and points the engine at it", async () => {
     const h = harness();
     await h.manager.apply({ mode: "local", remoteUrl: "" });

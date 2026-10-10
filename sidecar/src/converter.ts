@@ -2,10 +2,12 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { clearHelperPid, stopOrphanedHelper, writeHelperPid } from "./orphans.js";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { createServer } from "node:net";
+import { availableParallelism, setPriority } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
 import { installModels, modelsInstalled, removeModels, type ModelsProgress } from "./converter/models.js";
 import { platformTriple, type PlatformTriple } from "./converter/platform.js";
+import { CONVERTER_NICE, converterTuning, lowPriorityLaunch } from "./converter/tuning.js";
 import { engineEnvironment } from "./environment.js";
 import type { ConversionSettings } from "./settings.js";
 
@@ -108,6 +110,11 @@ export type ConverterDeps = {
   /** For the models' tool check (sh, curl, tar) and the Windows gate; detected when absent. */
   platformName?: NodeJS.Platform;
   toolsMissing?: (names: string[]) => string[];
+  /** The helper's CPU budget and priority (converter/tuning.ts); detected when absent. */
+  cores?: number;
+  /** Where `nice` might be; the real filesystem when absent. */
+  niceExists?: (path: string) => boolean;
+  setPriority?: (pid: number, priority: number) => void;
 };
 
 /** The helper inherits the OS/session allowlist only — none of the engine's matrix, none of our KV_* config. */
@@ -214,9 +221,14 @@ export function createConverterManager(deps: ConverterDeps) {
     }
     const url = `http://127.0.0.1:${port}`;
     mkdirSync(join(deps.dataDir, "logs"), { recursive: true });
-    const proc = spawnImpl(deps.nodePath, ["--import", hooksUrl, deps.entry], {
+    // At background priority and on half the cores, so a long PDF converts while the computer stays usable.
+    const launch = lowPriorityLaunch(platformName, deps.nodePath, ["--import", hooksUrl, deps.entry], deps.niceExists);
+    const cacheDir = join(converterDir, "graph-cache");
+    mkdirSync(cacheDir, { recursive: true });
+    const proc = spawnImpl(launch.cmd, launch.args, {
       env: {
         ...deps.env,
+        ...converterTuning({ cores: deps.cores ?? availableParallelism(), modelsDir, cacheDir }),
         CONVERTER_MODULES_DIR: modulesDir,
         CONVERT_SERVICE_HOST: "127.0.0.1",
         CONVERT_SERVICE_PORT: String(port),
@@ -226,6 +238,13 @@ export function createConverterManager(deps: ConverterDeps) {
     });
     child = proc;
     if (proc.pid) writeHelperPid(deps.dataDir, proc.pid);
+    if (launch.reniceAfterSpawn && proc.pid) {
+      try {
+        (deps.setPriority ?? setPriority)(proc.pid, CONVERTER_NICE);
+      } catch (reniceError) {
+        log(`could not lower the converter's priority: ${(reniceError as Error).message}`);
+      }
+    }
     lastStartAt = now();
     appendFileSync(logPath, `--- ${new Date(now()).toISOString()} start pid ${proc.pid ?? "?"} port ${port}\n`);
     logStream ??= createWriteStream(logPath, { flags: "a" });
