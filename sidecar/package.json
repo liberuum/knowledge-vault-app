@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.json && cp src/*.mjs dist/",
     "dev": "bun run build && KV_STDIN_STOP=1 KV_DATA_DIR=../.dev-data KV_PORT=4201 KV_CONTROL_PORT=4202 KV_CONTROL_TOKEN=dev-token KV_HOST_ORIGIN=http://127.0.0.1:4200 node dist/main.js",
     "tsc": "tsc -p tsconfig.json --noEmit",
+    "check": "bun check -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {

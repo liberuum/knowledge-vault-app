@@ -6,6 +6,7 @@
     "dev": "vite --port 4200 --strictPort",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "tsc": "tsc -p tsconfig.json --noEmit",
+    "check": "bun check -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {

@@ -17,6 +17,7 @@
     "build:host": "bun run --cwd host build",
     "build:sidecar": "bun run --cwd sidecar build",
     "tsc": "bun run --cwd sidecar tsc && bun run --cwd host tsc",
+    "check": "bun run --cwd sidecar check && bun run --cwd host check",
     "test": "vitest run",
     "stack:check": "node scripts/check-stack-versions.mjs",
     "e2e": "playwright test",
