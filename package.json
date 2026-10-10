@@ -35,5 +35,8 @@
     "tar": "7",
     "typescript": "^5.9.3",
     "vitest": "4.1.1"
+  },
+  "patchedDependencies": {
+    "@powerhousedao/reactor@6.2.3-dev.52": "patches/@powerhousedao%2Freactor@6.2.3-dev.52.patch"
   }
 }

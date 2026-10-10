@@ -31,6 +31,8 @@ mkdirSync(join(ws, "sidecar"), { recursive: true });
 for (const f of ["package.json", "bun.lock", "bunfig.toml", ".npmrc"]) if (existsSync(join(root, f))) copyFileSync(join(root, f), join(ws, f));
 copyFileSync(join(root, "host", "package.json"), join(ws, "host", "package.json"));
 copyFileSync(join(root, "sidecar", "package.json"), join(ws, "sidecar", "package.json"));
+// bun applies package.json's patchedDependencies on install: the patch files must be beside it.
+if (existsSync(join(root, "patches"))) cpSync(join(root, "patches"), join(ws, "patches"), { recursive: true });
 execFileSync("bun", ["install", "--production", "--frozen-lockfile", "--filter", "@knowledge-vault-app/sidecar", "--linker", "hoisted"], { cwd: ws, stdio: "inherit" });
 
 // 2. the engine as it ships
