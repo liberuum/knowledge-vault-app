@@ -74,10 +74,15 @@
 .kv-onb-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv-onb-files .kv-hint { margin: 0; }
 .kv-onb-paste { display: inline-block; margin-top: 14px; }
-.kv-onb-guide { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-surface); }
-.kv-onb-guide p { margin: 0; }
 .kv-onb-check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .kv-onb-check input { margin-top: 3px; accent-color: var(--bai-accent); }
+/* the guide, always on the list of sources to add: an example to pick, no file needed */
+.kv-onb-files li.kv-onb-example { align-items: flex-start; background: var(--bai-surface); }
+.kv-onb-example .kv-onb-check { flex: 1 1 auto; min-width: 0; }
+.kv-onb-example-body { display: grid; gap: 2px; min-width: 0; }
+.kv-onb-example-body .kv-onb-file-name { white-space: normal; }
+.kv-onb-files li.kv-onb-example .kv-hint { white-space: normal; }
+.kv-onb-badge { flex: none; align-self: center; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--bai-border); color: var(--bai-text-secondary); }
 
 @media (prefers-reduced-motion: reduce) {
   .kv-onb-step, .kv-onb-ok::before, .kv-onb-rail li[data-state="done"] .kv-onb-dot { animation: none; }

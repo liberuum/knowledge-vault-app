@@ -18,14 +18,16 @@ function size(bytes: number): string {
 
 /**
  * What goes in first: files (converted by the vault's own intake, shown on the next screen), pasted text, or the
- * app's guide. With nothing at hand the one action is "Start with the guide": results without a file of your own.
+ * app's guide. The guide is always on the list as a ready example source, ticked while nothing else is: with
+ * nothing at hand the one action is "Start with the guide", results without a file of your own.
  */
 export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
   const [target, setTarget] = useState<string | null>(vaultId ?? null);
   const [files, setFiles] = useState<File[]>([]);
   const [text, setText] = useState("");
   const [pasting, setPasting] = useState(false);
-  const [guideToo, setGuideToo] = useState(false);
+  /** The user's own choice about the example source; until they make one, it is ticked while nothing else is added. */
+  const [guidePick, setGuidePick] = useState<boolean | null>(null);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,12 +123,12 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
   }, [busy, conversionOff, info]);
 
   const own = files.length + (text.trim() ? 1 : 0);
-  const withGuide = own === 0 || guideToo;
+  const withGuide = guidePick ?? own === 0;
   const count = own + (withGuide ? 1 : 0);
-  const label = busy ? "Adding…" : own === 0 ? "Start with the guide" : `Add ${count} source${count === 1 ? "" : "s"}`;
+  const label = busy ? "Adding…" : count === 0 ? "Choose a source" : own === 0 ? "Start with the guide" : `Add ${count} source${count === 1 ? "" : "s"}`;
 
   async function start() {
-    if (!target) return;
+    if (!target || count === 0) return;
     setBusy(true);
     setError(null);
     try {
@@ -185,19 +187,27 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
           </>
         )}
       </div>
-      {files.length > 0 && (
-        <ul className="kv-onb-files" aria-label="Files to add">
-          {files.map((f, i) => (
-            <li key={`${f.name}-${i}`}>
-              <span className="kv-onb-file-name">{f.name}</span>
-              <span className="kv-hint">{size(f.size)}</span>
-              <button type="button" className="kv-link" onClick={() => setFiles((current) => current.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`} disabled={busy}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="kv-onb-files" aria-label="Sources to add">
+        <li className="kv-onb-example">
+          <label className="kv-onb-check">
+            <input type="checkbox" checked={withGuide} onChange={(e) => setGuidePick(e.target.checked)} disabled={busy} aria-describedby="onb-example-about" />
+            <span className="kv-onb-example-body">
+              <span className="kv-onb-file-name">How Knowledge Vault works</span>
+              <span id="onb-example-about" className="kv-hint">The app's own guide, ready to add: its notes explain notes, links and the maps of your topics. Try the app with it, no file needed.</span>
+            </span>
+          </label>
+          <span className="kv-onb-badge">Example</span>
+        </li>
+        {files.map((f, i) => (
+          <li key={`${f.name}-${i}`}>
+            <span className="kv-onb-file-name">{f.name}</span>
+            <span className="kv-hint">{size(f.size)}</span>
+            <button type="button" className="kv-link" onClick={() => setFiles((current) => current.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`} disabled={busy}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
       {pasting ? (
         <>
           <label htmlFor="onb-paste" className="kv-onb-label">Paste text</label>
@@ -206,24 +216,12 @@ export function SourcesStep({ info, vaultId, onBack, onStarted }: Props) {
       ) : (
         <button type="button" className="kv-link kv-onb-paste" onClick={() => setPasting(true)} disabled={busy}>Or paste some text</button>
       )}
-      <div className="kv-onb-guide">
-        {own === 0 ? (
-          <p>
-            <strong>Nothing at hand?</strong> Start with the app's own guide, <em>How Knowledge Vault works</em>: its notes explain notes, links and the maps of your topics.
-          </p>
-        ) : (
-          <label className="kv-onb-check">
-            <input type="checkbox" checked={guideToo} onChange={(e) => setGuideToo(e.target.checked)} disabled={busy} />
-            <span>Also add the app's guide, <em>How Knowledge Vault works</em></span>
-          </label>
-        )}
-      </div>
       {dropNote && <p role="status" className={dropNote.startsWith("Reading") ? "kv-quiet" : "kv-error"}>{dropNote}</p>}
       {!target && <p className="kv-error">Create a vault first: go back one step.</p>}
       {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
       <div className="kv-onb-actions">
         <button type="button" className="kv-button" onClick={onBack} disabled={busy}>Back</button>
-        <button type="button" className="kv-button kv-button-primary" onClick={() => void start()} disabled={busy || !target}>{label}</button>
+        <button type="button" className="kv-button kv-button-primary" onClick={() => void start()} disabled={busy || !target || count === 0}>{label}</button>
       </div>
     </section>
   );
