@@ -43,6 +43,11 @@ describe("checkForUpdate", () => {
     ];
     const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => list })) as unknown as typeof fetch;
     expect(await checkForUpdate(feed, "0.2.0", fetchImpl, memory(), () => 0)).toEqual({ latest: "0.2.2-dev.1", url: "u2", assets: [{ name: "a.dmg", url: "https://github.com/x/a.dmg", size: 7 }] });
+    // The repository's other releases are not versions of the app (what GitHub lists today: only the converter's).
+    const other = vi.fn(async () => ({ ok: true, json: async () => [{ tag_name: "docling-binding-v1.58.0", html_url: "u", prerelease: true, assets: [] }, { tag_name: "v9.0.0-nightly", html_url: "n" }, { tag_name: "v1.2", html_url: "x" }] })) as unknown as typeof fetch;
+    expect(await checkForUpdate(feed, "0.0.0-dev", other, memory(), () => 0)).toEqual({ latest: "9.0.0-nightly", url: "n", assets: [] });
+    const onlyOther = vi.fn(async () => ({ ok: true, json: async () => [{ tag_name: "docling-binding-v99.0.0", html_url: "u" }] })) as unknown as typeof fetch;
+    expect(await checkForUpdate(feed, "0.0.0-dev", onlyOther, memory(), () => 0)).toBeNull();
     const empty = vi.fn(async () => ({ ok: true, json: async () => [] })) as unknown as typeof fetch;
     expect(await checkForUpdate(feed, "0.2.0", empty, memory(), () => 0)).toBeNull();
   });

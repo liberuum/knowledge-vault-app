@@ -40,8 +40,14 @@ export const CHECK_EVERY_MS = 90 * 60_000;
 
 type Release = { tag_name?: string; html_url?: string; draft?: boolean; assets?: Array<{ name?: string; browser_download_url?: string; size?: number }> };
 
+/**
+ * An app release's tag: v0.2.1, v0.3.0-beta.2. The repository also publishes other releases (the
+ * converter's docling-binding-v1.58.0), which are not versions of the app and must never be offered.
+ */
+const APP_TAG = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
 function toInfo(r: Release, feedUrl: string): UpdateInfo | null {
-  if (!r.tag_name || r.draft) return null;
+  if (!r.tag_name || r.draft || !APP_TAG.test(r.tag_name)) return null;
   return {
     latest: r.tag_name.replace(/^v/, ""),
     url: r.html_url ?? feedUrl,
@@ -49,7 +55,7 @@ function toInfo(r: Release, feedUrl: string): UpdateInfo | null {
   };
 }
 
-/** The newest release in the feed's answer: one release ("latest"), or a list — drafts left out, pre-releases in (the app ships as pre-releases). */
+/** The newest app release in the feed's answer: one release ("latest"), or a list — drafts and other releases left out, pre-releases in (the app ships as pre-releases). */
 export function newestRelease(body: unknown, feedUrl: string): UpdateInfo | null {
   const list = Array.isArray(body) ? (body as Release[]) : [body as Release];
   let best: UpdateInfo | null = null;
