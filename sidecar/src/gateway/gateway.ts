@@ -6,6 +6,7 @@ import { openAiError, providerMessage } from "./errors.js";
 import { createQueue } from "./queue.js";
 import { modelsUrl, providerHeaders } from "../provider-auth.js";
 import { adaptPayload, withoutRefusedParameter } from "./compat.js";
+import { cleanJsonReply, withJsonInstruction } from "./json.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -72,6 +73,8 @@ export function createGateway(deps: GatewayDeps) {
           return sendJson(res, 400, openAiError(400, "The request body must be a JSON object."), cors);
         }
         if (typeof payload.model !== "string" || !payload.model.trim()) payload.model = settings.models.model;
+        // JSON asked for is JSON received, whatever the model: said in words too (json.ts).
+        payload = withJsonInstruction(payload);
         if (settings.models.provider === "anthropic" && payload.response_format && key) {
           try {
             const answer = await anthropicJson({ endpoint, key, body: payload, fetchImpl: f, signal: controller.signal });
@@ -87,6 +90,7 @@ export function createGateway(deps: GatewayDeps) {
         return await deps.chatgpt.handle({ kind: isChat ? "chat" : "models", payload, res, cors, signal: controller.signal, interactive });
       }
       let upstream: Response;
+      const wantsJson = isChat && payload.response_format !== undefined && payload.stream !== true;
       if (isChat) payload = adaptPayload(endpoint, payload);
       // A model that refuses one parameter by name (a newer OpenAI model and `temperature`) is asked again without it.
       for (let retries = 0; ; retries++) {
@@ -115,6 +119,13 @@ export function createGateway(deps: GatewayDeps) {
         return sendJson(res, upstream.status, openAiError(upstream.status, message, code), cors);
       }
       const type = upstream.headers.get("content-type") ?? "application/json";
+      if (wantsJson && type.includes("json")) {
+        // An answer still wrapped in a code fence or prose comes back as the JSON alone.
+        const reply = cleanJsonReply(await upstream.text());
+        res.writeHead(200, { "content-type": type, "cache-control": "no-store", ...cors });
+        res.end(reply);
+        return;
+      }
       res.writeHead(200, { "content-type": type, "cache-control": "no-store", ...cors });
       try {
         for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) res.write(chunk);

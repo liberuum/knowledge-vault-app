@@ -6,6 +6,7 @@ import type { AppSettings } from "../settings.js";
 import { createChatGptBridge, toResponsesRequest, TOOL_NAMESPACE, type ChatGptSessionLike } from "./chatgpt.js";
 import { chatGptFailureFromBody } from "./errors.js";
 import { createGateway, GATEWAY_PATH } from "./gateway.js";
+import { JSON_INSTRUCTION } from "./json.js";
 
 type Json = Record<string, unknown>;
 const servers: Server[] = [];
@@ -211,7 +212,7 @@ describe("the ChatGPT bridge in the gateway", () => {
     });
     expect(api.seen[0]!.body).toEqual({
       model: "gpt-6.1-sol",
-      instructions: "Extract claims as JSON.",
+      instructions: `Extract claims as JSON.\n\n${JSON_INSTRUCTION}`,
       // The system prompt became instructions, which JSON mode does not read: the input says it too.
       input: [{ role: "user", content: "The text.\n\nAnswer in JSON." }],
       store: false,
