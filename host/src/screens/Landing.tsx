@@ -96,6 +96,9 @@ type Props = {
   onStartSettings?: () => void;
 };
 
+/** How long the vault list keeps asking an engine that does not answer (it is restarting) before it says so. */
+const VAULTS_RETRY_MS = 60_000;
+
 /**
  * The front door (spec §5.7): the vaults as constellation tiles, the most
  * recently opened one largest; on first run, the inline create form; the
@@ -144,10 +147,29 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
   useEffect(() => {
     if (!info) return;
     let alive = true;
-    api
-      .fetchVaults(info)
-      .then((v) => alive && setVaults(v))
-      .catch((e: Error) => alive && setError(`Could not load the vaults: ${e.message}`));
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const since = Date.now();
+    const loadVaults = (): void => {
+      api.fetchVaults(info).then(
+        (v) => {
+          if (!alive) return;
+          setVaults(v);
+          setError(null);
+        },
+        (e: Error) => {
+          if (!alive) return;
+          // No answer at all ("Load failed", "Failed to fetch") is an engine restarting — after a restore,
+          // a backup, a protection switch. Ask again before calling it a failure; an answer that is an
+          // error is shown at once.
+          if (e instanceof TypeError && Date.now() - since < VAULTS_RETRY_MS) {
+            retry = setTimeout(loadVaults, 1000);
+            return;
+          }
+          setError(`Could not load the vaults: ${e.message}`);
+        },
+      );
+    };
+    loadVaults();
     api
       .fetchRemoteVaults(info)
       .then((v) => alive && setRemotes(v))
@@ -158,6 +180,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
       .catch(() => {});
     return () => {
       alive = false;
+      clearTimeout(retry);
     };
   }, [api, info]);
 
