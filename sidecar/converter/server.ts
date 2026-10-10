@@ -8,27 +8,31 @@
  *
  * Design points that come from measurement, not taste:
  *
- * - **It starts instantly and loads nothing.** The native binding (~68 MB) is
- *   imported on first use, and the warm `Pipeline` — which holds the ONNX
- *   models — is created only when a PDF or image actually arrives. A fresh
- *   process that has served no documents costs no model memory.
+ * - **It starts instantly and loads nothing.** The process started is a
+ *   coordinator: HTTP, slots, progress, the upload on disk. Each conversion runs
+ *   in a worker process (this same file, `CONVERT_ROLE=worker`), started on
+ *   demand, which imports the native binding and creates the warm `Pipeline` —
+ *   the ONNX models — only when a PDF or image arrives. A process that has
+ *   served no documents costs no model memory.
+ * - **A worker can be stopped.** docling.rs has no abort; a process can be
+ *   ended. `DELETE /convert/:id`, or a caller that disconnects, ends the worker
+ *   (and the OCR/ghostscript helpers in its process group) and frees its slot.
+ *   A crash or out-of-memory takes down one worker, not the service.
+ * - **Two lanes.** PDFs and images (`models`) run one at a time by default —
+ *   measured fastest on one machine's CPU budget, since a conversion already
+ *   spreads its pages over every thread it has; everything else (`other`) runs
+ *   alongside, so a quick `.docx` never waits behind a long PDF.
  * - **The warm `Pipeline` serves `pdf` and `image` only.** Its own typings say
  *   so; every declarative format (`md`, `html`, `docx`, `csv`, `epub`, …) goes
  *   through the per-call functions and needs no models at all. That is what
  *   makes "conversion works before the 700 MB is fetched" true rather than
  *   aspirational.
- * - **One instance serialises PDF conversions.** The binding documents that
- *   overlapping calls on one `Pipeline` queue, because the models are mutable
- *   sessions — so batch throughput comes from warm models and extra *processes*,
- *   never from extra concurrent requests.
- * - **It chunks with `chunkFileAsync`, not by re-chunking its own JSON.** Chunking
- *   the document it already converted (`chunkDocumentAsync` on the `to: "json"`
- *   output) measured ~1.6× cheaper, but **disagrees with `chunkFile` on
- *   tables** — on the sample PDF the education table's cells came back
- *   associated differently. Correctness won; re-converting inside the chunker
- *   is cheap because models live for the life of the process (three consecutive
- *   calls: 1630 / 1522 / 1580 ms), not per call.
- * - Model files are ~700 MB and are *not* fetched here at start-up. See
+ * - **A document is converted once.** One pass to docling JSON; the Markdown is
+ *   rendered from it (`json_docling`, no models) and the chunks chunked from it
+ *   (`chunkDocumentAsync`), and the figures are cut from it — byte-identical
+ *   Markdown and identical chunks to the three passes this replaced, in a third
+ *   of the time (see `convertOnce`).
+ * - Model files are ~750 MB and are *not* fetched here at start-up. See
  *   `fetch-models.mjs`, and `/health`, which reports `ready: false` and the
  *   missing list until they exist.
  *
@@ -45,21 +49,30 @@
  *   it: that mode writes image files into `artifactsDir`, and nothing here
  *   removes those. `ConvertResult.images` is empty in the current calls, which
  *   is why no artifact cleanup exists.
- * - The one thing that cannot be freed per extraction is the warm pipeline's
- *   ~1.36 GB of loaded models — that warmth is what avoids reloading them per
- *   request. `CONVERT_IDLE_RELEASE_MS` trades it back after a quiet period.
+ * - The one thing that cannot be freed per extraction is a worker's warm
+ *   models (~1.2 GB) — that warmth is what avoids reloading them per request.
+ *   `CONVERT_IDLE_RELEASE_MS` stops an idle worker, which gives it all back.
  *
  * Runs on Node and Bun: `node:http` and `node:child_process` are both
  * implemented by Bun, and Node is what Vetra deploys the vault with.
  */
-import { spawn } from "node:child_process";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { fork, spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { cpus, tmpdir } from "node:os";
+import { availableParallelism, cpus, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type * as DoclingRs from "docling.rs";
@@ -71,6 +84,7 @@ import {
   type OcrCapabilities,
 } from "./routing.mjs";
 import { conversionQuality, type ConversionQuality } from "./quality.mjs";
+import { restorePlaceholders } from "./docjson.mjs";
 import {
   documentToBlocks,
   insertFigurePlaceholders,
@@ -132,13 +146,53 @@ const STALE_TMP_MS = Number(
 );
 
 /**
- * Release the warm pipeline after this long with no conversion. `0` = never.
+ * Stop a worker after this long with no conversion, giving its memory back to
+ * the system — its warm models among it. `0` = never.
  *
- * Off by default, because warmth is the whole point: the models cost ~1.36 GB
+ * Off by default, because warmth is the whole point: the models cost ~1.2 GB
  * resident but a reload per request costs seconds. Turn it on where memory
- * matters more than latency.
+ * matters more than latency (the desktop app does). Stopping the process is
+ * what frees native memory for certain; dropping a reference left it to GC.
  */
 const IDLE_RELEASE_MS = Number(process.env.CONVERT_IDLE_RELEASE_MS ?? 0);
+
+/**
+ * How many conversions run at once, per lane. A document that needs the models
+ * (PDF, image) goes to the `models` lane; everything else (Office, HTML,
+ * Markdown, …) to `other`, so a quick file never waits behind a long PDF.
+ *
+ * One model conversion at a time by default — measured: 12 PDFs (144 pages) on
+ * one 8-thread budget took 78.7 s one at a time, and 84.6 / 75.2 / 85.9 s with
+ * 2 / 3 / 4 at once, each file 2–2.5× slower and 0.5–0.9 GB more at peak. A
+ * conversion already uses every thread it is given across its pages, so more
+ * at once only splits the same CPU. A bigger server may still want two.
+ */
+const MODEL_SLOTS = boundedInt(process.env.CONVERT_MODEL_SLOTS, 1, 1, 16);
+const OTHER_SLOTS = boundedInt(process.env.CONVERT_OTHER_SLOTS, 2, 1, 16);
+
+/**
+ * The PDF thread budget (docling.rs reads `DOCLING_RS_PDF_THREADS`; all cores
+ * when unset). With several model slots it is split between them, so N at once
+ * never take N times the CPU.
+ */
+const PDF_THREAD_BUDGET = boundedInt(
+  process.env.DOCLING_RS_PDF_THREADS,
+  availableParallelism(),
+  1,
+  1024,
+);
+
+function boundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = Number(raw);
+  if (raw === undefined || raw.trim() === "" || !Number.isFinite(value))
+    return fallback;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
 
 /** Format ids that cannot be converted without the downloaded models. */
 const MODEL_BACKED_FORMATS = new Set(["pdf", "image", "mets_gbs"]);
@@ -267,29 +321,6 @@ function pipelineFor(PipelineClass: typeof Pipeline): Pipeline {
   return warmPipeline;
 }
 
-let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * Give the models back after a quiet period — the only "cache" here that can
- * be released, and off unless asked for (see `IDLE_RELEASE_MS`). Dropping the
- * reference is enough: the ONNX sessions belong to the Pipeline and are
- * collected with it.
- */
-function scheduleIdleRelease(): void {
-  if (IDLE_RELEASE_MS <= 0) return;
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    if (warmPipeline !== null) {
-      warmPipeline = null;
-      console.log(
-        `[convert] released the warm pipeline after ${IDLE_RELEASE_MS} ms idle`,
-      );
-    }
-  }, IDLE_RELEASE_MS);
-  // A pending release must never keep the process alive.
-  idleTimer.unref();
-}
-
 /**
  * Delete leftover scratch dirs from a previous run.
  *
@@ -396,25 +427,6 @@ function startHeartbeat(res: ServerResponse, intervalMs: number) {
   return { stop: () => clearInterval(timer) };
 }
 
-/** Read the raw request body, refusing anything over `MAX_BYTES`. */
-function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const parts: Buffer[] = [];
-    let size = 0;
-    req.on("data", (part: Buffer) => {
-      size += part.length;
-      if (size > MAX_BYTES) {
-        reject(new Error(`body exceeds ${MAX_BYTES} bytes`));
-        req.destroy();
-        return;
-      }
-      parts.push(part);
-    });
-    req.on("end", () => resolve(Buffer.concat(parts)));
-    req.on("error", reject);
-  });
-}
-
 /** Run a helper binary, resolving to whether it succeeded. */
 function run(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
@@ -425,7 +437,7 @@ function run(command: string, args: string[]): Promise<boolean> {
 }
 
 /**
- * The rewrites to try, in order, when pdfium refuses a PDF.
+ * The rewrites to try, in order, when the parser refuses a PDF.
  *
  * `qpdf --linearize` first because it is lossless and fast, `gs` second because
  * it rebuilds the page tree wholesale — which is the only thing that helps for
@@ -449,8 +461,14 @@ const REWRITERS = [
   },
 ];
 
+/**
+ * The parser refused the file. docling.rs 1.x read PDFs with pdfium
+ * (`PdfiumLibraryInternalError(FormatError|Unknown)`); 2.x reads them itself and
+ * says `pdf: not a readable PDF: the file is damaged or not a PDF …`. Either
+ * way the file may still be rescued by a rewrite.
+ */
 const isFormatError = (error: unknown): boolean =>
-  /FormatError|pdfium/i.test(
+  /FormatError|pdfium|not a readable PDF/i.test(
     error instanceof Error ? error.message : String(error),
   );
 
@@ -462,68 +480,74 @@ interface Conversion {
   format: string;
   inputName: string;
   timings: { convertMs: number; chunkMs: number };
+  /**
+   * The docling JSON the Markdown and chunks were derived from, when a model
+   * conversion produced them: the figures are cut from the same document, so
+   * their placeholder indices are the Markdown's. `null` for text-layer and
+   * declarative conversions.
+   */
+  json: string | null;
+}
+
+/**
+ * Markdown and chunks from a docling JSON document, without the models: the
+ * render is a declarative conversion (milliseconds) and the chunker reads the
+ * document it is given. Chunking our own JSON gives the same chunks as
+ * `chunkFileAsync` re-converting the file — measured identical on four PDFs
+ * (1, 1, 1 and 439 chunks) with 2.13 and on 434 chunks with 1.58; the table
+ * disagreement once seen came from comparing two separate conversions.
+ */
+async function conversionFromJson(
+  library: typeof DoclingRs,
+  json: string,
+  meta: { format: string; inputName: string; convertMs: number },
+): Promise<Conversion> {
+  const chunkStart = Date.now();
+  const [rendered, chunks] = await Promise.all([
+    library.convertAsync(
+      { name: "document.json", data: Buffer.from(json), format: "json_docling" },
+      { to: "markdown" },
+    ),
+    library.chunkDocumentAsync(json),
+  ]);
+  return {
+    // The render escapes docling's placeholder comments (docjson.mjs); 1.58
+    // also escapes one URL's underscores, which nothing reads.
+    markdown: restorePlaceholders(rendered.content),
+    chunks,
+    format: meta.format,
+    inputName: meta.inputName,
+    timings: { convertMs: meta.convertMs, chunkMs: Date.now() - chunkStart },
+    json,
+  };
 }
 
 /**
  * The OCR path, for a PDF whose text layer exists but lies.
  *
- * **`forceFullPageOcr` only takes effect on the module-level `convertFileAsync`
- * — measured, not assumed.** The warm `Pipeline` class ignores it completely,
- * whether given to its constructor or per-call: on the same 19-page document,
- * `new Pipeline({ forceFullPageOcr: true })` and a plain `Pipeline` both came
- * back 94.0% single-character tokens (unchanged from no OCR at all), while
- * `convertFileAsync(file, { forceFullPageOcr: true })` came back 1.5%. So this
- * path deliberately does NOT use `pipelineFor()` — it costs the warm pipeline's
- * one advantage (model reuse across calls) for the only version that reads.
+ * One OCR conversion to docling JSON; the Markdown, the chunks and the figures
+ * all come from it (`conversionFromJson`). It used to OCR the whole document
+ * twice — once for the Markdown, once for the chunks.
  *
- * `chunkFileAsync` re-converts the file itself and takes no OCR option, so it
- * would chunk the same glyph soup. The document is converted once with
- * `forceFullPageOcr` to docling JSON and chunked from that — the shortcut the
- * normal path rejects for table fidelity, but against a garbled text layer
- * there is nothing more faithful to compare it to.
+ * The module-level `convertFileAsync`, not the warm pipeline: up to docling.rs
+ * 1.71 `Pipeline` ignored `forceFullPageOcr` entirely (measured on a 19-page
+ * document: 94.0 % single-character tokens either way, against 1.5 % here), and
+ * this path is rare enough that a model load per call costs nothing that matters.
  */
 async function convertWithOcr(file: string): Promise<Conversion> {
   const library = await docling();
-
   const convertStart = Date.now();
-  const converted = await library.convertFileAsync(file, {
-    to: "markdown",
-    forceFullPageOcr: true,
-  });
-  const convertMs = Date.now() - convertStart;
-
-  const chunkStart = Date.now();
   const asJson = await library.convertFileAsync(file, {
     to: "json",
     forceFullPageOcr: true,
   });
-  const chunks = await library.chunkDocumentAsync(asJson.content);
-  const chunkMs = Date.now() - chunkStart;
-
-  return {
-    markdown: converted.content,
-    chunks,
-    format: converted.format,
-    inputName: converted.inputName,
-    timings: { convertMs, chunkMs },
-  };
+  return conversionFromJson(library, asJson.content, {
+    format: extname(file).slice(1).toLowerCase() || "pdf",
+    inputName: basename(file),
+    convertMs: Date.now() - convertStart,
+  });
 }
 
-/**
- * One conversion pass: markdown for the source's own content, plus the chunks
- * the vault turns into sections.
- *
- * Both calls are needed. Chunk text is *not* markdown-quality for tables — a
- * PDF invoice's line items come back as `PART-X, QUANTITY = 480 pcs` triplets —
- * and the binding exposes no json→markdown export to derive one from the other.
- *
- * The chunks deliberately come from `chunkFileAsync`, which converts the file a
- * second time internally even though we already hold a conversion. Chunking our
- * own JSON instead (`chunkDocumentAsync`) is ~1.6× cheaper but loses table
- * fidelity: on the sample PDF the education table's cells came back associated
- * differently, and the two renders were not equal after whitespace
- * normalisation. 0.6 s is a fair price for correct tables.
- */
 // --- progress: what the caller can watch while it waits ------------------------
 
 type Phase =
@@ -534,15 +558,18 @@ type Phase =
   | "ocr"
   | "figures"
   | "done"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 /**
- * One entry per in-flight conversion the caller chose to watch (`?job=<id>`).
- * `pagesDone` is measured: the warm pipeline streams markdown as pages finish
- * (24 chunks for a 23-page paper, byte-identical to the buffered result), so
- * a chunk is a page. `structuring` — docling's chunking pass — has no page
- * signal and is shown as a phase, not a bar. Entries linger a minute after
- * completion so a late poll still gets the final state.
+ * One entry per in-flight conversion (`?job=<id>`, or an id the service picks).
+ * `pages` is the document's page count once pdf.js has read it. A model
+ * conversion is one pass to docling JSON, which reports nothing until it is
+ * done, so `reading` carries no page count of its own — `pagesDone` stays 0 and
+ * a client shows the phase and the time it has taken, never a guessed share.
+ * (It used to stream Markdown page by page, at the cost of two more passes.)
+ * `figures` counts formulas located. Entries linger a minute after completion
+ * so a late poll still gets the final state.
  */
 interface JobProgress {
   phase: Phase;
@@ -569,7 +596,7 @@ function startJob(id: string | null): JobProgress | null {
 function finishJob(
   id: string | null,
   job: JobProgress | null,
-  phase: "done" | "failed",
+  phase: "done" | "failed" | "cancelled",
 ): void {
   if (!id || !job) return;
   job.phase = phase;
@@ -582,53 +609,55 @@ interface ProgressHooks {
   onPage?: (pagesDone: number) => void;
 }
 
+/**
+ * One conversion: the Markdown for the source's own content, the chunks the
+ * vault turns into sections, and — for PDFs and images — the docling JSON the
+ * figures are cut from.
+ *
+ * A model-backed document (PDF, image) is converted **once**, to docling JSON,
+ * on the warm pipeline; the Markdown and the chunks are derived from that
+ * (`conversionFromJson`), and the figures reuse it. It used to be converted
+ * three times — streamed Markdown, then `chunkFileAsync` re-converting the file
+ * (and, being a one-shot call, reloading every model), then JSON for the
+ * figures. Measured on a 48-page paper: 25 s for the JSON pass, 35 ms for the
+ * Markdown render and 159 ms for the chunks, against ~75 s for the three passes,
+ * with byte-identical Markdown and identical chunks.
+ *
+ * A declarative format (Office, HTML, Markdown, …) needs no models and takes
+ * milliseconds, so it keeps the direct path: Markdown and chunks from the file.
+ */
 async function convertOnce(
   file: string,
   usePipeline: boolean,
   progress: ProgressHooks = {},
 ): Promise<Conversion> {
   const library = await docling();
-  const { chunkFileAsync, convertFileAsync } = library;
-  const warm = usePipeline ? pipelineFor(library.Pipeline) : null;
-
   progress.onPhase?.("reading");
   const convertStart = Date.now();
-  let markdown: string;
-  let format: string;
-  let inputName: string;
-  if (warm) {
-    // Streamed, not buffered: identical bytes (measured), and each chunk is a
-    // page finishing — the only progress signal the pipeline gives.
-    let out = "";
-    let pagesDone = 0;
-    for await (const chunk of warm.streamFileMarkdown(file)) {
-      out += chunk;
-      pagesDone += 1;
-      progress.onPage?.(pagesDone);
-    }
-    markdown = out;
-    format = extname(file).slice(1).toLowerCase() || "pdf";
-    inputName = basename(file);
-  } else {
-    const converted = await convertFileAsync(file, { to: "markdown" });
-    markdown = converted.content;
-    format = converted.format;
-    inputName = converted.inputName;
+  if (!usePipeline) {
+    const converted = await library.convertFileAsync(file, { to: "markdown" });
+    const convertMs = Date.now() - convertStart;
+    progress.onPhase?.("structuring");
+    const chunkStart = Date.now();
+    const chunks = await library.chunkFileAsync(file);
+    return {
+      markdown: converted.content,
+      chunks,
+      format: converted.format,
+      inputName: converted.inputName,
+      timings: { convertMs, chunkMs: Date.now() - chunkStart },
+      json: null,
+    };
   }
-  const convertMs = Date.now() - convertStart;
-
+  const asJson = await pipelineFor(library.Pipeline).convertFileAsync(file, {
+    to: "json",
+  });
   progress.onPhase?.("structuring");
-  const chunkStart = Date.now();
-  const chunks = await chunkFileAsync(file);
-  const chunkMs = Date.now() - chunkStart;
-
-  return {
-    markdown,
-    chunks,
-    format,
-    inputName,
-    timings: { convertMs, chunkMs },
-  };
+  return conversionFromJson(library, asJson.content, {
+    format: extname(file).slice(1).toLowerCase() || "pdf",
+    inputName: basename(file),
+    convertMs: Date.now() - convertStart,
+  });
 }
 
 // --- what this machine can do ------------------------------------------------
@@ -702,14 +731,6 @@ const AUTO_OCR_BUDGET_SECONDS = Number(
 );
 const OCR_LANG = process.env.CONVERT_OCR_LANG ?? "eng";
 
-/**
- * One heavy conversion at a time. The warm pipeline already serialises its own
- * calls, but the OCR paths do not share it — two overlapping requests would run
- * two OCR passes at once, which on a 16-core laptop read as "the machine hung".
- * A second caller gets an immediate 503 naming what is running, not a queue.
- */
-let busy: { filename: string; since: number } | null = null;
-
 /** Run a helper with lower scheduling priority when `nice` exists, capturing stderr for the error path. */
 function runNiced(
   command: string,
@@ -734,8 +755,8 @@ function runNiced(
 // --- the text layer, read by pdf.js -------------------------------------------
 
 /**
- * pdf.js reads fonts pdfium cannot: measured on a report re-exported with
- * Type 3 fonts under custom encodings, pdfium returned 96 % single-character
+ * pdf.js reads fonts docling's reader could not: measured on a report re-exported with
+ * Type 3 fonts under custom encodings, docling.rs 1.x (pdfium) returned 96 % single-character
  * tokens and pdf.js 1.2 %, in 0.4 s for 19 pages. Pure npm, so this rung exists
  * on every machine the service runs on. It yields text, not layout.
  */
@@ -838,6 +859,7 @@ async function conversionFromText(
     format: "pdf",
     inputName,
     timings: { convertMs: 0, chunkMs: Date.now() - chunkStart },
+    json: null,
   };
 }
 
@@ -995,15 +1017,22 @@ async function collectFigures(
   dir: string,
   usePipeline: boolean,
   hooks: ProgressHooks,
+  /** The docling JSON the Markdown came from; converted here only when absent. */
+  documentJson: string | null,
 ): Promise<{ figures: Figure[]; stats: FigureStats }> {
-  const library = await docling();
-  const warm = usePipeline ? pipelineFor(library.Pipeline) : null;
   const jsonStart = Date.now();
-  const json = warm
-    ? await warm.convertFileAsync(file, { to: "json" })
-    : await library.convertFileAsync(file, { to: "json" });
+  let content = documentJson;
+  if (content === null) {
+    const library = await docling();
+    const warm = usePipeline ? pipelineFor(library.Pipeline) : null;
+    content = (
+      warm
+        ? await warm.convertFileAsync(file, { to: "json" })
+        : await library.convertFileAsync(file, { to: "json" })
+    ).content;
+  }
   const jsonMs = Date.now() - jsonStart;
-  const doc = JSON.parse(json.content) as {
+  const doc = JSON.parse(content) as {
     pages?: Record<string, { size: { width: number; height: number } }>;
   };
   const pageSize = (page: number) => doc.pages?.[String(page)]?.size;
@@ -1115,7 +1144,10 @@ async function collectFigures(
         });
         continue;
       }
-      const dpi = dpiFor(p.box);
+      // The resolution it was rendered at (above): looked up at the formula
+      // default instead, a small picture always fell back to its 72 dpi embed
+      // and the sharper render it had paid for went unused.
+      const dpi = dpiFor(p.box, "picture");
       const png =
         p.box && p.page ? rendered.get(`${p.page}@${dpi}`) : undefined;
       const size = pageSize(p.page);
@@ -1224,7 +1256,7 @@ async function collectFigures(
 async function convertWithoutBinding(
   filename: string,
   bytes: Buffer,
-  res: ServerResponse,
+  reply: Reply,
   jobId: string | null,
   job: JobProgress | null,
   hooks: ProgressHooks,
@@ -1233,9 +1265,9 @@ async function convertWithoutBinding(
   const format = formatWithoutBinding(filename);
   const refuse = (status: number, body: Record<string, unknown>): void => {
     finishJob(jobId, job, "failed");
-    sendJson(res, status, { ...body, binding: false });
+    reply(status, { ...body, binding: false });
   };
-  try {
+  {
     if (format === null) {
       const ext = extname(filename).slice(1).toLowerCase() || "this file";
       refuse(415, {
@@ -1251,7 +1283,7 @@ async function convertWithoutBinding(
       const chunkStart = Date.now();
       const chunks = localChunks(text);
       finishJob(jobId, job, "done");
-      sendJson(res, 200, {
+      reply(200, {
         markdown: text,
         chunks,
         format,
@@ -1270,11 +1302,9 @@ async function convertWithoutBinding(
       });
       return;
     }
-    await convertPdfTextLayer(filename, bytes, res, jobId, job, hooks, {
+    await convertPdfTextLayer(filename, bytes, reply, jobId, job, hooks, {
       remedy: "install the converter",
     });
-  } finally {
-    busy = null;
   }
 }
 
@@ -1299,7 +1329,7 @@ const TEXT_LAYER_MIN_WORDS = 3;
 async function convertPdfTextLayer(
   filename: string,
   bytes: Buffer,
-  res: ServerResponse,
+  reply: Reply,
   jobId: string | null,
   job: JobProgress | null,
   hooks: ProgressHooks,
@@ -1309,7 +1339,7 @@ async function convertPdfTextLayer(
   const binding = await bindingAvailable();
   const refuse = (body: Record<string, unknown>): void => {
     finishJob(jobId, job, "failed");
-    sendJson(res, 415, {
+    reply(415, {
       ...body,
       code: "NEEDS_CONVERTER",
       binding,
@@ -1356,7 +1386,7 @@ async function convertPdfTextLayer(
     dir = await mkdtemp(join(tmpdir(), "vault-convert-"));
     const conversion = await conversionFromText(layer.markdown, dir, filename);
     finishJob(jobId, job, "done");
-    sendJson(res, 200, {
+    reply(200, {
       markdown: conversion.markdown,
       chunks: conversion.chunks,
       format: "pdf",
@@ -1377,54 +1407,43 @@ async function convertPdfTextLayer(
   }
 }
 
-async function handleConvert(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
+/** How a conversion answers: the status and body the coordinator sends back. */
+type Reply = (status: number, body: Record<string, unknown>) => void;
+
+/** What the coordinator hands a worker: the upload is already on disk, in a dir the coordinator owns. */
+interface JobRequest {
+  id: string;
+  /** The job's scratch dir; the upload is `<dir>/<filename>`. Removed by the coordinator. */
+  dir: string;
+  filename: string;
+  ocr: boolean;
+  figures: boolean;
+}
+
+/**
+ * One document, converted — runs in a worker process (see `startWorker`), which
+ * holds the warm pipeline. Everything before this (the upload, the slot, the
+ * heartbeat) is the coordinator's; everything here answers through `reply`.
+ */
+async function convertJob(
+  request: JobRequest,
+  job: JobProgress,
+  reply: Reply,
 ): Promise<void> {
-  const filename = basename(url.searchParams.get("filename") ?? "");
-  if (!filename) {
-    sendJson(res, 400, { error: "filename query parameter is required" });
-    return;
-  }
-
-  let bytes: Buffer;
-  try {
-    bytes = await readBody(req);
-  } catch (error) {
-    sendJson(res, 413, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return;
-  }
-  if (bytes.length === 0) {
-    sendJson(res, 400, { error: "empty body" });
-    return;
-  }
-
-  if (busy) {
-    sendJson(res, 503, {
-      error: `a conversion is already running (${busy.filename}, ${Math.round((Date.now() - busy.since) / 1000)} s ago); try again when it finishes`,
-      code: "CONVERSION_BUSY",
-      busyWith: busy.filename,
-      sinceMs: Date.now() - busy.since,
-    });
-    return;
-  }
-  busy = { filename, since: Date.now() };
-  const jobId = url.searchParams.get("job");
-  const job = startJob(jobId);
+  const { filename } = request;
+  const jobId = request.id;
+  const bytes = await readFile(join(request.dir, filename));
   const hooks: ProgressHooks = {
     onPhase: (phase) => {
-      if (job) job.phase = phase;
+      job.phase = phase;
     },
     onPage: (n) => {
-      if (job) job.pagesDone = job.pages === null ? n : Math.min(n, job.pages);
+      job.pagesDone = job.pages === null ? n : Math.min(n, job.pages);
     },
   };
 
   if (!(await bindingAvailable())) {
-    await convertWithoutBinding(filename, bytes, res, jobId, job, hooks);
+    await convertWithoutBinding(filename, bytes, reply, jobId, job, hooks);
     return;
   }
 
@@ -1432,9 +1451,8 @@ async function handleConvert(
   try {
     library = await docling();
   } catch (error) {
-    busy = null;
     finishJob(jobId, job, "failed");
-    sendJson(res, 503, {
+    reply(503, {
       error: "the docling.rs binding is not installed",
       detail: error instanceof Error ? error.message : String(error),
       hintForOperators: "run `bun install` in the vault package",
@@ -1453,19 +1471,14 @@ async function handleConvert(
     if (format === "pdf") {
       // The binding without the models: the text layer still reads a text PDF
       // (the same rung as a fresh install); only a scan waits for the models.
-      try {
-        await convertPdfTextLayer(filename, bytes, res, jobId, job, hooks, {
-          remedy: "install the PDF models",
-          missing: dependencies.missing,
-        });
-      } finally {
-        busy = null;
-      }
+      await convertPdfTextLayer(filename, bytes, reply, jobId, job, hooks, {
+        remedy: "install the PDF models",
+        missing: dependencies.missing,
+      });
       return;
     }
-    busy = null;
     finishJob(jobId, job, "failed");
-    sendJson(res, 415, {
+    reply(415, {
       error: `cannot convert ${format} without the docling models`,
       code: "MODELS_REQUIRED",
       missing: dependencies.missing,
@@ -1475,15 +1488,14 @@ async function handleConvert(
     return;
   }
 
-  const dir = await mkdtemp(join(tmpdir(), "vault-convert-"));
+  const dir = request.dir;
   const started = Date.now();
   try {
     const file = join(dir, filename);
-    await writeFile(file, bytes);
 
     // The text layer, read once up front by pdf.js (0.4 s for 19 pages): the
     // page count feeds the progress bar, the text feeds the quality score, and
-    // both feed the routing decision if pdfium's result turns out garbled.
+    // both feed the routing decision if docling's result turns out garbled.
     const isPdf = filename.toLowerCase().endsWith(".pdf");
     let layer: {
       garbled: boolean;
@@ -1504,7 +1516,7 @@ async function handleConvert(
           pages: extracted.pages,
           blocks: extracted.blocks,
         };
-        if (job) job.pages = extracted.pages;
+        job.pages = extracted.pages;
       } catch {
         layer = null; // pdf.js could not open it; the OCR rungs decide later
       }
@@ -1517,7 +1529,7 @@ async function handleConvert(
     try {
       result = await convertOnce(file, usePipeline, hooks);
     } catch (error) {
-      // Rewrite only when pdfium actually refused the file, and only for PDFs.
+      // Rewrite only when the parser actually refused the file, and only for PDFs.
       if (!isPdf || !isFormatError(error)) throw error;
       refusal = error;
 
@@ -1539,20 +1551,20 @@ async function handleConvert(
       }
     }
 
-    // pdfium refused it and no rewrite produced something it accepts.
+    // The parser refused it and no rewrite produced something it accepts.
     if (result === null) {
       finishJob(jobId, job, "failed");
-      sendJson(res, 415, {
+      reply(415, {
         error: "the document could not be read, even after rewriting it",
         detail: refusal instanceof Error ? refusal.message : String(refusal),
         attempted: REWRITERS.map((rewriter) => rewriter.tool),
         hintForOperators:
-          "pdfium refused this PDF and neither qpdf nor ghostscript produced a file it accepts",
+          "docling.rs refused this PDF and neither qpdf nor ghostscript produced a file it accepts",
       });
       return;
     }
 
-    // pdfium read the file, but did it read words? If not — or if the caller
+    // docling read the file, but did it read words? If not — or if the caller
     // asked for OCR outright with `?ocr=1` — decide how to read it from what the
     // file is and what this machine has (see routing.mjs). Cheapest rung first;
     // nothing is installed; the response says which rung produced the text.
@@ -1565,8 +1577,12 @@ async function handleConvert(
     } | null = null;
     let pages: number | null = null;
     let ocrMs = 0;
-    const ocrRequested = url.searchParams.get("ocr") === "1";
-    const wantFigures = url.searchParams.get("figures") === "1";
+    const ocrRequested = request.ocr;
+    const wantFigures = request.figures;
+    // The figures are cut from the docling JSON of the conversion whose Markdown
+    // ships, so their placeholder indices line up; the text-layer rung keeps the
+    // first conversion's (its Markdown has no placeholders of its own).
+    const initialJson = result.json;
     const doclingGarbled = looksGarbled(result.markdown);
     if (usePipeline && (ocrRequested || doclingGarbled)) {
       const source = normalised
@@ -1618,7 +1634,7 @@ async function handleConvert(
             textSource = "docling-ocr";
           } else {
             finishJob(jobId, job, "failed");
-            sendJson(res, 415, {
+            reply(415, {
               error:
                 "the document could not be read: its text is unusable and OCR failed",
               detail: out.error,
@@ -1642,7 +1658,7 @@ async function handleConvert(
           break;
         case "unreadable":
           finishJob(jobId, job, "failed");
-          sendJson(res, 415, {
+          reply(415, {
             error:
               "the document's text is unusable and nothing here can OCR it",
             capabilities: caps,
@@ -1696,12 +1712,10 @@ async function handleConvert(
     // to put them in.
     let figures: Figure[] = [];
     let figureStats: FigureStats | null = null;
-    if (wantFigures && isPdf) {
+    if (wantFigures && isPdf && !needsOcr) {
       hooks.onPhase?.("figures");
-      if (job) {
-        job.pagesDone = 0;
-        job.pages = null;
-      }
+      job.pagesDone = 0;
+      job.pages = null;
       const figureSource = normalised
         ? join(dir, `normalised-${normalised}.pdf`)
         : file;
@@ -1711,6 +1725,7 @@ async function handleConvert(
           dir,
           usePipeline,
           hooks,
+          textSource === "pdfjs" ? initialJson : (result.json ?? initialJson),
         );
         figures = collected.figures;
         figureStats = collected.stats;
@@ -1760,11 +1775,9 @@ async function handleConvert(
         ? conversionQuality(layer.text, result.markdown)
         : null;
 
-    // A conversion just happened: re-arm the idle release if it is enabled.
-    scheduleIdleRelease();
     finishJob(jobId, job, "done");
 
-    sendJson(res, 200, {
+    reply(200, {
       markdown: result.markdown,
       chunks: result.chunks,
       format: result.format,
@@ -1781,9 +1794,10 @@ async function handleConvert(
       figures,
       figureStats,
     });
-  } finally {
-    busy = null;
-    await rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    // The worker answers 500 with the message; the job must not linger as running.
+    finishJob(jobId, job, "failed");
+    throw error;
   }
 }
 
@@ -1805,6 +1819,7 @@ async function handleHealth(res: ServerResponse): Promise<void> {
       capabilities: { ...(await capabilities()), doclingOcr: false },
       ocrEngine: null,
       autoOcrBudgetSeconds: AUTO_OCR_BUDGET_SECONDS,
+      ...(await slotsReport()),
       hint: "Install the docling.rs binding for Word, slides, spreadsheets and scanned PDFs.",
     });
     return;
@@ -1820,7 +1835,8 @@ async function handleHealth(res: ServerResponse): Promise<void> {
       ready: dependencies.ready,
       missing: dependencies.missing,
       modelsDir: dependencies.home,
-      modelsLoaded: warmPipeline !== null,
+      // A model worker alive keeps the models warm (they load in the worker).
+      modelsLoaded: lanes.models.idle.length > 0 || [...lanes.models.running].some((r) => r.worker !== null),
       formats: library.supportedFormats(),
       // What this machine can do about a scan, so a UI can say "fast", "slow" or
       // "install …" before anyone drops a file.
@@ -1832,6 +1848,7 @@ async function handleHealth(res: ServerResponse): Promise<void> {
             ? "docling"
             : null,
       autoOcrBudgetSeconds: AUTO_OCR_BUDGET_SECONDS,
+      ...(await slotsReport()),
     });
   } catch (error) {
     sendJson(res, 503, {
@@ -1845,90 +1862,604 @@ async function handleHealth(res: ServerResponse): Promise<void> {
   }
 }
 
-// --- server -----------------------------------------------------------------
+// --- the coordinator: HTTP, slots, cancellation -------------------------------
 
-const server = createServer((req, res) => {
-  void (async () => {
-    const url = new URL(
-      req.url ?? "/",
-      `http://${req.headers.host ?? "localhost"}`,
-    );
-    try {
-      if (req.method === "GET" && url.pathname === "/health") {
-        await handleHealth(res);
-        return;
-      }
-      if (req.method === "GET" && url.pathname.startsWith("/progress/")) {
-        const job = jobs.get(
-          decodeURIComponent(url.pathname.slice("/progress/".length)),
-        );
-        if (!job) {
-          sendJson(res, 404, {
-            error: "no such job (finished jobs are kept for a minute)",
-            code: "JOB_NOT_FOUND",
-          });
-          return;
-        }
-        sendJson(res, 200, {
-          phase: job.phase,
-          pages: job.pages,
-          pagesDone: job.pagesDone,
-          elapsedMs: (job.finishedAt ?? Date.now()) - job.startedAt,
-        });
-        return;
-      }
-      if (req.method === "POST" && url.pathname === "/convert") {
-        // The heartbeat starts before the work, not after the body is read: a
-        // large upload over a slow link is itself long enough to trip an idle
-        // timeout, and nothing has been written yet at that point.
-        const heartbeat = startHeartbeat(res, HEARTBEAT_MS);
-        try {
-          await handleConvert(req, res, url);
-        } finally {
-          heartbeat.stop();
-        }
-        return;
-      }
-      if (url.pathname === "/") {
-        sendJson(res, 200, {
-          service: "vault-convert",
-          endpoints: ["GET /health", "POST /convert?filename=<name>"],
-        });
-        return;
-      }
-      sendJson(res, 404, { error: "not found" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/ENOENT|command not found/i.test(message)) {
-        sendJson(res, 415, { error: message });
-        return;
-      }
-      sendJson(res, 500, { error: message });
-    }
+/**
+ * The service is two kinds of process. The **coordinator** — the one started —
+ * answers HTTP, holds the slots and the progress table, and keeps the upload on
+ * disk; it never converts. Each conversion runs in a **worker**: a child process
+ * of this same file (`CONVERT_ROLE=worker`) holding its own warm pipeline. So a
+ * conversion can be stopped for real — docling.rs has no abort, but a process
+ * can be ended — and a crash or an out-of-memory in one document is that
+ * worker's, not the service's.
+ */
+type Lane = "models" | "other";
+
+interface Worker {
+  child: ChildProcess;
+  /** Resolves true once the worker said it is ready, false if it died first. */
+  ready: Promise<boolean>;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+}
+
+interface Running {
+  id: string;
+  filename: string;
+  lane: Lane;
+  since: number;
+  worker: Worker | null;
+  cancelled: boolean;
+  /** Stops whatever stage the job is in: the upload, or the worker converting it. */
+  stop: (() => void) | null;
+}
+
+const lanes: Record<
+  Lane,
+  { capacity: number; running: Set<Running>; idle: Worker[] }
+> = {
+  models: { capacity: MODEL_SLOTS, running: new Set(), idle: [] },
+  other: { capacity: OTHER_SLOTS, running: new Set(), idle: [] },
+};
+const runningJobs = new Map<string, Running>();
+const JOB_ID = /^[\w-]{1,80}$/;
+const SELF = fileURLToPath(import.meta.url);
+const CANCELLED: Settled = {
+  status: 409,
+  body: { error: "the conversion was cancelled", code: "CONVERSION_CANCELLED" },
+};
+
+/** A worker's answer: small bodies travel inline, a converted document as a file the coordinator streams. */
+type Settled =
+  | { status: number; body: Record<string, unknown> }
+  | { status: 200; resultPath: string };
+
+/** Image extensions docling.rs may read as `image`; filtered through the binding's own naming. */
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif"];
+
+let modelExtensionsProbe: Promise<string[]> | null = null;
+/** The extensions that go to the model lane: PDF always, images when the binding reads them. */
+function modelExtensions(): Promise<string[]> {
+  modelExtensionsProbe ??= (async () => {
+    if (!(await bindingAvailable())) return ["pdf"];
+    const library = await docling();
+    const backed = IMAGE_EXTENSIONS.filter((ext) => {
+      const format = library.formatFromName(`file.${ext}`);
+      return format !== null && MODEL_BACKED_FORMATS.has(format);
+    });
+    return ["pdf", ...backed];
   })();
-});
+  return modelExtensionsProbe;
+}
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    server.close(() => process.exit(0));
+async function laneFor(filename: string): Promise<Lane> {
+  const ext = extname(filename).slice(1).toLowerCase();
+  return (await modelExtensions()).includes(ext) ? "models" : "other";
+}
+
+/** `/health`'s `slots` and `modelExtensions`: a client sends no more at once than these. */
+async function slotsReport(): Promise<{
+  slots: { models: number; other: number; busyModels: number; busyOther: number };
+  modelExtensions: string[];
+}> {
+  return {
+    slots: {
+      models: lanes.models.capacity,
+      other: lanes.other.capacity,
+      busyModels: lanes.models.running.size,
+      busyOther: lanes.other.running.size,
+    },
+    modelExtensions: await modelExtensions(),
+  };
+}
+
+/** A worker's environment: this process's, with the PDF thread budget split when several model slots share it. */
+function workerEnv(lane: Lane): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, CONVERT_ROLE: "worker" };
+  if (lane === "models" && MODEL_SLOTS > 1) {
+    const share = Math.max(1, Math.floor(PDF_THREAD_BUDGET / MODEL_SLOTS));
+    env.DOCLING_RS_PDF_THREADS = String(share);
+    env.DOCLING_RS_TF_INTRA = String(Math.min(2, share));
+    env.CONVERT_OCR_JOBS = String(share);
+  }
+  return env;
+}
+
+function spawnWorker(lane: Lane): Worker {
+  const child = fork(SELF, [], {
+    env: workerEnv(lane),
+    // Its own process group on POSIX, so stopping it stops the helpers it
+    // started too (ocrmypdf, tesseract, gs, qpdf) — they are not detached.
+    detached: process.platform !== "win32",
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+  });
+  const ready = new Promise<boolean>((resolve) => {
+    const onMessage = (message: { type?: string } | null) => {
+      if (message?.type !== "ready") return;
+      child.off("message", onMessage);
+      resolve(true);
+    };
+    child.on("message", onMessage);
+    child.once("exit", () => resolve(false));
+    child.once("error", () => resolve(false));
+  });
+  return { child, ready, idleTimer: null };
+}
+
+/** End a worker and everything it started. Its slot's job, if any, settles from its exit. */
+function stopWorker(worker: Worker): void {
+  if (worker.idleTimer) clearTimeout(worker.idleTimer);
+  const { child } = worker;
+  const pid = child.pid;
+  if (pid === undefined || child.exitCode !== null || child.signalCode !== null)
+    return;
+  if (process.platform === "win32") {
+    // No process groups: taskkill walks the tree.
+    spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    }).on("error", () => child.kill());
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+async function acquireWorker(lane: Lane): Promise<Worker> {
+  const pool = lanes[lane];
+  for (let worker = pool.idle.pop(); worker; worker = pool.idle.pop()) {
+    if (worker.idleTimer) clearTimeout(worker.idleTimer);
+    worker.idleTimer = null;
+    if (worker.child.exitCode === null && worker.child.signalCode === null)
+      return worker;
+  }
+  const worker = spawnWorker(lane);
+  if (!(await worker.ready)) {
+    throw new Error("the conversion worker did not start (see the converter log)");
+  }
+  return worker;
+}
+
+function releaseWorker(lane: Lane, worker: Worker): void {
+  if (worker.child.exitCode !== null || worker.child.signalCode !== null) return;
+  const pool = lanes[lane];
+  pool.idle.push(worker);
+  if (IDLE_RELEASE_MS > 0) {
+    worker.idleTimer = setTimeout(() => {
+      const index = pool.idle.indexOf(worker);
+      if (index < 0) return;
+      pool.idle.splice(index, 1);
+      stopWorker(worker);
+      console.log(`[convert] stopped an idle ${lane} worker after ${IDLE_RELEASE_MS} ms`);
+    }, IDLE_RELEASE_MS);
+    worker.idleTimer.unref();
+  }
+}
+
+const isCancelled = (entry: Running): boolean => entry.cancelled;
+
+/** Cancel a job: its upload stops, or its worker is ended; the slot is freed when it settles. */
+function cancelRunning(entry: Running): void {
+  if (entry.cancelled) return;
+  entry.cancelled = true;
+  const job = jobs.get(entry.id);
+  if (job) job.phase = "cancelled";
+  entry.stop?.();
+}
+
+class BodyTooLarge extends Error {}
+class UploadCancelled extends Error {}
+
+/** Stream the upload to `path`, refusing anything over `MAX_BYTES`. Never held in memory whole. */
+function receiveBody(
+  req: IncomingMessage,
+  path: string,
+  entry: Running,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const out = createWriteStream(path);
+    let size = 0;
+    let failed = false;
+    const fail = (error: Error): void => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(out);
+      out.destroy();
+      req.resume(); // drain the rest, so the answer still reaches the caller
+      reject(error);
+    };
+    entry.stop = () => fail(new UploadCancelled("the conversion was cancelled"));
+    req.on("data", (part: Buffer) => {
+      size += part.length;
+      if (size > MAX_BYTES) fail(new BodyTooLarge(`body exceeds ${MAX_BYTES} bytes`));
+    });
+    req.on("error", (error) => fail(error));
+    out.on("error", (error) => fail(error));
+    out.on("finish", () => {
+      if (!failed) resolve(size);
+    });
+    req.pipe(out);
   });
 }
 
-server.listen(PORT, HOST, () => {
-  // One line, so `docker logs` / journald show something useful at start-up.
-  console.log(
-    `vault-convert listening on http://${HOST}:${PORT} (${runtimeName()})`,
-  );
-  if (IDLE_RELEASE_MS > 0) {
-    console.log(`[convert] idle release: ${IDLE_RELEASE_MS} ms`);
-    scheduleIdleRelease();
-  }
-  // After listening, so a slow sweep never delays readiness.
-  void sweepStaleTempDirs().then((removed) => {
-    if (removed > 0) {
-      console.log(
-        `[convert] swept ${removed} stale scratch dir(s) from a previous run`,
-      );
-    }
+/** A converted document, streamed from the worker's file: the coordinator never parses it. */
+function sendResultFile(res: ServerResponse, path: string): Promise<void> {
+  return new Promise((resolve) => {
+    void stat(path).then(
+      (info) => {
+        if (!res.headersSent) {
+          res.writeHead(200, {
+            "content-type": "application/json",
+            "content-length": info.size,
+          });
+        }
+        const stream = createReadStream(path);
+        stream.on("error", () => {
+          res.destroy();
+          resolve();
+        });
+        res.once("close", () => resolve());
+        stream.pipe(res);
+      },
+      () => {
+        sendJson(res, 500, { error: "the converted document could not be read back" });
+        resolve();
+      },
+    );
   });
-});
+}
+
+async function handleConvertRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+): Promise<void> {
+  const filename = basename(url.searchParams.get("filename") ?? "");
+  if (!filename) {
+    req.resume();
+    sendJson(res, 400, { error: "filename query parameter is required" });
+    return;
+  }
+  const lane = await laneFor(filename);
+  const pool = lanes[lane];
+  // The slot is taken before the upload is read: a caller that would be turned
+  // away learns it at once, instead of after sending 100 MB.
+  if (pool.running.size >= pool.capacity) {
+    req.resume();
+    const busyWith = [...pool.running].sort((a, b) => a.since - b.since);
+    sendJson(res, 503, {
+      error: `${busyWith.length === 1 ? "a conversion is" : `${busyWith.length} conversions are`} already running (${busyWith.map((r) => r.filename).join(", ")}); try again when ${busyWith.length === 1 ? "it finishes" : "one finishes"}`,
+      code: "CONVERSION_BUSY",
+      busyWith: busyWith[0]?.filename ?? null,
+      sinceMs: busyWith[0] ? Date.now() - busyWith[0].since : 0,
+    });
+    return;
+  }
+  const asked = url.searchParams.get("job");
+  if (asked !== null && JOB_ID.test(asked) && runningJobs.has(asked)) {
+    req.resume();
+    sendJson(res, 409, { error: `job ${asked} is already running`, code: "JOB_EXISTS" });
+    return;
+  }
+  const id = asked !== null && JOB_ID.test(asked) ? asked : randomUUID();
+  const entry: Running = {
+    id,
+    filename,
+    lane,
+    since: Date.now(),
+    worker: null,
+    cancelled: false,
+    stop: null,
+  };
+  pool.running.add(entry);
+  runningJobs.set(id, entry);
+  const job = startJob(id);
+  // A caller that goes away takes its conversion with it. `res`, not `req`: a
+  // request reports "close" as soon as its body has been read.
+  res.once("close", () => {
+    if (!res.writableFinished) cancelRunning(entry);
+  });
+  let dir: string | null = null;
+  let worker: Worker | null = null;
+  let outcome: Settled;
+  try {
+    dir = await mkdtemp(join(tmpdir(), TMP_PREFIX));
+    let size: number;
+    try {
+      size = await receiveBody(req, join(dir, filename), entry);
+    } catch (error) {
+      outcome =
+        error instanceof UploadCancelled
+          ? CANCELLED
+          : { status: 413, body: { error: error instanceof Error ? error.message : String(error) } };
+      return;
+    }
+    if (size === 0) {
+      outcome = { status: 400, body: { error: "empty body" } };
+      return;
+    }
+    if (entry.cancelled) {
+      outcome = CANCELLED;
+      return;
+    }
+    worker = await acquireWorker(lane);
+    entry.worker = worker;
+    const request: JobRequest = {
+      id,
+      dir,
+      filename,
+      ocr: url.searchParams.get("ocr") === "1",
+      figures: url.searchParams.get("figures") === "1",
+    };
+    const child = worker.child;
+    const live = worker;
+    outcome = await new Promise<Settled>((resolve) => {
+      const onMessage = (message: WorkerMessage | null) => {
+        if (!message || message.id !== id) return;
+        if (message.type === "progress" && job) {
+          job.phase = entry.cancelled ? "cancelled" : message.progress.phase;
+          job.pages = message.progress.pages;
+          job.pagesDone = message.progress.pagesDone;
+          return;
+        }
+        if (message.type !== "result") return;
+        done();
+        resolve(
+          message.resultPath
+            ? { status: 200, resultPath: message.resultPath }
+            : { status: message.status, body: message.body ?? {} },
+        );
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        done();
+        resolve(
+          entry.cancelled
+            ? CANCELLED
+            : {
+                status: 500,
+                body: {
+                  error: `the converter stopped while converting ${filename} (${signal ?? `exit ${code}`}) — it may have run out of memory`,
+                  code: "WORKER_EXITED",
+                },
+              },
+        );
+      };
+      const done = () => {
+        child.off("message", onMessage);
+        child.off("exit", onExit);
+      };
+      child.on("message", onMessage);
+      child.once("exit", onExit);
+      entry.stop = () => stopWorker(live);
+      child.send({ type: "convert", request });
+    });
+    // Read through a call: a cancel lands while the conversion is awaited.
+    if (isCancelled(entry)) outcome = CANCELLED;
+  } catch (error) {
+    outcome = {
+      status: 500,
+      body: { error: error instanceof Error ? error.message : String(error) },
+    };
+  } finally {
+    entry.stop = null;
+    // A cancel may have ended the worker; one that finished goes back to its lane.
+    if (worker && !entry.cancelled) releaseWorker(lane, worker);
+    const settled = outcome!;
+    finishJob(
+      id,
+      job,
+      entry.cancelled ? "cancelled" : settled.status === 200 ? "done" : "failed",
+    );
+    if (!res.destroyed && !res.writableEnded) {
+      if ("resultPath" in settled) await sendResultFile(res, settled.resultPath);
+      else sendJson(res, settled.status, settled.body);
+    }
+    pool.running.delete(entry);
+    runningJobs.delete(id);
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
+}
+
+type WorkerMessage =
+  | { type: "ready"; id?: undefined }
+  | {
+      type: "progress";
+      id: string;
+      progress: { phase: Phase; pages: number | null; pagesDone: number };
+    }
+  | {
+      type: "result";
+      id: string;
+      status: number;
+      body?: Record<string, unknown>;
+      resultPath?: string;
+    };
+
+function startCoordinator(): void {
+  const server = createServer((req, res) => {
+    void (async () => {
+      const url = new URL(
+        req.url ?? "/",
+        `http://${req.headers.host ?? "localhost"}`,
+      );
+      try {
+        if (req.method === "GET" && url.pathname === "/health") {
+          await handleHealth(res);
+          return;
+        }
+        if (req.method === "GET" && url.pathname.startsWith("/progress/")) {
+          const job = jobs.get(
+            decodeURIComponent(url.pathname.slice("/progress/".length)),
+          );
+          if (!job) {
+            sendJson(res, 404, {
+              error: "no such job (finished jobs are kept for a minute)",
+              code: "JOB_NOT_FOUND",
+            });
+            return;
+          }
+          sendJson(res, 200, {
+            phase: job.phase,
+            pages: job.pages,
+            pagesDone: job.pagesDone,
+            elapsedMs: (job.finishedAt ?? Date.now()) - job.startedAt,
+          });
+          return;
+        }
+        if (req.method === "POST" && url.pathname === "/convert") {
+          // The heartbeat starts before the work, not after the body is read: a
+          // large upload over a slow link is itself long enough to trip an idle
+          // timeout, and nothing has been written yet at that point.
+          const heartbeat = startHeartbeat(res, HEARTBEAT_MS);
+          try {
+            await handleConvertRequest(req, res, url);
+          } finally {
+            heartbeat.stop();
+          }
+          return;
+        }
+        if (req.method === "DELETE" && url.pathname.startsWith("/convert/")) {
+          const id = decodeURIComponent(url.pathname.slice("/convert/".length));
+          if (!JOB_ID.test(id)) {
+            sendJson(res, 400, { error: "malformed job id", code: "INVALID_JOB" });
+            return;
+          }
+          const entry = runningJobs.get(id);
+          if (!entry) {
+            sendJson(res, 404, { cancelled: false });
+            return;
+          }
+          cancelRunning(entry);
+          sendJson(res, 200, { cancelled: true });
+          return;
+        }
+        if (url.pathname === "/") {
+          sendJson(res, 200, {
+            service: "vault-convert",
+            endpoints: [
+              "GET /health",
+              "POST /convert?filename=<name>&job=<id>",
+              "GET /progress/<id>",
+              "DELETE /convert/<id>",
+            ],
+          });
+          return;
+        }
+        sendJson(res, 404, { error: "not found" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/ENOENT|command not found/i.test(message)) {
+          sendJson(res, 415, { error: message });
+          return;
+        }
+        sendJson(res, 500, { error: message });
+      }
+    })();
+  });
+
+  const stopAll = () => {
+    for (const lane of Object.values(lanes)) {
+      for (const worker of lane.idle) stopWorker(worker);
+      for (const entry of lane.running) if (entry.worker) stopWorker(entry.worker);
+    }
+  };
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      stopAll();
+      server.close(() => process.exit(0));
+    });
+  }
+  process.on("exit", stopAll);
+
+  server.listen(PORT, HOST, () => {
+    // One line, so `docker logs` / journald show something useful at start-up.
+    console.log(
+      `vault-convert listening on http://${HOST}:${PORT} (${runtimeName()}; slots: ${MODEL_SLOTS} model, ${OTHER_SLOTS} other)`,
+    );
+    if (IDLE_RELEASE_MS > 0) {
+      console.log(`[convert] idle workers stop after ${IDLE_RELEASE_MS} ms`);
+    }
+    // After listening, so a slow sweep never delays readiness.
+    void sweepStaleTempDirs().then((removed) => {
+      if (removed > 0) {
+        console.log(
+          `[convert] swept ${removed} stale scratch dir(s) from a previous run`,
+        );
+      }
+    });
+  });
+}
+
+// --- the worker ----------------------------------------------------------------
+
+/** How often a worker reports its progress to the coordinator while converting. */
+const PROGRESS_REPORT_MS = 300;
+
+function startWorker(): void {
+  // The coordinator went away (ended, or killed outright): so does its worker.
+  process.on("disconnect", () => process.exit(0));
+  process.on("message", (message: { type?: string; request?: JobRequest } | null) => {
+    if (message?.type === "convert" && message.request)
+      void runJob(message.request);
+  });
+  process.send?.({ type: "ready" });
+}
+
+async function runJob(request: JobRequest): Promise<void> {
+  const job: JobProgress = {
+    phase: "starting",
+    pages: null,
+    pagesDone: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+  };
+  let last = "";
+  const report = (): void => {
+    const progress = { phase: job.phase, pages: job.pages, pagesDone: job.pagesDone };
+    const key = JSON.stringify(progress);
+    if (key === last) return;
+    last = key;
+    process.send?.({ type: "progress", id: request.id, progress });
+  };
+  const ticker = setInterval(report, PROGRESS_REPORT_MS);
+  let outcome: { status: number; body: Record<string, unknown> } | null = null;
+  try {
+    await convertJob(request, job, (status, body) => {
+      outcome = { status, body };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    outcome = {
+      status: /ENOENT|command not found/i.test(message) ? 415 : 500,
+      body: { error: message },
+    };
+  } finally {
+    clearInterval(ticker);
+    report();
+  }
+  const settled: { status: number; body: Record<string, unknown> } = outcome ?? {
+    status: 500,
+    body: { error: "the conversion ended without an answer" },
+  };
+  if (settled.status === 200) {
+    // A document can be megabytes of Markdown, chunks and figures: it travels
+    // as a file the coordinator streams, never as one IPC message to parse.
+    const resultPath = join(request.dir, `result-${request.id}.json`);
+    await writeFile(resultPath, JSON.stringify(settled.body));
+    process.send?.({ type: "result", id: request.id, status: 200, resultPath });
+    return;
+  }
+  process.send?.({
+    type: "result",
+    id: request.id,
+    status: settled.status,
+    body: settled.body,
+  });
+}
+
+if (process.env.CONVERT_ROLE === "worker" && typeof process.send === "function") {
+  startWorker();
+} else {
+  startCoordinator();
+}

@@ -16,14 +16,25 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
  * into a staging dir, then swapped into `node_modules/` in one rename. The
  * version is the one the vendored service is tested against.
  */
-export const BINDING_VERSION = "1.58.0";
+export const BINDING_VERSION = "2.13.0";
+/**
+ * Where this project's macOS build of `BINDING_VERSION` is not published yet, a Mac keeps the last
+ * version that was — it converts with that until the new build is recorded in `SELF_BUILT`, then
+ * upgrades on its own (converter.ts `autoInstall`). The vendored service runs on either.
+ */
+export const DARWIN_FALLBACK_VERSION = "1.58.0";
 export const DEFAULT_REGISTRY = "https://registry.npmjs.org";
-/** The registry's integrity strings for the pinned version, recorded 2026-10-07: a registry answer that differs is refused before any download. */
+/**
+ * The registry's integrity strings for the pinned versions: a registry answer that differs is refused
+ * before any download. 2.13.0 recorded 2026-10-10 (each tarball re-hashed after download); the
+ * 1.58.0 JS package stays for Macs on `DARWIN_FALLBACK_VERSION`.
+ */
 export const PINNED_INTEGRITY: Record<string, string> = {
+  "docling.rs@2.13.0": "sha512-dR14cshbSXJavGDuTGHZFXY6CtSmFx8MzEr7s652i6j7Jc6uGtm1CkgrOpfRMbawA/vQp/qWAJZa39bVLIDe9Q==",
+  "docling.rs-linux-x64-gnu@2.13.0": "sha512-DD76TNrxZGOwx2n0Yq9nzQHZoOsGvIGOaqGR4WPw1ffSm8076KtcGttoeUqP0dGVWfZ98LsVRlWuqJLpUqi2iQ==",
+  "docling.rs-linux-arm64-gnu@2.13.0": "sha512-WyT5x7V4K3M1JMw3FtekLITdO7jW4k4YKnmKy1Ob37hkOcoV0dA0r/ZTtOnAVztWR5/nekyuFlMzJlAakp+1Qw==",
+  "docling.rs-win32-x64-msvc@2.13.0": "sha512-sT16Zhe1J1jbqGTnG4x9nwAAUhLw48o/3dxXz/E89zQU/y1RGJUsjartYXyt1sxVS7p/qk1972XpxfO4GqAxIg==",
   "docling.rs@1.58.0": "sha512-6PkJ2g1O44FjPFIzrRANZSVR5gv95OYDg/rjy5Ellmkc1YIuSPJN3AXzEbJg4W0lNURsCkqMizW+G6ogj6qHLw==",
-  "docling.rs-linux-x64-gnu@1.58.0": "sha512-4be77AUbYgCn7QiwBGEGnUR2lYRnaJDOLTfr2AN/ttUeBqJPEP8Z0bieexWVjeSpdhXbJRstiWZJY15wqdpQfw==",
-  "docling.rs-linux-arm64-gnu@1.58.0": "sha512-G0KvOVbrsm0h2XCgjMUgVQ4JAEmvbswTdN5uM6QdnMjqWxvFZJobLOxpMNf1E4lLEfdvazM1Mk4xflzcCUKuUQ==",
-  "docling.rs-win32-x64-msvc@1.58.0": "sha512-rmQxc+hYfaI8HblD53DOATOlPqvllLv7B2fD8pG4C4zrKOTRO98UhUvN5iFy80WU53UR7NERqZyTYLshi5AdBw==",
 };
 
 /**
@@ -43,6 +54,13 @@ export const SELF_BUILT: Record<string, SelfBuiltPackage> = {
 /** Whether this project publishes the platform package for `triple` at `version`. */
 export function selfBuiltReady(triple: string, version: string = BINDING_VERSION): boolean {
   return Boolean(SELF_BUILT[`docling.rs-${triple}@${version}`]?.integrity);
+}
+
+/** The binding version this platform installs: `BINDING_VERSION`, or a Mac's fallback until its build is published. */
+export function bindingVersionFor(triple: string | null, selfBuilt: Record<string, SelfBuiltPackage> = SELF_BUILT): string {
+  const built = (version: string) => Boolean(selfBuilt[`docling.rs-${triple}@${version}`]?.integrity);
+  if (triple === "darwin-arm64" && !built(BINDING_VERSION) && built(DARWIN_FALLBACK_VERSION)) return DARWIN_FALLBACK_VERSION;
+  return BINDING_VERSION;
 }
 
 export type InstallPhase = "metadata" | "downloading" | "verifying" | "extracting" | "done";

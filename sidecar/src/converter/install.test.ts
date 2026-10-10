@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { installBinding, installedBinding, IntegrityError, removeBinding, SELF_BUILT, selfBuiltReady, type InstallProgress } from "./install.js";
+import { BINDING_VERSION, bindingVersionFor, DARWIN_FALLBACK_VERSION, installBinding, installedBinding, IntegrityError, removeBinding, SELF_BUILT, selfBuiltReady, type InstallProgress } from "./install.js";
 import { platformTriple } from "./platform.js";
 
 const require = createRequire(import.meta.url);
@@ -30,16 +30,16 @@ const sri = (bytes: Buffer) => `sha512-${createHash("sha512").update(bytes).dige
  * and an optional wrong integrity.
  */
 async function fakeRegistry(opts: { dropOnceAt?: number; wrongIntegrity?: boolean; stall?: boolean } = {}) {
-  const js = tarball({ "package.json": JSON.stringify({ name: "docling.rs", version: "1.58.0", main: "index.js" }), "index.js": 'module.exports = { marker: "fake-docling" };\n' });
-  const native = tarball({ "package.json": JSON.stringify({ name: "docling.rs-linux-x64-gnu", version: "1.58.0" }), "docling-rs.linux-x64-gnu.node": randomBytes(2 * 1024 * 1024) /* incompressible, like the real .node */ });
-  const darwin = tarball({ "package.json": JSON.stringify({ name: "docling.rs-darwin-arm64", version: "1.58.0" }), "docling-rs.darwin-arm64.node": randomBytes(256 * 1024) });
+  const js = tarball({ "package.json": JSON.stringify({ name: "docling.rs", version: BINDING_VERSION, main: "index.js" }), "index.js": 'module.exports = { marker: "fake-docling" };\n' });
+  const native = tarball({ "package.json": JSON.stringify({ name: "docling.rs-linux-x64-gnu", version: BINDING_VERSION }), "docling-rs.linux-x64-gnu.node": randomBytes(2 * 1024 * 1024) /* incompressible, like the real .node */ });
+  const darwin = tarball({ "package.json": JSON.stringify({ name: "docling.rs-darwin-arm64", version: BINDING_VERSION }), "docling-rs.darwin-arm64.node": randomBytes(256 * 1024) });
   const files: Record<string, Buffer> = { "docling.rs": js, "docling.rs-linux-x64-gnu": native, "docling.rs-darwin-arm64": darwin };
   const requests: { url: string; range: string | undefined }[] = [];
   let dropped = false;
   const server: Server = createServer((req, res) => {
     const url = req.url ?? "/";
     requests.push({ url, range: req.headers.range });
-    const meta = /^\/(docling\.rs(?:-[a-z0-9-]+)?)\/1\.58\.0$/.exec(url);
+    const meta = new RegExp(`^/(docling\\.rs(?:-[a-z0-9-]+)?)/${BINDING_VERSION.replaceAll(".", "\\.")}$`).exec(url);
     if (meta) {
       const name = meta[1]!;
       const bytes = files[name]!;
@@ -80,7 +80,7 @@ async function fakeRegistry(opts: { dropOnceAt?: number; wrongIntegrity?: boolea
   const port = await new Promise<number>((resolve) => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
   return {
     registry: `http://127.0.0.1:${port}`,
-    integrity: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [`${name}@1.58.0`, sri(bytes)])),
+    integrity: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [`${name}@${BINDING_VERSION}`, sri(bytes)])),
     requests,
     close: () =>
       new Promise<void>((r) => {
@@ -103,12 +103,12 @@ describe("installBinding", () => {
     const dir = mkdtemp("kv-conv-");
     const phases: InstallProgress[] = [];
     const manifest = await installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: {}, onProgress: (p) => phases.push(p) });
-    expect(manifest).toMatchObject({ version: "1.58.0", platform: "linux-x64-gnu" });
+    expect(manifest).toMatchObject({ version: BINDING_VERSION, platform: "linux-x64-gnu" });
     expect(manifest.bytes).toBeGreaterThan(100_000);
     expect(require(join(dir, "node_modules", "docling.rs"))).toEqual({ marker: "fake-docling" });
     expect(existsSync(join(dir, "node_modules", "docling.rs-linux-x64-gnu", "docling-rs.linux-x64-gnu.node"))).toBe(true);
-    expect(installedBinding(dir)).toMatchObject({ version: "1.58.0" });
-    expect(existsSync(join(dir, "downloads", "docling.rs-1.58.0.tgz"))).toBe(false); // tidied
+    expect(installedBinding(dir)).toMatchObject({ version: BINDING_VERSION });
+    expect(existsSync(join(dir, "downloads", `docling.rs-${BINDING_VERSION}.tgz`))).toBe(false); // tidied
     expect(phases.map((p) => p.phase)).toEqual(expect.arrayContaining(["metadata", "downloading", "verifying", "extracting", "done"]));
     const downloading = phases.filter((p) => p.phase === "downloading" && p.file === "docling.rs-linux-x64-gnu");
     expect(downloading.at(-1)!.bytes).toBe(downloading.at(-1)!.total);
@@ -136,8 +136,8 @@ describe("installBinding", () => {
     const dir = mkdtemp("kv-conv-");
     await expect(installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: {} })).rejects.toBeInstanceOf(IntegrityError);
     expect(existsSync(join(dir, "node_modules"))).toBe(false);
-    expect(existsSync(join(dir, "downloads", "docling.rs-1.58.0.tgz"))).toBe(false);
-    expect(existsSync(join(dir, "downloads", "docling.rs-1.58.0.tgz.part"))).toBe(false);
+    expect(existsSync(join(dir, "downloads", `docling.rs-${BINDING_VERSION}.tgz`))).toBe(false);
+    expect(existsSync(join(dir, "downloads", `docling.rs-${BINDING_VERSION}.tgz.part`))).toBe(false);
     expect(installedBinding(dir)).toBeNull();
   });
 });
@@ -158,7 +158,7 @@ describe("installBinding — never hangs, never trusts a changed registry", () =
     const reg = await fakeRegistry();
     closers.push(reg.close);
     const dir = mkdtemp("kv-conv-");
-    await expect(installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: { "docling.rs@1.58.0": reg.integrity["docling.rs@1.58.0"]! } })).rejects.toThrow(/No pinned integrity for docling\.rs-linux-x64-gnu/);
+    await expect(installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: { [`docling.rs@${BINDING_VERSION}`]: reg.integrity[`docling.rs@${BINDING_VERSION}`]! } })).rejects.toThrow(/No pinned integrity for docling\.rs-linux-x64-gnu/);
     expect(reg.requests.some((r) => r.url === "/tgz/docling.rs-linux-x64-gnu")).toBe(false);
   });
 
@@ -166,7 +166,7 @@ describe("installBinding — never hangs, never trusts a changed registry", () =
     const reg = await fakeRegistry();
     closers.push(reg.close);
     const dir = mkdtemp("kv-conv-");
-    await expect(installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: { "docling.rs@1.58.0": "sha512-somethingelse" } })).rejects.toBeInstanceOf(IntegrityError);
+    await expect(installBinding({ dir, triple: "linux-x64-gnu", registry: reg.registry, pins: { [`docling.rs@${BINDING_VERSION}`]: "sha512-somethingelse" } })).rejects.toBeInstanceOf(IntegrityError);
     expect(reg.requests.some((r) => r.url.startsWith("/tgz/"))).toBe(false);
   });
 });
@@ -176,17 +176,17 @@ describe("installBinding — the macOS package this project builds", () => {
     const reg = await fakeRegistry();
     closers.push(reg.close);
     const dir = mkdtemp("kv-conv-");
-    const selfBuilt = { "docling.rs-darwin-arm64@1.58.0": { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: reg.integrity["docling.rs-darwin-arm64@1.58.0"]! } };
-    const manifest = await installBinding({ dir, triple: "darwin-arm64", registry: reg.registry, pins: { "docling.rs@1.58.0": reg.integrity["docling.rs@1.58.0"]! }, selfBuilt });
-    expect(manifest).toMatchObject({ version: "1.58.0", platform: "darwin-arm64" });
+    const selfBuilt = { [`docling.rs-darwin-arm64@${BINDING_VERSION}`]: { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: reg.integrity[`docling.rs-darwin-arm64@${BINDING_VERSION}`]! } };
+    const manifest = await installBinding({ dir, triple: "darwin-arm64", registry: reg.registry, pins: { [`docling.rs@${BINDING_VERSION}`]: reg.integrity[`docling.rs@${BINDING_VERSION}`]! }, selfBuilt });
+    expect(manifest).toMatchObject({ version: BINDING_VERSION, platform: "darwin-arm64" });
     expect(existsSync(join(dir, "node_modules", "docling.rs-darwin-arm64", "docling-rs.darwin-arm64.node"))).toBe(true);
-    expect(reg.requests.some((r) => r.url === "/docling.rs-darwin-arm64/1.58.0")).toBe(false); // never asked the registry for it
+    expect(reg.requests.some((r) => r.url === `/docling.rs-darwin-arm64/${BINDING_VERSION}`)).toBe(false); // never asked the registry for it
   });
   it("refuses a release asset whose bytes differ from the pin", async () => {
     const reg = await fakeRegistry();
     closers.push(reg.close);
     const dir = mkdtemp("kv-conv-");
-    const selfBuilt = { "docling.rs-darwin-arm64@1.58.0": { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: "sha512-somethingelse" } };
+    const selfBuilt = { [`docling.rs-darwin-arm64@${BINDING_VERSION}`]: { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: "sha512-somethingelse" } };
     await expect(installBinding({ dir, triple: "darwin-arm64", registry: reg.registry, pins: {}, selfBuilt })).rejects.toThrow();
     expect(installedBinding(dir)).toBeNull();
   });
@@ -194,15 +194,23 @@ describe("installBinding — the macOS package this project builds", () => {
     const reg = await fakeRegistry();
     closers.push(reg.close);
     const dir = mkdtemp("kv-conv-");
-    const selfBuilt = { "docling.rs-darwin-arm64@1.58.0": { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: "" } };
+    const selfBuilt = { [`docling.rs-darwin-arm64@${BINDING_VERSION}`]: { url: `${reg.registry}/tgz/docling.rs-darwin-arm64`, integrity: "" } };
     await expect(installBinding({ dir, triple: "darwin-arm64", registry: reg.registry, pins: {}, selfBuilt })).rejects.toBeInstanceOf(IntegrityError);
     expect(reg.requests.some((r) => r.url === "/tgz/docling.rs-darwin-arm64")).toBe(false);
   });
-  it("points at a pre-release of this project for the pinned binding version", () => {
-    expect(Object.keys(SELF_BUILT)).toEqual(["docling.rs-darwin-arm64@1.58.0"]);
-    expect(SELF_BUILT["docling.rs-darwin-arm64@1.58.0"]!.url).toBe("https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v1.58.0/docling.rs-darwin-arm64-1.58.0.tgz");
-    expect(selfBuiltReady("darwin-arm64")).toBe(Boolean(SELF_BUILT["docling.rs-darwin-arm64@1.58.0"]!.integrity));
-    expect(selfBuiltReady("linux-x64-gnu")).toBe(false);
+  it("points at pre-releases of this project, and keeps a Mac on the last published build until the new one is recorded", () => {
+    for (const [key, entry] of Object.entries(SELF_BUILT)) {
+      const version = key.split("@")[1]!;
+      expect(entry.url).toBe(`https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v${version}/docling.rs-darwin-arm64-${version}.tgz`);
+    }
+    // Linux and Windows always take the pinned version: npm publishes theirs.
+    expect(bindingVersionFor("linux-x64-gnu")).toBe(BINDING_VERSION);
+    expect(bindingVersionFor("win32-x64-msvc")).toBe(BINDING_VERSION);
+    // A Mac: the pinned version once its build is recorded, the fallback until then — never nothing.
+    const fallbackOnly = { [`docling.rs-darwin-arm64@${DARWIN_FALLBACK_VERSION}`]: { url: "u", integrity: "sha512-x" } };
+    expect(bindingVersionFor("darwin-arm64", fallbackOnly)).toBe(DARWIN_FALLBACK_VERSION);
+    expect(bindingVersionFor("darwin-arm64", { ...fallbackOnly, [`docling.rs-darwin-arm64@${BINDING_VERSION}`]: { url: "u", integrity: "sha512-y" } })).toBe(BINDING_VERSION);
+    expect(selfBuiltReady("darwin-arm64", bindingVersionFor("darwin-arm64"))).toBe(true);
   });
 });
 

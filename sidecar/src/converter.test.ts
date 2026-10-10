@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { ConverterBusyError, ConverterInputError, converterEnvironment, createConverterManager, missingOnPath, type ConverterDeps, type Installer } from "./converter.js";
-import type { BindingManifest } from "./converter/install.js";
+import { BINDING_VERSION, type BindingManifest } from "./converter/install.js";
 
 class FakeChild extends EventEmitter {
   pid = 4242;
@@ -221,7 +221,7 @@ function fakeInstaller(opts: { hold?: boolean } = {}) {
       onProgress({ phase: "verifying", file: "docling.rs-linux-x64-gnu" });
       onProgress({ phase: "extracting", file: "docling.rs-linux-x64-gnu" });
       onProgress({ phase: "done" });
-      state.binding = { version: "1.58.0", platform: "linux-x64-gnu", installedAt: "2026-10-06T00:00:00.000Z", bytes: 100 };
+      state.binding = { version: BINDING_VERSION, platform: "linux-x64-gnu", installedAt: "2026-10-06T00:00:00.000Z", bytes: 100 };
       return state.binding;
     },
     installModels: async (onProgress) => {
@@ -250,7 +250,7 @@ describe("converter manager — installing", () => {
     await tick();
     const done = await h.manager.status();
     expect(done.job).toMatchObject({ component: "binding", phase: "done", percent: 100 });
-    expect(done.installed.binding).toMatchObject({ installed: true, version: "1.58.0" });
+    expect(done.installed.binding).toMatchObject({ installed: true, version: BINDING_VERSION });
     expect(h.spawns).toHaveLength(2); // restarted, so the helper's once-per-process probe sees the binding
     expect(done.state).toBe("ready");
   });
@@ -436,6 +436,31 @@ describe("converter manager — installing on its own", () => {
     expect(state.binding).not.toBeNull();
     expect(state.models).toBe(true);
     expect(await h.manager.autoInstall()).toEqual([]); // nothing left to do
+  });
+
+  it("upgrades a binding of another version, stopping the helper that loaded it before the swap", async () => {
+    const { installer, state } = fakeInstaller();
+    state.binding = { version: "1.0.0", platform: "linux-x64-gnu", installedAt: "2026-09-01T00:00:00.000Z", bytes: 100 };
+    state.models = true;
+    let helperRunningAtSwap: boolean | null = null;
+    const h = harness({
+      installer: {
+        ...installer,
+        installBinding: async (onProgress) => {
+          helperRunningAtSwap = h.children.some((c) => !c.exited);
+          return installer.installBinding(onProgress);
+        },
+      },
+      platform: linux,
+    });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(h.children.filter((c) => !c.exited)).toHaveLength(1);
+    expect(await h.manager.autoInstall()).toEqual(["binding"]);
+    expect(state.binding).toMatchObject({ version: BINDING_VERSION });
+    expect(helperRunningAtSwap).toBe(false); // Windows keeps a loaded .node locked
+    expect(h.children.filter((c) => !c.exited)).toHaveLength(1); // started again on the new binding
+    expect(await h.manager.autoInstall()).toEqual([]);
+    await h.manager.stop();
   });
 
   it("leaves a component the user removed alone", async () => {

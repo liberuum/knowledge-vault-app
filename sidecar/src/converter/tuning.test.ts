@@ -8,7 +8,16 @@ describe("converter tuning", () => {
 
   it("caps TableFormer at two threads, and never above the budget", () => {
     const env = converterTuning({ cores: 2, modelsDir: "/m", cacheDir: "/c", exists: () => false });
-    expect(env).toEqual({ DOCLING_RS_PDF_THREADS: "1", DOCLING_RS_TF_INTRA: "1", DOCLING_RS_NO_ARENA: "1", DOCLING_RS_GRAPH_CACHE_DIR: "/c", CONVERT_OCR_JOBS: "1" });
+    expect(env).toEqual({
+      DOCLING_RS_PDF_THREADS: "1",
+      DOCLING_RS_TF_INTRA: "1",
+      DOCLING_RS_NO_ARENA: "1",
+      DOCLING_RS_GRAPH_CACHE_DIR: "/c",
+      CONVERT_OCR_JOBS: "1",
+      CONVERT_MODEL_SLOTS: "1",
+      CONVERT_OTHER_SLOTS: "2",
+      CONVERT_IDLE_RELEASE_MS: "300000",
+    });
   });
 
   it("uses the KV-cache decoder only when both of its files are there", () => {

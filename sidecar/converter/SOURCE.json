@@ -1,9 +1,12 @@
 {
   "source": "@powerhousedao/docling-service (../docling/src)",
-  "commit": "691e223c057092c3f66d239810ce86ba37a5ac4c",
-  "syncedAt": "2026-10-08T13:42:13.125Z",
+  "commit": "09a621df1ea9c8f7ef16fd6329a1c59ef4ecc668",
+  "syncedAt": "2026-10-10T20:27:58.839Z",
   "files": [
+    "docjson.d.mts",
+    "docjson.mjs",
     "fetch-models.mjs",
+    "fetch-node.d.mts",
     "fetch-node.mjs",
     "figures.d.mts",
     "figures.mjs",

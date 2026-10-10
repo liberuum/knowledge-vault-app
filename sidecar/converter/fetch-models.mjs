@@ -31,14 +31,14 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * The download script of the docling.rs version in use. Override it with
- * `DOCLING_DOWNLOAD_SCRIPT_URL` to pin a tag: the script on `master` follows
- * the newest binding — the 1.100 line no longer fetches pdfium, which 1.5x
- * bindings still need — so a pinned binding wants its own tag's script.
+ * The download script of the docling.rs version in use — its tag, not `master`,
+ * which follows the newest binding (the script's file list moves with it: 1.81
+ * dropped pdfium, 1.98 added the PP-OCRv6 recognizer). Override it with
+ * `DOCLING_DOWNLOAD_SCRIPT_URL` to pin another tag.
  */
 const SCRIPT_URL =
   process.env.DOCLING_DOWNLOAD_SCRIPT_URL ??
-  "https://raw.githubusercontent.com/docling-project/docling.rs/master/scripts/install/download_dependencies.sh";
+  "https://raw.githubusercontent.com/docling-project/docling.rs/v2.13.0/scripts/install/download_dependencies.sh";
 
 // ASR is Whisper-tiny and is for audio/video only; the vault converts documents.
 const SCRIPT_ARGS = ["--no-asr"];
@@ -96,7 +96,8 @@ async function fetchScript() {
 /**
  * Windows has no `sh` (and the upstream script has no Windows branch): the download runs in Node
  * there (fetch-node.mjs). Elsewhere the pinned script runs, unless DOCLING_FETCH_NODE=1 asks for the
- * Node path. DOCLING_FETCH_ONLY=pdfium fetches just pdfium (a quick check of the platform's library).
+ * Node path. DOCLING_FETCH_ONLY=<file> (e.g. `.models/en_dict.txt`) fetches just that file — a quick
+ * check that the Node download works on the platform.
  */
 const IN_NODE = process.platform === "win32" || process.env.DOCLING_FETCH_NODE === "1";
 
@@ -124,8 +125,8 @@ async function main() {
     `\n${status.ready ? "ready" : "NOT READY"}  home=${status.home}  missing=${JSON.stringify(status.missing)}`,
   );
   console.log(
-    `  pdfium=${status.pdfium} layout=${status.layout} ocr=${status.ocr} ` +
-      `ocrDet=${status.ocrDet} tableformer=${status.tableformer} chunkTokenizer=${status.chunkTokenizer}`,
+    `  layout=${status.layout} ocr=${status.ocr} ocrDet=${status.ocrDet} ` +
+      `tableformer=${status.tableformer} chunkTokenizer=${status.chunkTokenizer}`,
   );
 
   if (!status.ready) {

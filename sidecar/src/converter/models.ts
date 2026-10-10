@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { RM_RETRY } from "../fs-retry.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BINDING_VERSION } from "./install.js";
 
 /**
  * The PDF models (~700 MB): the vendored `fetch-models.mjs` run as a child with
@@ -13,13 +14,27 @@ import { join } from "node:path";
  * and the binding first.
  */
 /**
- * The download script of the binding's own version (v1.58.0), not master: the
- * 1.100 line's script no longer fetches pdfium, which the 1.58 binding needs —
- * verified the hard way (720 MB fetched, `missing: ["pdfium"]`). Both the URL
- * and the hash are pinned; a changed script fails closed.
+ * The download script of the binding's own version, never master: the file list moves with the
+ * binding — 1.81 dropped pdfium, which 1.58 needs (verified the hard way: 720 MB fetched,
+ * `missing: ["pdfium"]`); 1.98 added the PP-OCRv6 recognizer. Both the URL and the hash are pinned;
+ * a changed script fails closed. A Mac on the fallback binding (install.ts) gets 1.58's script.
  */
-export const DOWNLOAD_SCRIPT_URL = "https://raw.githubusercontent.com/docling-project/docling.rs/v1.58.0/scripts/install/download_dependencies.sh";
-export const DOWNLOAD_SCRIPT_SHA256 = "a56bd5ee5039f3bffae5adb58d7c9f6d18261ecb1db04d2c807865147613e963";
+export const DOWNLOAD_SCRIPTS: Record<string, { url: string; sha256: string }> = {
+  "2.13.0": {
+    url: "https://raw.githubusercontent.com/docling-project/docling.rs/v2.13.0/scripts/install/download_dependencies.sh",
+    sha256: "78425527c90826c49ed38e859d240dab5f8469d941dff5ba3c360ca6bb2f4273",
+  },
+  "1.58.0": {
+    url: "https://raw.githubusercontent.com/docling-project/docling.rs/v1.58.0/scripts/install/download_dependencies.sh",
+    sha256: "a56bd5ee5039f3bffae5adb58d7c9f6d18261ecb1db04d2c807865147613e963",
+  },
+};
+/** The script for a binding version; the current one's for a version with none of its own. */
+export function downloadScriptFor(version: string): { url: string; sha256: string } {
+  return DOWNLOAD_SCRIPTS[version] ?? DOWNLOAD_SCRIPTS[BINDING_VERSION]!;
+}
+export const DOWNLOAD_SCRIPT_URL = downloadScriptFor(BINDING_VERSION).url;
+export const DOWNLOAD_SCRIPT_SHA256 = downloadScriptFor(BINDING_VERSION).sha256;
 
 export type ModelsProgress = { file: string | null; bytes: number; lines: string[] };
 

@@ -4,8 +4,8 @@ import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStr
 import { createServer } from "node:net";
 import { availableParallelism, setPriority } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
-import { installModels, modelsInstalled, removeModels, type ModelsProgress } from "./converter/models.js";
+import { bindingVersionFor, installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
+import { downloadScriptFor, installModels, modelsInstalled, removeModels, type ModelsProgress } from "./converter/models.js";
 import { platformTriple, type PlatformTriple } from "./converter/platform.js";
 import { CONVERTER_NICE, converterTuning, lowPriorityLaunch } from "./converter/tuning.js";
 import { engineEnvironment } from "./environment.js";
@@ -151,9 +151,23 @@ export function createConverterManager(deps: ConverterDeps) {
   const hooksUrl = new URL("./converter-hooks.mjs", import.meta.url).href;
   const platform = deps.platform ?? platformTriple();
   const installer: Installer = deps.installer ?? {
-    installBinding: (onProgress) => installBinding({ dir: converterDir, triple: platform.triple ?? "", registry: deps.registry, onProgress }),
-    installModels: (onProgress) =>
-      installModels({ modelsDir, script: join(dirname(deps.entry), "fetch-models.mjs"), hooks: hooksUrl, modulesDir, nodePath: deps.nodePath, env: deps.env, onProgress }),
+    installBinding: (onProgress) =>
+      installBinding({ dir: converterDir, triple: platform.triple ?? "", version: bindingVersionFor(platform.triple), registry: deps.registry, onProgress }),
+    // The models of the binding actually installed: a Mac on the fallback binding still needs 1.58's pdfium.
+    installModels: (onProgress) => {
+      const script = downloadScriptFor(installedBinding(converterDir)?.version ?? bindingVersionFor(platform.triple));
+      return installModels({
+        modelsDir,
+        script: join(dirname(deps.entry), "fetch-models.mjs"),
+        hooks: hooksUrl,
+        modulesDir,
+        nodePath: deps.nodePath,
+        env: deps.env,
+        scriptUrl: script.url,
+        scriptSha256: script.sha256,
+        onProgress,
+      });
+    },
     removeBinding: () => removeBinding(converterDir),
     removeModels: () => removeModels(modelsDir),
     bindingInstalled: () => installedBinding(converterDir),
@@ -401,6 +415,9 @@ export function createConverterManager(deps: ConverterDeps) {
   async function runInstall(current: InstallJob): Promise<void> {
     try {
       if (current.component === "binding") {
+        // Replacing a binding the helper has loaded: stop it first — Windows keeps a loaded .node
+        // locked, and the coordinator and its workers both load it. It restarts below.
+        if (installer.bindingInstalled() !== null && child) await stop();
         await installer.installBinding((p) => {
           if (job !== current) return;
           if (p.phase === "downloading") {
@@ -469,12 +486,17 @@ export function createConverterManager(deps: ConverterDeps) {
     if (mode !== "local") return done;
     const attempt = async (component: "binding" | "models"): Promise<void> => {
       if (removed.includes(component)) return;
-      if (component === "binding" ? installer.bindingInstalled() !== null : installer.modelsInstalled()) return;
+      // A binding of another version than this platform's is replaced: an app update brings the
+      // binding its converter is tested against, and an older install would otherwise stay put.
+      const installed = component === "binding" ? installer.bindingInstalled() : null;
+      const target = bindingVersionFor(platform.triple);
+      const upgrade = installed !== null && installed.version !== target;
+      if (component === "binding" ? installed !== null && !upgrade : installer.modelsInstalled()) return;
       if (component === "binding" && !platform.triple) return;
       if (component === "models" && (installer.bindingInstalled() === null || !modelsSupport().supported)) return;
       await running; // never two jobs at once
       if (jobActive()) return;
-      log(`installing the ${component} on its own (first use)`);
+      log(upgrade ? `upgrading the converter binding ${installed.version} → ${target}` : `installing the ${component} on its own (first use)`);
       await install(component);
       await running;
       if (job?.component === component && job.phase === "done") done.push(component);

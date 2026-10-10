@@ -21,7 +21,16 @@ import { join } from "node:path";
  * - The graph cache keeps the optimised model graphs between runs. docling.rs puts it under $HOME, which
  *   Windows does not set, so there it was off; here it lives with the converter.
  * - The service's OCR (ocrmypdf --jobs) gets the same thread budget.
+ * - One PDF at a time (`CONVERT_MODEL_SLOTS`), with up to two quick formats alongside
+ *   (`CONVERT_OTHER_SLOTS`). Measured on 12 PDFs (144 pages) with docling.rs 2.13 on this budget:
+ *   one at a time 78.7 s; two, three, four at once 84.6 / 75.2 / 85.9 s, each file 2–2.5× slower
+ *   and up to 0.9 GB more at peak — a conversion already spreads its pages over every thread.
+ * - A worker idle for five minutes is stopped (`CONVERT_IDLE_RELEASE_MS`): a warm one holds
+ *   1.2–3.5 GB, and a desktop needs it back more than it needs the next PDF to skip a model load.
  */
+
+/** How long an idle conversion worker keeps its models before it is stopped. */
+export const CONVERTER_IDLE_RELEASE_MS = 5 * 60_000;
 
 /** Below-normal: work the person is doing comes first. `nice -n 10` on macOS and Linux, BELOW_NORMAL on Windows. */
 export const CONVERTER_NICE = 10;
@@ -41,6 +50,9 @@ export function converterTuning(opts: { cores: number; modelsDir: string; cacheD
     DOCLING_RS_NO_ARENA: "1",
     DOCLING_RS_GRAPH_CACHE_DIR: opts.cacheDir,
     CONVERT_OCR_JOBS: String(threads),
+    CONVERT_MODEL_SLOTS: "1",
+    CONVERT_OTHER_SLOTS: "2",
+    CONVERT_IDLE_RELEASE_MS: String(CONVERTER_IDLE_RELEASE_MS),
   };
   const kv = join(opts.modelsDir, ".models", "tableformer", "decoder_kv.onnx");
   if (exists(kv) && exists(`${kv}.data`)) env.DOCLING_TABLEFORMER_DECODER = kv;

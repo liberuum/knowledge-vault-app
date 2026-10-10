@@ -37,7 +37,10 @@ export const DEFAULT_MAX_FIGURE_BYTES = 8 * 1024 * 1024;
 /**
  * Items in the order the markdown is written: `body.children`, descending into
  * groups (lists) but not into pictures (their children are captions, written
- * separately).
+ * separately). Furniture — running headers and footers — is skipped: the
+ * markdown leaves it out, and docling.rs 2.x lists it in `body.children` (13
+ * items on a 9-page paper; 1.58 kept it out), where a header could pass for a
+ * formula's neighbour or shift the picture count.
  * @param {any} doc
  * @returns {any[]}
  */
@@ -49,7 +52,7 @@ export function readingOrder(doc) {
   const walk = (refs) => {
     for (const ref of refs ?? []) {
       const item = byRef.get(ref.$ref);
-      if (!item) continue;
+      if (!item || item.content_layer === "furniture") continue;
       out.push(item);
       if (
         item.children?.length &&

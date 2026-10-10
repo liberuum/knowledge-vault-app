@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { win32 } from "node:path";
-import { selfBuiltReady } from "./install.js";
+import { bindingVersionFor, selfBuiltReady } from "./install.js";
 
 /**
  * The platform packages the converter installs: the ones `docling.rs` publishes on npm, and darwin-arm64,
@@ -45,7 +45,7 @@ export function platformTriple(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   musl: boolean = isMusl(platform),
-  darwinReady: boolean = selfBuiltReady("darwin-arm64"),
+  darwinReady: boolean = selfBuiltReady("darwin-arm64", bindingVersionFor("darwin-arm64")),
   vcRuntime: boolean = hasVcRuntime(platform),
 ): { triple: PlatformTriple | null; reason: string | null } {
   if (platform === "linux") {
