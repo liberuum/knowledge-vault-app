@@ -156,7 +156,10 @@ async function startSidecar(attempt = 0) {
 const ready = await startSidecar();
 
 const vite = run("bun", ["run", "--cwd", "host", "dev"], {
-  env: { ...process.env, VITE_SIDECAR_PORT: String(ready.port), VITE_CONTROL_PORT: String(ready.controlPort), VITE_CONTROL_TOKEN: TOKEN },
+  // Vite's pre-bundled libraries live with this run's data: a test run or a second dev loop
+  // rewriting a shared cache leaves this server's pages asking for files that are gone ("504
+  // Outdated Optimize Dep", "Importing a module script failed").
+  env: { ...process.env, VITE_SIDECAR_PORT: String(ready.port), VITE_CONTROL_PORT: String(ready.controlPort), VITE_CONTROL_TOKEN: TOKEN, KV_VITE_CACHE: join(dataDir, "vite-cache") },
 });
 vite.stdout.pipe(process.stdout);
 if (!noShell) {

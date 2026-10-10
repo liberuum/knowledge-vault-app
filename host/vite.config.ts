@@ -68,5 +68,7 @@ export default defineConfig(async () => {
     },
     // Imported lazily by sidecar.ts under Tauri; pre-bundling them avoids a mid-session re-optimisation (stale chunk names on first load).
     optimizeDeps: { include: ["@tauri-apps/api/core", "@tauri-apps/api/event"] },
+    // The dev loop gives each run its own cache (scripts/dev.mjs), so nothing else rewrites it mid-session.
+    ...(process.env.KV_VITE_CACHE ? { cacheDir: process.env.KV_VITE_CACHE } : {}),
   };
 });
