@@ -44,6 +44,12 @@ export const PINNED_INTEGRITY: Record<string, string> = {
  */
 export type SelfBuiltPackage = { url: string; integrity: string };
 export const SELF_BUILT: Record<string, SelfBuiltPackage> = {
+  "docling.rs-darwin-arm64@2.13.0": {
+    url: "https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v2.13.0/docling.rs-darwin-arm64-2.13.0.tgz",
+    // Published by the converter-binding workflow (run 38084239444: built, loaded on macOS, converted a sample),
+    // recorded 2026-10-10 and re-hashed from the downloaded asset.
+    integrity: "sha512-sFN3ES4yezKrYAelLdSuAweRuMMVMn/dXY2bFUqhk2uRv/eXw1ICZISa/CxCda5x5GyogzU3rgLwwT9Z/byoRg==",
+  },
   "docling.rs-darwin-arm64@1.58.0": {
     url: "https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v1.58.0/docling.rs-darwin-arm64-1.58.0.tgz",
     // Published by the converter-binding workflow (run 37761132274, Xcode 15.4), recorded 2026-10-08.
