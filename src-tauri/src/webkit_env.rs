@@ -86,7 +86,9 @@ pub fn defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::{defaults, Gpu};
+    use super::defaults;
+    #[cfg(target_os = "linux")]
+    use super::Gpu;
 
     fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |k| {
@@ -96,7 +98,10 @@ mod tests {
         }
     }
 
+    // Linux only, like the tests that use them: on macOS and Windows an unused constant fails clippy -D warnings.
+    #[cfg(target_os = "linux")]
     const GPU: Gpu = Gpu { render_node: true, gles: true, nvidia_proprietary: false };
+    #[cfg(target_os = "linux")]
     const NO_GPU: Gpu = Gpu { render_node: false, gles: false, nvidia_proprietary: false };
 
     #[test]
