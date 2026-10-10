@@ -7,5 +7,5 @@ export default defineConfig({
   fullyParallel: false,
   use: { baseURL: "http://127.0.0.1:4200", headless: true },
   // Its own store: --fresh wipes .e2e-data, never the developer's .dev-data. KV_DEBUG_ROUTES opens /debug/crash (resilience.spec).
-  webServer: { command: "KV_DEBUG_ROUTES=1 KV_CONVERTER_AUTO_INSTALL=0 node scripts/dev.mjs --no-shell --fresh --data-dir .e2e-data", url: "http://127.0.0.1:4200", timeout: 180_000, reuseExistingServer: false },
+  webServer: { command: "VITE_KV_UPDATE_FEED= KV_DEBUG_ROUTES=1 KV_CONVERTER_AUTO_INSTALL=0 node scripts/dev.mjs --no-shell --fresh --data-dir .e2e-data", url: "http://127.0.0.1:4200", timeout: 180_000, reuseExistingServer: false },
 });

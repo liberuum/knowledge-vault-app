@@ -145,6 +145,9 @@ settings and your sign-in. The app does not collect usage data and has no analyt
 - your requests to a **shared team vault**, if you connect one;
 - signing in with **[Renown](https://renown.id)**, the identity used for shared vaults.
 
+The app also asks GitHub when it starts, and every 90 minutes while it is open, whether a new version is out. That
+request carries nothing about you or your vaults.
+
 **Where your data lives:**
 
 | System | Folder |
