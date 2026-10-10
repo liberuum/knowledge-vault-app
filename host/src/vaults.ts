@@ -158,7 +158,18 @@ export async function fetchModelCatalog(info: SidecarInfo, endpoint?: string, fe
 }
 
 // ---- Plan 5: maintenance. Backups, restores and the delete-all run at the engine's next start (spec §9).
-export type BackupInfo = { name: string; path: string; bytes: number; stackVersion: string; createdAt: string };
+export type BackupInfo = {
+  name: string;
+  path: string;
+  bytes: number;
+  stackVersion: string;
+  createdAt: string;
+  /** What made it, and the vaults it holds (engines from 0.2.3 record them). */
+  kind?: "backup" | "pre-restore" | "before-upgrade" | "imported";
+  vaults?: { name: string; noteCount: number }[];
+  /** An imported backup: the file it came from. */
+  importedFrom?: string;
+};
 export type ActionResult = { action: "backup" | "restore" | "delete-all"; ok: boolean; detail: string; at: string };
 export type ExportResult = { path: string; documents: number; bytes: number; failed?: string[] };
 export async function fetchBackups(info: SidecarInfo, fetchImpl: typeof fetch = fetch): Promise<{ backups: BackupInfo[]; lastAction: ActionResult | null }> {

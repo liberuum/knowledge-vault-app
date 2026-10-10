@@ -47,6 +47,7 @@
         "@powerhousedao/workflow": "6.2.3-dev.44",
         "@renown/sdk": "6.2.3-dev.44",
         "pdfjs-dist": "^6.3.289",
+        "tar": "7",
       },
       "devDependencies": {
         "@types/node": "^24.9.2",

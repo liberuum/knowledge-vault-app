@@ -10,6 +10,9 @@ export function Dialog({ open, title, onClose, children, kind = "default" }: { o
     if (open && !dialog.open) {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.setAttribute("open", "");
+      // showModal() moves focus to the first focusable element, after a child's autoFocus already ran;
+      // a field marked data-autofocus (the one the dialog is about) gets it back.
+      dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     } else if (!open && dialog.open) {
       if (typeof dialog.close === "function") dialog.close();
       else dialog.removeAttribute("open");

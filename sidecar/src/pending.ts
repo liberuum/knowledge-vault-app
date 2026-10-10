@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createBackup, deleteAllData, human, pruneBackups, restoreBackup, type BackupDeps } from "./backups.js";
+import { createBackup, deleteAllData, human, pruneBackups, restoreBackup, type BackupDeps, type BackupVault } from "./backups.js";
 import { writeFileAtomic } from "./process-identity.js";
 
 /**
@@ -9,8 +9,14 @@ import { writeFileAtomic } from "./process-identity.js";
  * at the next start — before anything opens PGlite. The result is kept for the
  * host, which shows it after the restart.
  */
-export type PendingAction = { action: "backup" } | { action: "restore"; name: string } | { action: "delete-all"; includeBackups: boolean };
-export type ActionResult = { action: PendingAction["action"]; ok: boolean; detail: string; at: string };
+export type PendingAction =
+  /** `vaults`: what the engine listed when asked (the backup records it); `exportTo`: a file to write the backup into once made; `reason`: the upgrade guard's. */
+  | { action: "backup"; vaults?: BackupVault[]; exportTo?: string; reason?: "upgrade" }
+  /** `vaults`: the vaults set aside, recorded on the pre-restore copy. */
+  | { action: "restore"; name: string; vaults?: BackupVault[] }
+  | { action: "delete-all"; includeBackups: boolean };
+/** `backup`: the backup a backup or a restore made (a restore's is its pre-restore copy). */
+export type ActionResult = { action: PendingAction["action"]; ok: boolean; detail: string; at: string; backup?: string };
 
 const pendingPath = (dataDir: string) => join(dataDir, "pending-action.json");
 const lastPath = (dataDir: string) => join(dataDir, "last-action.json");
@@ -36,7 +42,7 @@ export function takePending(dataDir: string): PendingAction | undefined {
 export function isPendingAction(v: unknown): v is PendingAction {
   if (!v || typeof v !== "object") return false;
   const a = v as Record<string, unknown>;
-  if (a.action === "backup") return true;
+  if (a.action === "backup") return a.exportTo === undefined || typeof a.exportTo === "string";
   if (a.action === "restore") return typeof a.name === "string" && a.name.length > 0;
   if (a.action === "delete-all") return typeof a.includeBackups === "boolean";
   return false;
@@ -63,13 +69,13 @@ export function runPendingAction(dataDir: string, action: PendingAction, stackVe
   let result: ActionResult;
   try {
     if (action.action === "backup") {
-      const b = createBackup(dataDir, deps.storeStack ?? stackVersion, deps);
+      const b = createBackup(dataDir, deps.storeStack ?? stackVersion, deps, { kind: action.reason === "upgrade" ? "before-upgrade" : "backup", ...(action.vaults ? { vaults: action.vaults } : {}) });
       const pruned = pruneBackups(dataDir);
-      result = { action: "backup", ok: true, detail: `Backed up ${human(b.bytes)} as ${b.name}.${pruned.length ? ` Removed ${pruned.length} older backup${pruned.length === 1 ? "" : "s"}.` : ""}`, at: now() };
+      result = { action: "backup", ok: true, detail: `Backed up ${human(b.bytes)} as ${b.name}.${pruned.length ? ` Removed ${pruned.length} older backup${pruned.length === 1 ? "" : "s"}.` : ""}`, at: now(), backup: b.name };
     } else if (action.action === "restore") {
-      const r = restoreBackup(dataDir, action.name, stackVersion, deps);
+      const r = restoreBackup(dataDir, action.name, stackVersion, deps, { ...(action.vaults ? { vaults: action.vaults } : {}) });
       pruneBackups(dataDir);
-      result = { action: "restore", ok: true, detail: `Restored ${action.name}; what was there is kept as ${r.preRestore}.`, at: now() };
+      result = { action: "restore", ok: true, detail: `Restored ${action.name}; what was there is kept as ${r.preRestore}.`, at: now(), backup: r.preRestore };
     } else {
       deleteAllData(dataDir, { includeBackups: action.includeBackups });
       result = { action: "delete-all", ok: true, detail: action.includeBackups ? "Deleted all local data, backups included." : "Deleted all local data; backups kept.", at: now() };

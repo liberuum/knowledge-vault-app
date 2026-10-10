@@ -29,7 +29,9 @@ import { singleFlight } from "./single-flight.js";
 import { readModelKey, readSettings, readStackVersion, setComponentRemoved, writeSettings, writeStackVersion, PROVIDER_ENDPOINTS } from "./settings.js";
 import { acquireEngineLockWaiting, StoreInUseError } from "./engine-lock.js";
 import { readLastAction, runPendingAction, takePending, writeLastAction, writePending } from "./pending.js";
-import { cleanPartialBackups, listBackups, recoverInterruptedRestore } from "./backups.js";
+import { cleanPartialBackups, deleteBackup, listBackups, recoverInterruptedRestore } from "./backups.js";
+import { cleanImportStaging } from "./store-archive.js";
+import { createStoreTransfers } from "./store-transfers.js";
 import { stopOrphanedHelper } from "./orphans.js";
 import { exportVault } from "./export.js";
 import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
@@ -140,11 +142,24 @@ async function main(): Promise<void> {
   // (3) a converter helper left by a killed engine is stopped before a delete-all can lose its record.
   const orphan = stopOrphanedHelper(cfg.dataDir);
   if (orphan !== undefined) console.warn(`[sidecar] stopped an orphaned converter helper (pid ${orphan})`);
+  // A backup written into a file, or a file unpacked into a backup (Settings › Backup & restore).
+  // An imported backup the user wants restored goes through the ordinary restore, which restarts us.
+  let restoreImported: (name: string) => void = () => {};
+  const transfers = createStoreTransfers({ dataDir: cfg.dataDir, appVersion: cfg.appVersion, stackVersion: STACK_VERSION, restoreImported: (b) => restoreImported(b.name) });
   // (4) a backup, restore or delete-all the user asked for runs now, with the store closed.
   const pending = takePending(cfg.dataDir);
   if (pending) {
     const result = runPendingAction(cfg.dataDir, pending, STACK_VERSION, { storeStack: readStackVersion(cfg.dataDir) });
     console.log(`[sidecar] ${pending.action}: ${result.ok ? "done" : "refused"} — ${result.detail}`);
+    // Export: the backup just made is written into the chosen file while the engine starts.
+    if (pending.action === "backup" && pending.exportTo) {
+      try {
+        if (!result.ok || !result.backup) throw new Error(result.detail);
+        transfers.exportBackup(result.backup, pending.exportTo);
+      } catch (error) {
+        transfers.recordFailed("export", pending.exportTo, error);
+      }
+    }
     if (pending.action === "delete-all" && result.ok) {
       prepareDataDir(cfg.dataDir); // the store is fresh again: its folders are recreated (the lock was kept)
       // The supervisor read the protection setting before this ran; the delete-all reset it (and the
@@ -157,6 +172,7 @@ async function main(): Promise<void> {
   }
   // (5) an interrupted backup is not a backup.
   for (const name of cleanPartialBackups(cfg.dataDir)) console.warn(`[sidecar] removed an incomplete backup: ${name}`);
+  if (cleanImportStaging(cfg.dataDir)) console.warn("[sidecar] removed an import that was cut short");
   // (6) the stack guard: never open a store written by a newer stack; back up before opening one written by an older stack.
   console.log("[sidecar] checking the store"); // a landing start-up stage (host/src/landing/startup-stages.ts)
   const recordedStack = readStackVersion(cfg.dataDir);
@@ -167,7 +183,7 @@ async function main(): Promise<void> {
     if (relation === "downgrade") return fatalExit("store-too-new", TOO_NEW_MESSAGE(recordedStack!, STACK_VERSION));
     if (relation === "upgrade") {
       // Labelled with the stack that wrote the store, so the restore guard reads it right.
-      const result = runPendingAction(cfg.dataDir, { action: "backup" }, recordedStack!);
+      const result = runPendingAction(cfg.dataDir, { action: "backup", reason: "upgrade" }, recordedStack!);
       console.log(`[sidecar] upgrading the store from stack ${recordedStack} to ${STACK_VERSION}: backup ${result.ok ? "made" : "refused"} — ${result.detail}`);
       // Spec §9: a migration runs only after that backup. Without one, the store stays as it is.
       if (!result.ok) {
@@ -417,7 +433,9 @@ async function main(): Promise<void> {
         writePending(cfg.dataDir, action);
         requestRestart(action.action);
       },
+      deleteBackup: (name) => deleteBackup(cfg.dataDir, name),
     },
+    transfers,
     exportVault: async (id) => {
       if (!(await listVaultDrives(origin, engineFetch)).some((v) => v.id === id)) throw new NotAVaultError("That drive is not a vault.");
       return exportVault({ origin, driveId: id, dataDir: cfg.dataDir, fetchImpl: engineFetch });
@@ -482,6 +500,16 @@ async function main(): Promise<void> {
       remove: (id) => writeRemoteVaults(cfg.dataDir, readRemoteVaults(cfg.dataDir).filter((v) => v.id !== id)),
     },
   });
+  // An import the user asked to restore: the ordinary restore, labelling what it sets aside.
+  restoreImported = (name) => {
+    void listVaultDrives(origin, engineFetch)
+      .then((vs) => vs.map((v) => ({ name: v.name, noteCount: v.noteCount })))
+      .catch(() => undefined)
+      .then((vaults) => {
+        writePending(cfg.dataDir, { action: "restore", name, ...(vaults ? { vaults } : {}) });
+        requestRestart("restore");
+      });
+  };
   const controlPort = await control.listen(cfg.controlPort);
   boundControlPort = controlPort;
   void pipelines

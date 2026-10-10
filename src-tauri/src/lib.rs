@@ -67,7 +67,62 @@ fn open_logs(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::open_path(&dir, None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Show a file the app wrote (an export, a backup) in the file manager — only inside the data folder.
+/// Where the user chose to save a backup file (choose_backup_destination): `reveal_path` may show these too.
+#[derive(Default)]
+struct ChosenPaths(Mutex<Vec<PathBuf>>);
+
+/// A backup file's name with its extension, as the engine writes it (sidecar/src/store-archive.ts archiveTarget).
+fn with_backup_extension(path: PathBuf) -> PathBuf {
+    let has = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("kvbackup"));
+    if has {
+        return path;
+    }
+    let mut s = path.into_os_string();
+    s.push(".kvbackup");
+    PathBuf::from(s)
+}
+
+/// Settings › Backup & restore › Export: the desktop's Save dialog for a `.kvbackup`, starting in
+/// Downloads. Returns the chosen path (extension added), or None when cancelled.
+#[tauri::command]
+async fn choose_backup_destination(app: AppHandle, file_name: String) -> Option<String> {
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Export your vaults")
+        .add_filter("Knowledge Vault backup", &["kvbackup"])
+        .set_file_name(file_name);
+    if let Ok(dir) = app.path().download_dir().or_else(|_| app.path().home_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let path = with_backup_extension(dialog.blocking_save_file()?.into_path().ok()?);
+    app.state::<ChosenPaths>()
+        .0
+        .lock()
+        .unwrap()
+        .push(path.clone());
+    Some(path.to_string_lossy().into_owned())
+}
+
+/// Settings › Backup & restore › Import: the desktop's Open dialog for a `.kvbackup`.
+#[tauri::command]
+async fn choose_backup_file(app: AppHandle) -> Option<String> {
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Import a backup")
+        .add_filter("Knowledge Vault backup", &["kvbackup"]);
+    if let Ok(dir) = app.path().download_dir().or_else(|_| app.path().home_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let path = dialog.blocking_pick_file()?.into_path().ok()?;
+    Some(path.to_string_lossy().into_owned())
+}
+
+/// Show a file the app wrote (an export, a backup) in the file manager — only inside the data folder,
+/// Downloads, or where the user chose to save a backup file.
 #[tauri::command]
 fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
     let target = PathBuf::from(&path)
@@ -79,7 +134,15 @@ fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
         .flatten()
         .filter_map(|r| r.canonicalize().ok())
         .collect();
-    if !roots.iter().any(|r| target.starts_with(r)) {
+    let chosen = app
+        .state::<ChosenPaths>()
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p.canonicalize().ok())
+        .any(|p| p == target);
+    if !chosen && !roots.iter().any(|r| target.starts_with(r)) {
         return Err("Only files the app saved can be shown.".into());
     }
     tauri_plugin_opener::reveal_item_in_dir(&target).map_err(|e| e.to_string())
@@ -158,6 +221,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(SidecarState::default()))
+        .manage(ChosenPaths::default())
         .manage(DataDir::default())
         .manage(tray::Tray::default())
         .plugin(tauri_plugin_dialog::init())
@@ -172,7 +236,9 @@ pub fn run() {
             quit_app,
             retry_engine,
             host_loaded,
-            take_dropped_paths
+            take_dropped_paths,
+            choose_backup_destination,
+            choose_backup_file
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -522,6 +588,29 @@ fn take_dropped_paths(
 }
 
 #[cfg(test)]
+mod backup_file_tests {
+    use super::with_backup_extension;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_backup_file_keeps_or_gains_its_extension() {
+        let p = |s: &str| PathBuf::from(s);
+        assert_eq!(
+            with_backup_extension(p("/home/u/My vaults")),
+            p("/home/u/My vaults.kvbackup")
+        );
+        assert_eq!(
+            with_backup_extension(p("/home/u/a.KVBACKUP")),
+            p("/home/u/a.KVBACKUP")
+        );
+        assert_eq!(
+            with_backup_extension(p("/home/u/v1.2")),
+            p("/home/u/v1.2.kvbackup")
+        );
+    }
+}
+
+#[cfg(test)]
 mod capability_tests {
     /// Every command the shell registers must be granted to the page, or the installed app's page
     /// (a remote origin to Tauri) cannot call it. Keep in step with build.rs and generate_handler!.
@@ -543,6 +632,8 @@ mod capability_tests {
             "retry_engine",
             "host_loaded",
             "take_dropped_paths",
+            "choose_backup_destination",
+            "choose_backup_file",
         ] {
             let perm = format!("allow-{}", cmd.replace('_', "-"));
             assert!(

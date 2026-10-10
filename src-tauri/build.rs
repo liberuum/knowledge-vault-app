@@ -10,6 +10,8 @@ const COMMANDS: &[&str] = &[
     "retry_engine",
     "host_loaded",
     "take_dropped_paths",
+    "choose_backup_destination",
+    "choose_backup_file",
 ];
 
 fn main() {

@@ -12,6 +12,8 @@ import { IdentitySection } from "../settings/Identity.js";
 import type { IdentityController } from "../state/use-identity.js";
 import { ModelsSection } from "../settings/Models.js";
 import { VaultsSection } from "../settings/Vaults.js";
+import { BackupsSection } from "../settings/Backups.js";
+import { chooseExportPath, chooseImportFile, deleteBackup, exportToFile, fetchTransfer, importBackupFile, inspectBackupFile, saveBackupToFile, type ArchiveSummary, type TransferJob } from "../backup-files.js";
 import { WorkflowsSection } from "../settings/Workflows.js";
 import { GettingStartedSection } from "../settings/GettingStartedSection.js";
 import type { VaultView } from "../landing/GettingStarted.js";
@@ -38,6 +40,15 @@ export type SettingsApi = {
   requestBackup: (info: SidecarInfo) => Promise<{ restarting: boolean }>;
   requestRestore: (info: SidecarInfo, name: string) => Promise<{ restarting: boolean }>;
   requestDeleteAll: (info: SidecarInfo, includeBackups: boolean) => Promise<{ restarting: boolean }>;
+  /** A backup as one `.kvbackup` file, out and in (backup-files.ts). */
+  exportToFile: (info: SidecarInfo, path: string) => Promise<{ restarting: boolean }>;
+  saveBackupToFile: (info: SidecarInfo, name: string, path: string) => Promise<TransferJob>;
+  deleteBackup: (info: SidecarInfo, name: string) => Promise<void>;
+  inspectBackupFile: (info: SidecarInfo, path: string) => Promise<ArchiveSummary>;
+  importBackupFile: (info: SidecarInfo, path: string, restore: boolean) => Promise<TransferJob>;
+  fetchTransfer: (info: SidecarInfo) => Promise<TransferJob | null>;
+  chooseExportPath: (fileName: string) => Promise<string | null>;
+  chooseImportFile: () => Promise<string | null>;
   exportVault: (info: SidecarInfo, id: string) => Promise<ExportResult>;
   fetchLogTail: (info: SidecarInfo) => Promise<string[]>;
 };
@@ -62,6 +73,14 @@ export const realSettingsApi: SettingsApi = {
   requestBackup,
   requestRestore,
   requestDeleteAll,
+  exportToFile,
+  saveBackupToFile,
+  deleteBackup,
+  inspectBackupFile,
+  importBackupFile,
+  fetchTransfer,
+  chooseExportPath,
+  chooseImportFile,
   exportVault,
   fetchLogTail,
 };
@@ -69,6 +88,7 @@ export const realSettingsApi: SettingsApi = {
 const LABELS: Record<SettingsSection, string> = {
   start: "Getting started",
   vaults: "Vaults",
+  backups: "Backup & restore",
   appearance: "Appearance",
   models: "Models",
   conversion: "Conversion",
@@ -119,6 +139,7 @@ export function Settings({ info, section, onSection, onBack, onOpenWorkflows, ap
             />
           )}
           {section === "vaults" && <VaultsSection info={info} api={api} identity={identity} />}
+          {section === "backups" && <BackupsSection info={info} api={api} />}
           {section === "appearance" && <AppearanceSection info={info} api={api} />}
           {section === "models" && <ModelsSection info={info} api={api} />}
           {section === "conversion" && <ConversionSection info={info} api={api} />}

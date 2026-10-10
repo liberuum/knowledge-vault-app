@@ -28,6 +28,8 @@
     "allow-install-update",
     "allow-retry-engine",
     "allow-host-loaded",
-    "allow-take-dropped-paths"
+    "allow-take-dropped-paths",
+    "allow-choose-backup-destination",
+    "allow-choose-backup-file"
   ]
 }

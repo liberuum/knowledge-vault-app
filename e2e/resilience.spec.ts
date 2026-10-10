@@ -34,15 +34,19 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   // (b) Back up now: the engine restarts, makes the backup before it opens the store, and the list shows it.
   await page.getByRole("button", { name: "← Vaults" }).click();
   await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Backup & restore" }).click();
   await page.getByRole("button", { name: "Back up now" }).click();
-  await expect(page.getByText(/Restarting the engine… the backup runs/)).toBeVisible();
-  const backups = page.getByRole("list", { name: "Backups" });
-  await expect(backups.getByText(/^\d{4}-\d{2}-\d{2}T.*-6\.2\.3/)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(/Making a clean copy of your vaults/)).toBeVisible();
+  await expect(page.getByRole("status").getByText("Backed up", { exact: true })).toBeVisible({ timeout: 120_000 });
+  const points = page.getByRole("list", { name: "Restore points" });
+  await expect(points.getByText("Newest")).toBeVisible();
 
   // (c) Delete all local data, keeping the backups: the app reloads into its first run, the setup guide.
-  const del = page.getByRole("button", { name: "Delete all local data" });
+  await page.getByRole("button", { name: "Delete all local data…" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete all local data?" });
+  const del = confirm.getByRole("button", { name: "Delete everything" });
   await expect(del).toBeDisabled();
-  await page.getByLabel("Type delete to confirm").fill("delete");
+  await confirm.getByLabel("Type delete to confirm").fill("delete");
   await del.click();
   await expect(page.getByRole("heading", { name: "Turn your documents into connected notes" })).toBeVisible({ timeout: 120_000 });
   const after = await (await request.get(`${CONTROL}/backups`, { headers: auth })).json();

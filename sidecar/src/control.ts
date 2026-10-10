@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import type { UpdateDownloader } from "./app-update.js";
 import { droppedFilePath, serveDroppedFile } from "./dropped-files.js";
@@ -18,7 +19,9 @@ import { ConnectionError, type FillResult } from "./connections.js";
 import type { EnsureResult, PipelineStatus } from "./pipelines.js";
 import { PROVIDER_ENDPOINTS, SettingsError, type AppSettings, type ConversionMode, type ConversionSettings, type SettingsPatch, type LocalProtection } from "./settings.js";
 import { NotAVaultError, type DriveRef, type VaultSummary } from "./vaults.js";
-import type { BackupInfo } from "./backups.js";
+import { BackupNotFoundError, BackupTooNewError, NotEnoughSpaceError, type BackupInfo, type BackupVault } from "./backups.js";
+import { ArchivePathError, NotABackupFileError } from "./store-archive.js";
+import { TransferBusyError, type StoreTransfers } from "./store-transfers.js";
 import type { ExportResult } from "./export.js";
 import type { ActionResult, PendingAction } from "./pending.js";
 
@@ -123,7 +126,11 @@ export type ControlDeps = {
     listBackups: () => BackupInfo[];
     lastAction: () => ActionResult | undefined;
     schedule: (action: PendingAction) => void;
+    /** DELETE /backups/:name — one backup the list shows. */
+    deleteBackup: (name: string) => void;
   };
+  /** A backup as one file, out and in (store-transfers.ts): POST /backups/:name/save, POST /store/inspect, POST /store/import, GET /store/transfer. */
+  transfers: Pick<StoreTransfers, "current" | "inspect" | "exportBackup" | "importFile">;
   /** Spec §9: GET /vaults/:id/export — the vault as documents under exports/ (synchronous; the host shows a spinner). */
   exportVault: (id: string) => Promise<ExportResult>;
   /** POST /shutdown: announce the stop (so the supervisor does not count it as a crash) and exit. */
@@ -218,6 +225,15 @@ function tokenMatches(header: string | undefined, token: string): boolean {
   const expected = Buffer.from(`Bearer ${token}`);
   const given = Buffer.from(header ?? "");
   return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+/** The vaults as a backup records them; a listing that fails leaves the backup unlabelled, never refused. */
+async function vaultBriefs(deps: Pick<ControlDeps, "listVaults">): Promise<BackupVault[] | undefined> {
+  try {
+    return (await deps.listVaults()).map((v) => ({ name: v.name, noteCount: v.noteCount }));
+  } catch {
+    return undefined;
+  }
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -499,15 +515,48 @@ export function createControlServer(deps: ControlDeps) {
         return send(res, 200, { backups: deps.maintenance.listBackups(), lastAction: deps.maintenance.lastAction() ?? null }, allowed);
       }
       if (req.method === "POST" && url.pathname === "/backups") {
-        deps.maintenance.schedule({ action: "backup" });
+        // `exportTo`: write the new backup into this file once made (Settings › Backup & restore › Export).
+        const body = await readJson(req);
+        const exportTo = typeof body.exportTo === "string" && body.exportTo ? body.exportTo : undefined;
+        if (exportTo !== undefined && !isAbsolute(exportTo)) return send(res, 400, { error: "Choose where to save the file." }, allowed);
+        const vaults = await vaultBriefs(deps);
+        deps.maintenance.schedule({ action: "backup", ...(vaults ? { vaults } : {}), ...(exportTo ? { exportTo } : {}) });
         return send(res, 202, { restarting: true }, allowed);
       }
       const restore = url.pathname.match(/^\/backups\/([^/]+)\/restore$/);
       if (restore && req.method === "POST") {
         const name = decodePart(restore[1]!);
         if (!deps.maintenance.listBackups().some((b) => b.name === name)) return send(res, 404, { error: `No backup named ${name}.` }, allowed);
-        deps.maintenance.schedule({ action: "restore", name });
+        const vaults = await vaultBriefs(deps);
+        deps.maintenance.schedule({ action: "restore", name, ...(vaults ? { vaults } : {}) });
         return send(res, 202, { restarting: true }, allowed);
+      }
+      const save = url.pathname.match(/^\/backups\/([^/]+)\/save$/);
+      if (save && req.method === "POST") {
+        const name = decodePart(save[1]!);
+        if (!deps.maintenance.listBackups().some((b) => b.name === name)) return send(res, 404, { error: `No backup named ${name}.` }, allowed);
+        const body = await readJson(req);
+        return send(res, 202, { job: deps.transfers.exportBackup(name, typeof body.path === "string" ? body.path : "") }, allowed);
+      }
+      const one = url.pathname.match(/^\/backups\/([^/]+)$/);
+      if (one && req.method === "DELETE") {
+        deps.maintenance.deleteBackup(decodePart(one[1]!));
+        return send(res, 200, { deleted: decodePart(one[1]!) }, allowed);
+      }
+      if (req.method === "POST" && url.pathname === "/store/inspect") {
+        const body = await readJson(req);
+        return send(res, 200, { summary: await deps.transfers.inspect(typeof body.path === "string" ? body.path : "") }, allowed);
+      }
+      if (req.method === "POST" && url.pathname === "/store/import") {
+        const body = await readJson(req);
+        const path = typeof body.path === "string" ? body.path : "";
+        // Refused now (not a backup, too new) rather than as a failed job the host has to poll for.
+        const summary = await deps.transfers.inspect(path);
+        if (summary.tooNew) throw new BackupTooNewError(`This file was made by a newer Knowledge Vault (stack ${summary.stackVersion}). Update the app to import it.`);
+        return send(res, 202, { job: deps.transfers.importFile(path, body.restore === true) }, allowed);
+      }
+      if (req.method === "GET" && url.pathname === "/store/transfer") {
+        return send(res, 200, { job: deps.transfers.current() }, allowed);
       }
       if (req.method === "POST" && url.pathname === "/data/delete-all") {
         const body = await readJson(req);
@@ -535,6 +584,10 @@ export function createControlServer(deps: ControlDeps) {
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof SettingsError || error instanceof ConnectionError || error instanceof ConverterInputError) return send(res, 400, { error: error.message }, allowed);
       if (error instanceof ConverterBusyError) return send(res, 409, { error: error.message }, allowed);
+      if (error instanceof ArchivePathError || error instanceof NotABackupFileError) return send(res, 400, { error: error.message }, allowed);
+      if (error instanceof BackupNotFoundError) return send(res, 404, { error: error.message }, allowed);
+      if (error instanceof TransferBusyError || error instanceof BackupTooNewError) return send(res, 409, { error: error.message }, allowed);
+      if (error instanceof NotEnoughSpaceError) return send(res, 507, { error: error.message }, allowed);
       if (error instanceof NotAVaultError) return send(res, 404, { error: error.message }, allowed);
       if (error instanceof RemoteInputError) return send(res, 400, { error: error.message }, allowed);
       if (error instanceof RemoteNotSwitchboardError) return send(res, 400, { error: error.message }, allowed);

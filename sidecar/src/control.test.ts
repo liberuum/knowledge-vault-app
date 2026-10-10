@@ -6,8 +6,12 @@ import { createControlServer } from "./control.js";
 import { SettingsError, type AppSettings } from "./settings.js";
 import { RemoteAuthError, RemoteInputError, type RemoteVault } from "./remote.js";
 import { NotAVaultError, type VaultSummary } from "./vaults.js";
+import { BackupNotFoundError } from "./backups.js";
+import { ArchivePathError, NotABackupFileError } from "./store-archive.js";
+import type { TransferJob } from "./store-transfers.js";
 
 const vaults: VaultSummary[] = [{ id: "v1", slug: "research", name: "Research", noteCount: 2, sourceCount: 1 }];
+const job: TransferJob = { id: "j1", kind: "export", state: "running", done: 0, total: 1500, file: "/home/u/old.kvbackup", backup: "2026-10-07T12-00-00Z-6.2.3-dev.44", restore: false, bytes: null, error: null, startedAt: "2026-10-07T12:00:00.000Z", finishedAt: null };
 let close: (() => Promise<void>) | undefined;
 let deleted: string[] = [];
 let signedIn = false;
@@ -25,11 +29,13 @@ let removedPipelines: string[] = [];
 let disabledFor: string[] = [];
 let modelsApplied = 0;
 let scheduled: unknown[] = [];
+let deletedBackups: string[] = [];
+let transferCalls: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
 let settingsPatches: unknown[] = [];
 let gatewayCalls: Array<{ url: string; body: string }> = [];
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; gatewayCalls = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; deletedBackups = []; transferCalls = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; gatewayCalls = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -100,6 +106,16 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
       listBackups: () => [{ name: "2026-10-07T12-00-00Z-6.2.3-dev.44", path: "/data/vault/backups/2026-10-07T12-00-00Z-6.2.3-dev.44", bytes: 1500, stackVersion: "6.2.3-dev.44", createdAt: "2026-10-07T12:00:00.000Z" }],
       lastAction: () => ({ action: "backup", ok: true, detail: "Backed up 1500 bytes.", at: "2026-10-07T12:00:01.000Z" }),
       schedule: (action) => { scheduled.push(action); },
+      deleteBackup: (name) => { if (name !== "2026-10-07T12-00-00Z-6.2.3-dev.44") throw new BackupNotFoundError(`No backup named ${name}.`); deletedBackups.push(name); },
+    },
+    transfers: {
+      current: () => (transferCalls.length ? job : null),
+      inspect: async (path) => {
+        if (path === "/home/u/notes.txt") throw new NotABackupFileError("notes.txt is not a Knowledge Vault backup.");
+        return { file: path, fileBytes: 900, name: "2026-10-07T12-00-00Z-6.2.3-dev.44", createdAt: "2026-10-07T12:00:00.000Z", stackVersion: path.includes("newer") ? "9.0.0" : "6.2.3-dev.44", appVersion: "0.2.2", bytes: 1500, vaults: [{ name: "Research", noteCount: 2 }], tooNew: path.includes("newer") };
+      },
+      exportBackup: (name, dest) => { transferCalls.push({ export: name, dest }); if (!dest.startsWith("/")) throw new ArchivePathError("Choose where to save the file."); return job; },
+      importFile: (file, restore) => { transferCalls.push({ import: file, restore }); return { ...job, kind: "import", file, restore }; },
     },
     shutdown: () => { shutdowns += 1; },
     exportVault: async (id) => { if (id !== "v1") throw new NotAVaultError("That drive is not a vault."); return { path: "/data/vault/exports/research-2026-10-07T12-00-00Z", documents: 2, bytes: 4096 }; },
@@ -420,7 +436,48 @@ describe("settings changes reach the pipelines", () => {
     expect(refused.status).toBe(400);
     const gone = await fetch(`${base}/data/delete-all`, { method: "POST", headers: h, body: JSON.stringify({ confirm: "delete", includeBackups: true }) });
     expect(gone.status).toBe(202);
-    expect(scheduled).toEqual([{ action: "backup" }, { action: "restore", name: "2026-10-07T12-00-00Z-6.2.3-dev.44" }, { action: "delete-all", includeBackups: true }]);
+    // A backup and a restore record the vaults the engine lists, for the restore points' labels.
+    expect(scheduled).toEqual([
+      { action: "backup", vaults: [{ name: "Research", noteCount: 2 }] },
+      { action: "restore", name: "2026-10-07T12-00-00Z-6.2.3-dev.44", vaults: [{ name: "Research", noteCount: 2 }] },
+      { action: "delete-all", includeBackups: true },
+    ]);
+  });
+  it("Backup & restore: exports a new backup into a file, saves an existing one, deletes one, and refuses a relative path", async () => {
+    const base = await start();
+    const h = { authorization: "Bearer secret", "content-type": "application/json" };
+    const now = await fetch(`${base}/backups`, { method: "POST", headers: h, body: JSON.stringify({ exportTo: "/home/u/Downloads/vaults.kvbackup" }) });
+    expect(now.status).toBe(202);
+    expect(scheduled).toEqual([{ action: "backup", vaults: [{ name: "Research", noteCount: 2 }], exportTo: "/home/u/Downloads/vaults.kvbackup" }]);
+    expect((await fetch(`${base}/backups`, { method: "POST", headers: h, body: JSON.stringify({ exportTo: "vaults.kvbackup" }) })).status).toBe(400);
+
+    const saved = await fetch(`${base}/backups/2026-10-07T12-00-00Z-6.2.3-dev.44/save`, { method: "POST", headers: h, body: JSON.stringify({ path: "/home/u/old.kvbackup" }) });
+    expect(saved.status).toBe(202);
+    expect(await saved.json()).toMatchObject({ job: { kind: "export", state: "running" } });
+    expect((await fetch(`${base}/backups/nope/save`, { method: "POST", headers: h, body: JSON.stringify({ path: "/x.kvbackup" }) })).status).toBe(404);
+    expect((await fetch(`${base}/backups/2026-10-07T12-00-00Z-6.2.3-dev.44/save`, { method: "POST", headers: h, body: JSON.stringify({ path: "here.kvbackup" }) })).status).toBe(400);
+
+    expect((await fetch(`${base}/backups/2026-10-07T12-00-00Z-6.2.3-dev.44`, { method: "DELETE", headers: h })).status).toBe(200);
+    expect(deletedBackups).toEqual(["2026-10-07T12-00-00Z-6.2.3-dev.44"]);
+    expect((await fetch(`${base}/backups/nope`, { method: "DELETE", headers: h })).status).toBe(404);
+  });
+  it("Backup & restore: previews a file, imports it (restoring when asked), refuses what is not a backup or too new, and reports the job", async () => {
+    const base = await start();
+    const h = { authorization: "Bearer secret", "content-type": "application/json" };
+    expect(await (await fetch(`${base}/store/transfer`, { headers: h })).json()).toEqual({ job: null });
+    const preview = await fetch(`${base}/store/inspect`, { method: "POST", headers: h, body: JSON.stringify({ path: "/home/u/vaults.kvbackup" }) });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ summary: { name: "2026-10-07T12-00-00Z-6.2.3-dev.44", vaults: [{ name: "Research", noteCount: 2 }], tooNew: false } });
+    const notOurs = await fetch(`${base}/store/inspect`, { method: "POST", headers: h, body: JSON.stringify({ path: "/home/u/notes.txt" }) });
+    expect(notOurs.status).toBe(400);
+    expect(await notOurs.json()).toEqual({ error: "notes.txt is not a Knowledge Vault backup." });
+
+    const imported = await fetch(`${base}/store/import`, { method: "POST", headers: h, body: JSON.stringify({ path: "/home/u/vaults.kvbackup", restore: true }) });
+    expect(imported.status).toBe(202);
+    expect(await imported.json()).toMatchObject({ job: { kind: "import", file: "/home/u/vaults.kvbackup", restore: true } });
+    expect((await fetch(`${base}/store/import`, { method: "POST", headers: h, body: JSON.stringify({ path: "/home/u/newer.kvbackup" }) })).status).toBe(409);
+    expect(transferCalls).toEqual([{ import: "/home/u/vaults.kvbackup", restore: true }]);
+    expect(await (await fetch(`${base}/store/transfer`, { headers: h })).json()).toMatchObject({ job: { id: "j1" } });
   });
   it("Plan 5: shutdown answers 202 and stops; the log tail is the supervisor's last lines; the crash route exists only when debug routes are on", async () => {
     const base = await start();

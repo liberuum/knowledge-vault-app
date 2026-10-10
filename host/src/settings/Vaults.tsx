@@ -5,7 +5,6 @@ import type { SettingsApi } from "../screens/Settings.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { shortAddress, type IdentityController } from "../state/use-identity.js";
 import type { LocalProtection, VaultSummary } from "../vaults.js";
-import { MaintenanceCards } from "./Maintenance.js";
 import { invokeIfTauri, isTauri } from "../shell/tauri.js";
 import { plainError } from "../problem.js";
 
@@ -202,7 +201,7 @@ export function VaultsSection({
                 )}
               </div>
               <div className="kv-settings-row-actions">
-                <button type="button" className="kv-button" disabled={exporting === v.id} title="Write the vault as documents (the drive-sync format) under the data folder's exports/" onClick={() => void exportOne(v)}>{exporting === v.id ? "Exporting…" : "Export"}</button>
+                <button type="button" className="kv-button" disabled={exporting === v.id} title="Write the vault as documents (the drive-sync format) under the data folder's exports/" onClick={() => void exportOne(v)}>{exporting === v.id ? "Exporting…" : "Export documents"}</button>
                 <button type="button" className="kv-button" onClick={() => { setDialogError(null); setRenaming(v); }}>Rename</button>
                 <button type="button" className="kv-button kv-button-danger-quiet" onClick={() => { setDialogError(null); setDeleting(v); }}>Delete</button>
               </div>
@@ -211,7 +210,6 @@ export function VaultsSection({
         </ul>
       )}
       <ProtectionCard info={info} api={api} identity={identity} pollMs={pollMs} onRestarted={onRestarted} />
-      <MaintenanceCards info={info} api={api} pollMs={pollMs} onRestarted={onRestarted} />
       {renaming && <RenameVaultDialog name={renaming.name} busy={busy} error={dialogError} onSave={(n) => void rename(renaming, n)} onClose={() => setRenaming(null)} />}
       {deleting && <DeleteVaultDialog name={deleting.name} noteCount={deleting.noteCount} busy={busy} error={dialogError} onConfirm={() => void remove(deleting)} onClose={() => setDeleting(null)} />}
     </div>

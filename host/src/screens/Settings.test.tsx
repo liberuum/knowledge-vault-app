@@ -92,6 +92,14 @@ function api(over: Partial<SettingsApi> = {}): SettingsApi {
     requestBackup: vi.fn(async () => ({ restarting: true })),
     requestRestore: vi.fn(async () => ({ restarting: true })),
     requestDeleteAll: vi.fn(async () => ({ restarting: true })),
+    exportToFile: vi.fn(async () => ({ restarting: true })),
+    saveBackupToFile: vi.fn(),
+    deleteBackup: vi.fn(async () => {}),
+    inspectBackupFile: vi.fn(),
+    importBackupFile: vi.fn(),
+    fetchTransfer: vi.fn(async () => null),
+    chooseExportPath: vi.fn(async () => null),
+    chooseImportFile: vi.fn(async () => null),
     exportVault: vi.fn(async () => ({ path: "/home/u/.local/share/kv/vault/exports/a-2026", documents: 24, bytes: 1000 })),
     fetchLogTail: vi.fn(async () => ["[sidecar] ready", "Authorization: Bearer abc.def", "model key sk-or-123"]),
     ...over,
@@ -362,40 +370,43 @@ describe("Settings", () => {
     expect(screen.queryByRole("button", { name: "Install models" })).toBeNull();
   });
 
-  it("backs up now, lists the backups with the last action, restores one after confirming, and says the engine restarts", async () => {
+  it("backs up and restores from their own section: the restore points listed, a restore confirmed, the engine restarting", async () => {
     const a = api();
     render(<Harness api={a} />);
-    expect(await screen.findByText("2026-10-07T12-00-00Z-6.2.3-dev.44")).toBeTruthy();
-    expect(screen.getByText(/Backed up 12 MB/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Backup & restore" }));
+    const points = await screen.findByRole("list", { name: "Restore points" });
+    expect(points.textContent).toMatch(/12 MB/);
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Restore this backup" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(a.requestRestore).toHaveBeenCalledWith(info, "2026-10-07T12-00-00Z-6.2.3-dev.44"));
-    expect(await screen.findByText(/Restarting the engine… the restore runs/)).toBeTruthy();
-    // while the engine restarts, nothing else can be scheduled
+    expect(await screen.findByText(/Setting your current vaults aside and switching/)).toBeTruthy();
+    // while the engine restarts, nothing else can be started
     expect((screen.getByRole("button", { name: "Back up now" }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
     const b = api();
-    render(<Harness api={b} />);
-    await screen.findByText("2026-10-07T12-00-00Z-6.2.3-dev.44");
+    render(<Harness api={b} start="backups" />);
+    await screen.findByRole("list", { name: "Restore points" });
     fireEvent.click(screen.getByRole("button", { name: "Back up now" }));
     await waitFor(() => expect(b.requestBackup).toHaveBeenCalledWith(info));
-    expect(await screen.findByText(/Restarting the engine… the backup runs/)).toBeTruthy();
+    expect(await screen.findByText(/Making a clean copy of your vaults/)).toBeTruthy();
   });
   it("exports a vault as documents and shows where it went", async () => {
     const a = api();
     render(<Harness api={a} />);
     await screen.findByText("Alpha");
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export documents" }));
     await waitFor(() => expect(a.exportVault).toHaveBeenCalledWith(info, "v1"));
     expect(await screen.findByText("/home/u/.local/share/kv/vault/exports/a-2026")).toBeTruthy();
   });
   it("deletes all local data only once delete is typed, keeping the backups unless asked", async () => {
     const a = api();
-    render(<Harness api={a} />);
-    await screen.findByText("Alpha");
-    const button = screen.getByRole("button", { name: "Delete all local data" }) as HTMLButtonElement;
+    render(<Harness api={a} start="backups" />);
+    await screen.findByRole("list", { name: "Restore points" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete all local data…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete all local data?" });
+    const button = within(dialog).getByRole("button", { name: "Delete everything" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Type delete to confirm"), { target: { value: "delete" } });
+    fireEvent.change(within(dialog).getByLabelText("Type delete to confirm"), { target: { value: "delete" } });
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
     await waitFor(() => expect(a.requestDeleteAll).toHaveBeenCalledWith(info, false));
