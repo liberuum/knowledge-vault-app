@@ -24,6 +24,12 @@ export const PINNED_INTEGRITY: Record<string, string> = {
   "docling.rs-linux-x64-gnu@1.58.0": "sha512-4be77AUbYgCn7QiwBGEGnUR2lYRnaJDOLTfr2AN/ttUeBqJPEP8Z0bieexWVjeSpdhXbJRstiWZJY15wqdpQfw==",
   "docling.rs-linux-arm64-gnu@1.58.0": "sha512-G0KvOVbrsm0h2XCgjMUgVQ4JAEmvbswTdN5uM6QdnMjqWxvFZJobLOxpMNf1E4lLEfdvazM1Mk4xflzcCUKuUQ==",
   "docling.rs-win32-x64-msvc@1.58.0": "sha512-rmQxc+hYfaI8HblD53DOATOlPqvllLv7B2fD8pG4C4zrKOTRO98UhUvN5iFy80WU53UR7NERqZyTYLshi5AdBw==",
+  // 2.13.0, recorded 2026-10-10 (each tarball re-hashed after download): the converter-binding workflow
+  // checks the JS package against this before it builds the macOS binding of the same version.
+  "docling.rs@2.13.0": "sha512-dR14cshbSXJavGDuTGHZFXY6CtSmFx8MzEr7s652i6j7Jc6uGtm1CkgrOpfRMbawA/vQp/qWAJZa39bVLIDe9Q==",
+  "docling.rs-linux-x64-gnu@2.13.0": "sha512-DD76TNrxZGOwx2n0Yq9nzQHZoOsGvIGOaqGR4WPw1ffSm8076KtcGttoeUqP0dGVWfZ98LsVRlWuqJLpUqi2iQ==",
+  "docling.rs-linux-arm64-gnu@2.13.0": "sha512-WyT5x7V4K3M1JMw3FtekLITdO7jW4k4YKnmKy1Ob37hkOcoV0dA0r/ZTtOnAVztWR5/nekyuFlMzJlAakp+1Qw==",
+  "docling.rs-win32-x64-msvc@2.13.0": "sha512-sT16Zhe1J1jbqGTnG4x9nwAAUhLw48o/3dxXz/E89zQU/y1RGJUsjartYXyt1sxVS7p/qk1972XpxfO4GqAxIg==",
 };
 
 /**
