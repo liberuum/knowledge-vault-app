@@ -4,7 +4,8 @@ import { anthropicJson as defaultAnthropicJson } from "./anthropic.js";
 import type { ChatGptBridge } from "./chatgpt.js";
 import { openAiError, providerMessage } from "./errors.js";
 import { createQueue } from "./queue.js";
-import { providerHeaders } from "../provider-auth.js";
+import { modelsUrl, providerHeaders } from "../provider-auth.js";
+import { adaptPayload, withoutRefusedParameter } from "./compat.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -86,16 +87,28 @@ export function createGateway(deps: GatewayDeps) {
         return await deps.chatgpt.handle({ kind: isChat ? "chat" : "models", payload, res, cors, signal: controller.signal, interactive });
       }
       let upstream: Response;
-      try {
-        upstream = await f(`${endpoint}${isChat ? "/chat/completions" : "/models"}`, {
-          method: isChat ? "POST" : "GET",
-          headers,
-          ...(isChat ? { body: JSON.stringify(payload) } : {}),
-          signal: controller.signal,
-        });
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        return sendJson(res, 502, openAiError(502, `Could not reach ${whoFor(settings)}: ${error instanceof Error ? error.message : String(error)}`, "provider_unreachable"), cors);
+      if (isChat) payload = adaptPayload(endpoint, payload);
+      // A model that refuses one parameter by name (a newer OpenAI model and `temperature`) is asked again without it.
+      for (let retries = 0; ; retries++) {
+        try {
+          upstream = await f(isChat ? `${endpoint}/chat/completions` : modelsUrl(endpoint), {
+            method: isChat ? "POST" : "GET",
+            headers,
+            ...(isChat ? { body: JSON.stringify(payload) } : {}),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          return sendJson(res, 502, openAiError(502, `Could not reach ${whoFor(settings)}: ${error instanceof Error ? error.message : String(error)}`, "provider_unreachable"), cors);
+        }
+        if (!isChat || upstream.status !== 400 || retries >= 3) break;
+        const refusal = await upstream.text();
+        const next = withoutRefusedParameter(payload, refusal);
+        if (!next) {
+          const { message, code } = providerMessage(settings.models.provider, 400, refusal);
+          return sendJson(res, 400, openAiError(400, message, code), cors);
+        }
+        payload = next;
       }
       if (!upstream.ok) {
         const { message, code } = providerMessage(settings.models.provider, upstream.status, await upstream.text());
