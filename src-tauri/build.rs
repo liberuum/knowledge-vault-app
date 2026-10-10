@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
     "open_logs",
     "reveal_path",
     "quit_app",
+    "install_update",
     "retry_engine",
     "host_loaded",
     "take_dropped_paths",

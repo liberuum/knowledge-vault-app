@@ -29,10 +29,35 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
-export type UpdateInfo = { latest: string; url: string };
+/** A file of the release: the installers, one per platform (the engine picks this machine's). */
+export type UpdateAsset = { name: string; url: string; size: number | null };
+export type UpdateInfo = { latest: string; url: string; assets: UpdateAsset[] };
 type Storage = { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void };
-const KEY = "kv.update-check";
+/** v2: the answer carries the release's files (v1 had none). */
+const KEY = "kv.update-check.v2";
 const DAY = 24 * 3_600_000;
+
+type Release = { tag_name?: string; html_url?: string; draft?: boolean; assets?: Array<{ name?: string; browser_download_url?: string; size?: number }> };
+
+function toInfo(r: Release, feedUrl: string): UpdateInfo | null {
+  if (!r.tag_name || r.draft) return null;
+  return {
+    latest: r.tag_name.replace(/^v/, ""),
+    url: r.html_url ?? feedUrl,
+    assets: (r.assets ?? []).flatMap((a) => (a.name && a.browser_download_url ? [{ name: a.name, url: a.browser_download_url, size: typeof a.size === "number" ? a.size : null }] : [])),
+  };
+}
+
+/** The newest release in the feed's answer: one release ("latest"), or a list — drafts left out, pre-releases in (the app ships as pre-releases). */
+export function newestRelease(body: unknown, feedUrl: string): UpdateInfo | null {
+  const list = Array.isArray(body) ? (body as Release[]) : [body as Release];
+  let best: UpdateInfo | null = null;
+  for (const r of list) {
+    const info = r && typeof r === "object" ? toInfo(r, feedUrl) : null;
+    if (info && (!best || compareSemver(info.latest, best.latest) > 0)) best = info;
+  }
+  return best;
+}
 
 /**
  * Spec §11: a notice, not an updater. Asks the release feed at most once a day (cached
@@ -42,7 +67,7 @@ const DAY = 24 * 3_600_000;
 export async function checkForUpdate(feedUrl: string, current: string, fetchImpl: typeof fetch, storage: Storage, now: () => number = Date.now): Promise<UpdateInfo | null> {
   if (!feedUrl) return null;
   try {
-    type Cached = { at: number; latest: string; url: string };
+    type Cached = UpdateInfo & { at: number };
     let cached: Cached | null;
     try {
       cached = JSON.parse(storage.getItem(KEY) ?? "null") as Cached | null;
@@ -51,13 +76,13 @@ export async function checkForUpdate(feedUrl: string, current: string, fetchImpl
     }
     let latest: UpdateInfo;
     if (cached && now() - cached.at < DAY) {
-      latest = { latest: cached.latest, url: cached.url };
+      latest = { latest: cached.latest, url: cached.url, assets: cached.assets ?? [] };
     } else {
       const res = await fetchImpl(feedUrl, { headers: { accept: "application/vnd.github+json" } });
       if (!res.ok) return null;
-      const body = (await res.json()) as { tag_name?: string; html_url?: string };
-      if (!body.tag_name) return null;
-      latest = { latest: body.tag_name.replace(/^v/, ""), url: body.html_url ?? feedUrl };
+      const found = newestRelease(await res.json(), feedUrl);
+      if (!found) return null;
+      latest = found;
       storage.setItem(KEY, JSON.stringify({ at: now(), ...latest }));
     }
     return compareSemver(latest.latest, current) > 0 ? latest : null;

@@ -4,7 +4,9 @@ import { initVaultStructure } from "./vault-structure.js";
 import { addVaultSource, findSourceByTitle } from "./vault-sources.js";
 import { checkModel } from "./model-check.js";
 import { register } from "node:module";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { createUpdateDownloader, downloadsDir } from "./app-update.js";
 import { fileURLToPath } from "node:url";
 import { readSidecarConfig, switchboardEnv } from "./config.js";
 import { createControlServer } from "./control.js";
@@ -425,6 +427,13 @@ async function main(): Promise<void> {
     },
     logsTail: () => tailLines(join(cfg.dataDir, "logs", "sidecar.log"), 200),
     debugRoutes: process.env.KV_DEBUG_ROUTES === "1",
+    update: createUpdateDownloader({
+      fetchImpl: fetch,
+      // The shell names the Downloads folder (it opens the installer from there) and says when an AppImage runs; the dev loop does neither.
+      dir: () => process.env.KV_DOWNLOAD_DIR || downloadsDir(process.platform, process.env, homedir()),
+      platform: process.platform,
+      appImage: process.env.KV_APPIMAGE === "1",
+    }),
     converter: {
       status: () => converter.status(),
       restart: () => converter.restart(),

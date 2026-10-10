@@ -413,9 +413,18 @@ describe("Settings", () => {
     expect(copied).toContain("[sidecar] ready");
     for (const secret of ["sk-or", "Bearer", "abc.def", "token"]) expect(copied).not.toContain(secret);
   });
-  it("says update checks are off until the app has a release feed", async () => {
-    render(<Harness api={api()} start="about" />);
-    expect(await screen.findByText("Update checks are off until the app has a release feed.")).toBeTruthy();
+  it("says when a newer version is on the release feed", async () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) });
+    const github = vi.fn(async () => new Response(JSON.stringify([{ tag_name: "v0.2.0", html_url: "https://github.com/liberuum/knowledge-vault-app/releases/tag/v0.2.0", assets: [] }]), { status: 200 }));
+    vi.stubGlobal("fetch", github);
+    try {
+      render(<Harness api={api()} start="about" />);
+      expect(await screen.findByText(/Version 0\.2\.0 is available\./)).toBeTruthy();
+      expect(github).toHaveBeenCalledWith(expect.stringContaining("api.github.com/repos/liberuum/knowledge-vault-app/releases"), expect.anything());
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it("keeps the engine running when the window closes, unless switched off in Appearance", async () => {
     const a = api({ fetchSettings: vi.fn(async () => ({ version: 1 as const, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, provider: "openrouter" as const }, conversion: { mode: "local" as const, remoteUrl: "" }, ui: { closeToTray: true } })) });

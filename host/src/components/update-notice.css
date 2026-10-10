@@ -1,0 +1,32 @@
+/* The update notice (UpdateNotice.tsx): top centre, above every screen. */
+.kv-update { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 70; display: flex; justify-content: center; pointer-events: none; max-width: calc(100vw - 32px); }
+.kv-update > * { pointer-events: auto; }
+
+.kv-update-card { width: 380px; max-width: 100%; padding: 14px 16px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-overlay); color: var(--bai-text); font: 14px/1.45 var(--kv-font-ui); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45); }
+.kv-update-card-wide { width: 460px; }
+.kv-update-card[data-error="true"] { border-color: var(--bai-danger); }
+.kv-update-title { margin: 0 0 4px; font-weight: 600; }
+.kv-update-text { margin: 0; color: var(--bai-text-secondary); overflow-wrap: anywhere; }
+.kv-update-steps { margin: 6px 0 8px; padding-left: 20px; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.kv-update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.kv-update-actions a.kv-button { text-decoration: none; }
+
+.kv-update-pill { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; border: 1px solid var(--bai-accent); border-radius: 999px; background: var(--bai-overlay); color: var(--bai-text); font: 13px/1 var(--kv-font-ui); cursor: pointer; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); white-space: nowrap; }
+.kv-update-pill:hover:not(:disabled) { background: var(--bai-overlay-hover); }
+.kv-update-pill:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: 2px; }
+.kv-update-pill:disabled { cursor: default; }
+.kv-update-icon { color: var(--bai-accent); flex: none; }
+.kv-update-pill[data-busy] .kv-update-icon { animation: kv-update-nudge 1.2s ease-in-out infinite; }
+.kv-update-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--bai-accent); transform-origin: left; transition: transform 0.4s ease; }
+
+/* The card drops in from above the window; the pill grows out of where the card was. */
+.kv-update-card[data-enter="drop"] { animation: kv-update-drop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+.kv-update-pill[data-enter="fold"] { animation: kv-update-fold 0.3s ease-out both; }
+@keyframes kv-update-drop { from { transform: translateY(calc(-100% - 24px)); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes kv-update-fold { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes kv-update-nudge { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .kv-update-card[data-enter="drop"], .kv-update-pill[data-enter="fold"], .kv-update-pill[data-busy] .kv-update-icon { animation: none; }
+  .kv-update-bar { transition: none; }
+}

@@ -25,6 +25,7 @@
     "allow-open-logs",
     "allow-reveal-path",
     "allow-quit-app",
+    "allow-install-update",
     "allow-retry-engine",
     "allow-host-loaded",
     "allow-take-dropped-paths"

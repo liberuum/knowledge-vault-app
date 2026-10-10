@@ -10,6 +10,7 @@ mod proc_tree;
 mod sidecar;
 mod smoke;
 mod tray;
+mod update;
 pub mod webkit_env;
 
 use config::{
@@ -89,6 +90,32 @@ fn quit_app(app: AppHandle) {
     quit(&app);
 }
 
+/// A downloaded update (update.rs): its installer is opened, then the app quits so it can be replaced.
+/// Only one of this app's release installers, and only from the Downloads folder.
+#[tauri::command]
+fn install_update(app: AppHandle, path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let downloads = app
+        .path()
+        .download_dir()
+        .and_then(|d| Ok(d.canonicalize()?))
+        .map_err(|e| format!("No Downloads folder: {e}"))?;
+    if target.parent() != Some(downloads.as_path()) {
+        return Err("Only an installer in the Downloads folder can be opened.".into());
+    }
+    let kind = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(update::installer_kind)
+        .ok_or("That file is not an installer of this app.")?;
+    // Opened by the path as given: canonical paths on Windows carry a `\\?\` prefix not every opener takes.
+    update::launch(&PathBuf::from(&path), kind)?;
+    quit(&app);
+    Ok(())
+}
+
 /// Whether the shell may move its working directory to the user's home: not inside an AppImage,
 /// whose bundled WebKit resolves its helper processes against the working directory.
 fn moves_to_home(appimage: Option<&std::ffi::OsStr>, appdir: Option<&std::ffi::OsStr>) -> bool {
@@ -141,6 +168,7 @@ pub fn run() {
             sidecar_info,
             open_logs,
             reveal_path,
+            install_update,
             quit_app,
             retry_engine,
             host_loaded,

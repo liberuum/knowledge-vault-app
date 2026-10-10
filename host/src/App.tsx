@@ -24,6 +24,7 @@ import { matchShortcut } from "./shell/shortcuts.js";
 import type { SidecarInfo } from "./sidecar.js";
 import type { TokenProvider } from "./api/identity.js";
 import { EngineBanner } from "./components/EngineBanner.js";
+import { UpdateNotice } from "./components/UpdateNotice.js";
 import { DownloadNotice } from "./components/DownloadNotice.js";
 import { useEngineHealth } from "./state/use-engine-health.js";
 import { fetchSettings, type AppSettings } from "./vaults.js";
@@ -215,6 +216,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
       <HostModals />
       <HostToasts />
       <DownloadNotice />
+      <UpdateNotice info={info} />
     </>
   );
 }

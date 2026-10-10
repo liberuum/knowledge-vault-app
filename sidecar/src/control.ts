@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import type { UpdateDownloader } from "./app-update.js";
 import { droppedFilePath, serveDroppedFile } from "./dropped-files.js";
 import { SAMPLE_SOURCE } from "./sample-source.js";
 import { titleFromText, type AddedSource, type NewSource } from "./vault-sources.js";
@@ -131,6 +132,8 @@ export type ControlDeps = {
   logsTail: () => string[];
   /** KV_DEBUG_ROUTES=1 only: POST /debug/crash exits 3 so the supervisor can be exercised. */
   debugRoutes?: boolean;
+  /** A new release's installer, downloaded into Downloads (app-update.ts): GET /update/download, POST /update/download. */
+  update?: UpdateDownloader;
 };
 
 /** A path segment; a malformed escape is the caller's mistake (400), not the server's (500). */
@@ -297,6 +300,21 @@ export function createControlServer(deps: ControlDeps) {
         return send(res, 200, { code: r.code }, allowed);
       }
       if (req.method === "GET" && url.pathname === "/status") return send(res, 200, deps.status(), allowed);
+      if (url.pathname === "/update/download" && deps.update) {
+        if (req.method === "GET") return send(res, 200, deps.update.status(), allowed);
+        if (req.method === "POST") {
+          const body = await readJson(req);
+          const version = typeof body.version === "string" ? body.version.trim() : "";
+          const assets = Array.isArray(body.assets)
+            ? (body.assets as unknown[]).flatMap((a) => {
+                const r = a as { name?: unknown; url?: unknown; size?: unknown } | null;
+                return r && typeof r.name === "string" && typeof r.url === "string" ? [{ name: r.name, url: r.url, size: typeof r.size === "number" ? r.size : null }] : [];
+              })
+            : [];
+          if (!version || assets.length === 0) return send(res, 400, { error: "Name the release and its files." }, allowed);
+          return send(res, 202, deps.update.start({ version, assets }), allowed);
+        }
+      }
       if (req.method === "GET" && url.pathname === "/vaults") return send(res, 200, { vaults: await deps.listVaults() }, allowed);
       if (req.method === "POST" && url.pathname === "/vaults") {
         const body = await readJson(req);

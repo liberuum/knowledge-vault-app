@@ -368,7 +368,19 @@ pub fn spawn_sidecar(
     app_version: &str,
 ) -> tauri::Result<()> {
     let protection = LocalProtection::load(&paths.data_dir.join("config.json"));
-    let env = SidecarEnv::build(paths, &ports, &token, app_version, &protection);
+    let mut env = SidecarEnv::build(paths, &ports, &token, app_version, &protection);
+    // An update's installer goes to the Downloads folder the shell knows (install_update opens it
+    // from there), and the engine picks the AppImage when that is what runs — its own environment
+    // keeps only KV_* variables (environment.ts), so it is told.
+    if let Ok(downloads) = app.path().download_dir() {
+        env.push((
+            "KV_DOWNLOAD_DIR".into(),
+            downloads.to_string_lossy().into_owned(),
+        ));
+    }
+    if std::env::var_os("APPIMAGE").is_some() {
+        env.push(("KV_APPIMAGE".into(), "1".into()));
+    }
     // cwd = the engine's root: it resolves its packages from <root>/node_modules.
     // The engine's environment is scrubbed by the sidecar itself (environment.ts), whoever spawns it.
     let base = if paths.sidecar.bundled_node {
