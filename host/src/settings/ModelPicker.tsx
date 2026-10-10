@@ -57,9 +57,12 @@ export function ModelPicker({ id, value, onChange, disabled, placeholder, hasKey
       .then((c) => {
         if (!alive) return;
         setCatalog(c);
-        // A key's list arrived: unless the current model is one it offers, choose the best fit.
+        // A key's list arrived: choose the best fit when no model is chosen, or when the list says
+        // the chosen one can't do the work. A model the list doesn't name is kept (typed on purpose).
         const { value: current, onChange: change, autoChoose: auto } = latest.current;
-        if (!auto || !c.ok || c.models.some((m) => m.id === current && fitForProcessing(m).ok !== false)) return;
+        if (!auto || !c.ok) return;
+        const listed = c.models.find((m) => m.id === current);
+        if (current.trim() && (!listed || fitForProcessing(listed).ok !== false)) return;
         const pick = defaultModel(c.models);
         if (pick) {
           change(pick.id);
