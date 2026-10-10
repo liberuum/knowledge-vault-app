@@ -120,8 +120,11 @@ export function ProviderChoice(props: Props) {
         );
       })}
       {chatgptAsButton && (
-        // The providers' own sign-in buttons, side by side (ChatGPT for now).
-        <div className="kv-provider-plain">{props.chatgptBlock}</div>
+        // The providers' own sign-in buttons, side by side (ChatGPT for now), named as the alternative they are.
+        <div className="kv-provider-plain">
+          <span className="kv-provider-plain-label">Or use your AI plan</span>
+          {props.chatgptBlock}
+        </div>
       )}
     </div>
   );

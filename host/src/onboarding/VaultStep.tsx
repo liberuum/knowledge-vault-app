@@ -8,6 +8,9 @@ import { plainError } from "../problem.js";
 
 type Props = { info: SidecarInfo; vaultId?: string; onBack: () => void; onReady: (vaultId: string) => void };
 
+/** Names to start from (Decision: a blank name is a small blank page); one click fills the field, which stays editable. */
+export const NAME_IDEAS = ["Research", "Work", "Reading notes", "Learning"] as const;
+
 /**
  * The first vault: a name, already filled in. Coming back shows the vault the guide made; opened with vaults
  * already there (from Settings), it offers them before a new one (review I4). A vault whose processing could not
@@ -86,9 +89,17 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
               <ul>
                 {vaults.map((v) => (
                   <li key={v.id}>
-                    <button type="button" className="kv-onb-card kv-onb-card-row" onClick={() => use(v.id)}>
-                      <strong>{v.name}</strong>
-                      <span>{v.noteCount} note{v.noteCount === 1 ? "" : "s"}</span>
+                    <button type="button" className="kv-onb-card kv-onb-vault" onClick={() => use(v.id)} aria-label={`Use ${v.name}`}>
+                      <span className="kv-onb-vault-main">
+                        <strong>{v.name}</strong>
+                        <span>{v.noteCount.toLocaleString()} note{v.noteCount === 1 ? "" : "s"}</span>
+                      </span>
+                      <span className="kv-onb-vault-use" aria-hidden="true">
+                        Use
+                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M5 12h14M13 6l6 6-6 6" />
+                        </svg>
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -98,6 +109,14 @@ export function VaultStep({ info, vaultId, onBack, onReady }: Props) {
           <form onSubmit={(e) => void create(e)}>
             <label htmlFor="onb-vault-name" className="kv-onb-label">{vaults.length > 0 ? "Or create a new vault" : "Name"}</label>
             <input id="onb-vault-name" className="kv-onb-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} disabled={busy} autoFocus={vaults.length === 0} />
+            <div className="kv-onb-ideas" role="group" aria-label="Name ideas">
+              <span className="kv-onb-ideas-label">Ideas:</span>
+              {NAME_IDEAS.map((idea) => (
+                <button key={idea} type="button" className="kv-onb-chip" aria-pressed={name === idea} onClick={() => setName(idea)} disabled={busy}>
+                  {idea}
+                </button>
+              ))}
+            </div>
             {!name.trim() && <p className="kv-hint">A vault needs a name, for example the subject it is about.</p>}
             {error && <p role="alert" className="kv-error">{plainError(error)}</p>}
             <div className="kv-onb-actions">

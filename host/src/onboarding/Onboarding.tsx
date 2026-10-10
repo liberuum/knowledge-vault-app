@@ -94,6 +94,10 @@ export function Onboarding({ info, step, vaultId, onStep, onFinish, onVisit, onR
   );
 }
 
+/**
+ * Where you are (Wayfinding): the four steps as nodes and links — the same track as Getting started on the front
+ * page — done ones ticked, the current one lit and named.
+ */
 function Rail({ current }: { current: OnboardingStep }) {
   return (
     <ol className="kv-onb-rail" aria-label="Setup steps">
@@ -101,8 +105,16 @@ function Rail({ current }: { current: OnboardingStep }) {
         const state = railState(current, r.step);
         return (
           <li key={r.step} data-state={state} aria-current={state === "current" ? "step" : undefined}>
-            <span className="kv-onb-dot" aria-hidden="true">{state === "done" ? "✓" : i + 1}</span>
-            <span>{r.label}</span>
+            <span className="kv-onb-dot" aria-hidden="true">
+              {state === "done" ? (
+                <svg viewBox="0 0 24 24" width={12} height={12} fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              ) : (
+                i + 1
+              )}
+            </span>
+            <span className="kv-onb-rail-label">{r.label}</span>
             {state === "done" && <span className="kv-visually-hidden"> (done)</span>}
           </li>
         );

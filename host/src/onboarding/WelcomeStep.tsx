@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Constellation } from "../landing/Constellation.js";
+import { LockNote } from "./LockNote.js";
 
-/** One screen, one button: what the app does, in three lines, and that it stays on this computer. */
+/** One screen, one button: what the app does, in three lines, how long setting it up takes, and that it stays on this computer. */
 export function WelcomeStep({ onStart }: { onStart: () => void }) {
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -28,8 +29,9 @@ export function WelcomeStep({ onStart }: { onStart: () => void }) {
           <span>Follow the links, browse the maps of your topics and chat with your vault.</span>
         </li>
       </ol>
-      <p className="kv-hint">Your files and notes stay on this computer.</p>
+      <LockNote>Your files and notes stay on this computer.</LockNote>
       <div className="kv-onb-actions kv-onb-actions-end">
+        <span className="kv-onb-actions-note kv-hint">4 short steps · a few minutes</span>
         <button type="button" className="kv-button kv-button-primary" onClick={onStart} autoFocus>
           Get started
         </button>

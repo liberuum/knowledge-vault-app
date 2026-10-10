@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SidecarInfo } from "../sidecar.js";
 import { fetchPipeline, fetchVaults, type PipelineStatus } from "../vaults.js";
 import { ensureAutoPublish, vaultIntake, type IntakeFileView, type IntakeView } from "./vault-intake.js";
+import { CardIcon } from "./CardIcon.js";
 
 export type VaultView = "chat" | "notes" | "graph" | "search" | "sources";
 
@@ -133,6 +134,9 @@ export function OverviewStep({ info, vaultId, onVisit, onRuns, onFinish }: { inf
               disabled={c.view === "runs" && !workflowId}
               onClick={() => (c.view === "runs" ? workflowId && onRuns(workflowId) : onVisit(c.view))}
             >
+              <span className="kv-onb-card-icon">
+                <CardIcon view={c.view} />
+              </span>
               <span className="kv-onb-card-head">
                 <strong>{c.title}</strong>
                 {c.afterNotes && notes === 0 && <span className="kv-onb-card-tag">After processing</span>}

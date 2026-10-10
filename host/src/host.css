@@ -397,6 +397,8 @@ body, #root { margin: 0; min-height: 100vh; }
 
 /* Provider choice: below the cards, the providers' own sign-in buttons (ChatGPT not chosen yet: its button alone) */
 .kv-provider-plain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0 2px; }
+/* the sign-in alternatives below the cards, named as such */
+.kv-provider-plain-label { flex-basis: 100%; color: var(--bai-text-tertiary); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* Fields inside the provider cards (Settings › Models and the setup guide alike): the app's own field look,
    drawn by the app rather than the system, so a key box or the service menu never falls back to the platform's. */

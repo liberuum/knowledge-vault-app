@@ -3,16 +3,21 @@
 .kv-onb-main { width: 100%; max-width: 680px; margin: 0 auto; padding: 22px var(--kv-gutter) 40px; box-sizing: border-box; }
 .kv-onb-foot { margin: 0; padding: 0 var(--kv-gutter) 22px; text-align: center; color: var(--bai-text-tertiary); font-size: 13px; }
 
-/* Wayfinding: the rail says where you are; the current step is the only lit one */
-.kv-onb-rail { list-style: none; margin: 0 0 26px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.kv-onb-rail li { display: flex; align-items: center; gap: 8px; min-width: 0; padding-top: 10px; border-top: 2px solid var(--bai-border); color: var(--bai-text-tertiary); font-size: 13px; }
-.kv-onb-rail li > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kv-onb-rail li[data-state="current"] { border-top-color: var(--bai-accent); color: var(--bai-text); font-weight: 600; }
-.kv-onb-rail li[data-state="done"] { border-top-color: var(--bai-accent-soft); color: var(--bai-text-secondary); }
-.kv-onb-dot { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; border: 1px solid var(--bai-border); font-size: 12px; font-weight: 600; }
-.kv-onb-rail li[data-state="current"] .kv-onb-dot { background: var(--bai-accent); border-color: transparent; color: var(--bai-accent-text); }
+/*
+ * Wayfinding: the rail is a track of the four steps — nodes and links, as on the front page's Getting started —
+ * a link turning green behind each finished step, the current node lit and its name the only bold one.
+ */
+.kv-onb-rail { list-style: none; margin: 0 0 30px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kv-onb-rail li { position: relative; display: grid; justify-items: center; gap: 8px; min-width: 0; color: var(--bai-text-tertiary); font-size: 13px; text-align: center; }
+.kv-onb-rail li + li::before { content: ""; position: absolute; top: 12px; right: calc(50% + 17px); left: calc(-50% + 17px); height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--bai-text) 14%, transparent); }
+.kv-onb-rail li[data-state="done"] + li::before { background: var(--bai-ok); }
+.kv-onb-rail-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-onb-rail li[data-state="current"] { color: var(--bai-text); font-weight: 600; }
+.kv-onb-rail li[data-state="done"] { color: var(--bai-text-secondary); }
+.kv-onb-dot { position: relative; z-index: 1; flex: none; width: 26px; height: 26px; box-sizing: border-box; border-radius: 50%; display: inline-grid; place-items: center; border: 1.5px solid color-mix(in srgb, var(--bai-text) 20%, transparent); background: var(--bai-bg, var(--bai-deep)); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kv-onb-rail li[data-state="current"] .kv-onb-dot { background: var(--bai-accent); border-color: transparent; color: var(--bai-accent-text); box-shadow: 0 0 0 5px color-mix(in srgb, var(--bai-accent) 18%, transparent); }
 /* Emotion: a finished step's tick pops once */
-.kv-onb-rail li[data-state="done"] .kv-onb-dot { background: var(--bai-ok-soft); border-color: transparent; color: var(--bai-ok); animation: kv-onb-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1.2); }
+.kv-onb-rail li[data-state="done"] .kv-onb-dot { background: var(--bai-ok); border-color: transparent; color: var(--bai-accent-text); animation: kv-onb-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1.2); }
 
 /* each step arrives from the side it lies on: forward from the right, back from the left */
 .kv-onb-step { animation: kv-onb-in-forward 260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
@@ -29,8 +34,22 @@
 .kv-onb-input:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: 1px; }
 .kv-onb-textarea { resize: vertical; min-height: 120px; }
 
-/* Vision: one primary action, bottom right; Back bottom left */
-.kv-onb-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 26px; }
+/*
+ * Vision: one primary action, bottom right; Back bottom left. The row stays in view while a long step scrolls
+ * (the AI choice on a small window), fading the content under it, and sits in place once the step ends.
+ */
+.kv-onb-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 26px;
+  padding: 16px 0 18px;
+  background: linear-gradient(to bottom, transparent, var(--bai-bg, var(--bai-deep)) 18px);
+}
 .kv-onb-actions-end { justify-content: flex-end; }
 .kv-onb-actions .kv-button-primary { min-width: 140px; }
 
@@ -60,6 +79,7 @@
 .kv-onb-found-item .kv-hint { margin: 0; }
 .kv-onb-none p { margin: 0 0 6px; }
 .kv-onb-local-more { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.kv-onb-local-more > .kv-button-quiet { padding-left: 0; }
 .kv-onb-details summary { cursor: pointer; color: var(--bai-text-tertiary); font-size: 14px; }
 .kv-onb-details[open] { flex-basis: 100%; }
 .kv-onb-address { padding-top: 4px; }
@@ -90,11 +110,8 @@
 /* narrow tiles: the rail keeps its numbers and the current step's name */
 @media (max-width: 560px) {
   .kv-onb-title { font-size: 25px; }
-  .kv-onb-rail { display: flex; }
-  .kv-onb-rail li { flex: none; }
-  .kv-onb-rail li > span:nth-child(2) { display: none; }
-  .kv-onb-rail li[data-state="current"] { flex: 1 1 auto; }
-  .kv-onb-rail li[data-state="current"] > span:nth-child(2) { display: inline; }
+  .kv-onb-rail-label { display: none; }
+  .kv-onb-rail li[data-state="current"] .kv-onb-rail-label { display: block; }
 }
 
 /* the overview: progress while the vault fills, then what it can do */
@@ -143,3 +160,33 @@
 /* a card's title with its "After processing" tag; overrides the card's secondary span style for the title row */
 .kv-onb-card .kv-onb-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--bai-text); font-size: inherit; }
 .kv-onb-card .kv-onb-card-tag { flex: none; font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--bai-border); border-radius: 999px; background: var(--bai-deep); color: var(--bai-text-secondary); white-space: nowrap; }
+
+/* Emotion: the promises under a decision, each with a small lock — the same as Backup & restore's */
+.kv-onb-assure { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 0; color: var(--bai-text-tertiary); font-size: 14px; }
+.kv-onb-assure svg { flex: none; margin-top: 3px; color: var(--bai-ok); }
+
+/* the AI step: what was found first, then what to expect of it; the preselected one says it is the suggestion */
+.kv-onb-local-note { margin: 0; font-size: 13.5px; }
+.kv-onb-suggested { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 13%, transparent); font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; }
+
+/* the vault step: an existing vault reads as a choice — its name, its size, and "Use →" */
+.kv-onb-card.kv-onb-vault { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; }
+.kv-onb-vault-main { display: grid; gap: 2px; min-width: 0; }
+.kv-onb-vault-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-onb-card .kv-onb-vault-use { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--bai-text-tertiary); font-size: 14px; font-weight: 500; transition: color 140ms ease, transform 140ms ease; }
+.kv-onb-vault:hover .kv-onb-vault-use, .kv-onb-vault:focus-visible .kv-onb-vault-use { color: var(--bai-accent); transform: translateX(2px); }
+/* names to start from */
+.kv-onb-ideas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.kv-onb-ideas-label { margin-right: 2px; color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-onb-chip { padding: 4px 11px; border: 1px solid var(--bai-border); border-radius: 999px; background: none; color: var(--bai-text-secondary); font: inherit; font-size: 13px; cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background 120ms ease; }
+.kv-onb-chip:hover:not(:disabled) { border-color: color-mix(in srgb, var(--bai-accent) 55%, var(--bai-border)); color: var(--bai-text); }
+.kv-onb-chip[aria-pressed="true"] { border-color: var(--bai-accent); color: var(--bai-text); background: color-mix(in srgb, var(--bai-accent) 14%, transparent); }
+.kv-onb-chip:focus-visible { outline: 2px solid var(--bai-accent); outline-offset: 1px; }
+
+/* the overview's cards: the view's mark, then its name and what it does */
+.kv-onb-cards .kv-onb-card { grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; row-gap: 3px; }
+.kv-onb-cards .kv-onb-card > :not(.kv-onb-card-icon) { grid-column: 2; }
+.kv-onb-card .kv-onb-card-icon { grid-row: 1 / span 2; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 13%, transparent); }
+.kv-onb-card:disabled .kv-onb-card-icon { color: var(--bai-text-tertiary); background: color-mix(in srgb, var(--bai-text) 8%, transparent); }
+
+@media (prefers-reduced-motion: reduce) { .kv-onb-vault-use, .kv-onb-chip { transition: none; } }

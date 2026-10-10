@@ -25,6 +25,7 @@ import {
 import { checkModel } from "./api.js";
 import { modelReady } from "./onboarding-state.js";
 import { plainError } from "../problem.js";
+import { LockNote } from "./LockNote.js";
 
 /** A model on this computer or the network; `typed` when it came from an address the person entered. */
 type Pick = { endpoint: string; model: string; typed?: boolean };
@@ -293,9 +294,10 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
         ? `Your text goes to the computer at ${hostOf(pick.endpoint)} on your network, and nowhere else.`
         : "Nothing leaves this computer.";
 
+  // With more than one found, the preselected one is named as the suggestion (Decision: a default, said why).
+  const suggested = options.length > 1 ? bestFound(found) : null;
   const localBlock = (
     <div className="kv-onb-local">
-      <p className="kv-hint">Slower than an online AI: each source takes a few minutes.</p>
       {scanning && <p role="status" className="kv-quiet">Looking for AI models on this computer…</p>}
       {!scanning && options.length > 0 && (
         <fieldset className="kv-onb-found">
@@ -316,7 +318,10 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
                   disabled={busy}
                 />
                 <span>
-                  <strong>{o.model.id}</strong>
+                  <strong>
+                    {o.model.id}
+                    {suggested && suggested.server.endpoint === o.server.endpoint && suggested.model.id === o.model.id && <span className="kv-onb-suggested">Suggested</span>}
+                  </strong>
                   <span className="kv-hint">{plainFound(o.server, o.model)}</span>
                 </span>
               </label>
@@ -333,6 +338,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
           </p>
         </div>
       )}
+      {!scanning && <p className="kv-hint kv-onb-local-note">Slower than an online AI: each source takes a few minutes.</p>}
       {!scanning && (
         <div className="kv-onb-local-more">
           <button type="button" className="kv-button kv-button-quiet" onClick={() => void scan()} disabled={busy}>Scan again</button>
@@ -356,7 +362,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
   return (
     <section aria-labelledby="onb-title">
       <h2 id="onb-title" className="kv-onb-title" tabIndex={-1}>Choose the AI that writes your notes</h2>
-      <p className="kv-onb-lead">It reads each source and writes the notes, and the vault's chat uses it too. You can change it any time in Settings.</p>
+      <p className="kv-onb-lead">It reads each source and writes the notes, and the vault's chat uses it too.</p>
       {loadError && <p role="alert" className="kv-error">{plainError(loadError)}</p>}
       {settings === null && !loadError && <p role="status" className="kv-quiet">Loading…</p>}
       {settings && (
@@ -425,7 +431,7 @@ export function AiStep({ info, onBack, onContinue }: { info: SidecarInfo; onBack
             {phase.kind === "ready" && <p role="status" className="kv-onb-ok">{phase.message}</p>}
             {phase.kind === "failed" && <p role="alert" className="kv-error">{plainError(phase.message)}</p>}
           </div>
-          <p className="kv-hint">{privacy}</p>
+          <LockNote>{privacy}</LockNote>
           <div className="kv-onb-actions">
             <button type="button" className="kv-button" onClick={onBack} disabled={busy}>Back</button>
             <span className="kv-onb-actions-right">
