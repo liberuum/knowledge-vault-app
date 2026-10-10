@@ -212,6 +212,9 @@ async function main(): Promise<void> {
   // Spec §4.7: never on the LAN. The Switchboard binds every interface and offers no host option;
   // a listen() for its port that names no host is bound to loopback (see loopback.ts).
   bindLoopbackOnly(cfg.port);
+  // A vault on this computer gets a dropped file without a network in between, so its convert route takes up to
+  // 100 MB (30 MB is the default for a hosted vault). The vault package reads this when the Switchboard sets it up.
+  process.env.CONVERT_MAX_UPLOAD_MB ??= "100";
   const { startSwitchboard } = await import("@powerhousedao/switchboard/server");
   const options = switchboardOptions(cfg, configFile, packageSpecs(PACKAGE_DIRS, process.cwd()), renownUrl);
   const switchboard = await startSwitchboard(options);
