@@ -47,7 +47,11 @@ impl Gpu {
     /// Only Linux has the choice; elsewhere nothing is probed.
     #[cfg(not(target_os = "linux"))]
     pub fn probe() -> Self {
-        Self { render_node: true, gles: true, nvidia_proprietary: false }
+        Self {
+            render_node: true,
+            gles: true,
+            nvidia_proprietary: false,
+        }
     }
 }
 
@@ -56,7 +60,10 @@ impl Gpu {
 fn gles_loads() -> bool {
     // SAFETY: a NUL-terminated name, a handle closed at once; called from main() before any thread exists.
     unsafe {
-        let handle = libc::dlopen(c"libGLESv2.so.2".as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL);
+        let handle = libc::dlopen(
+            c"libGLESv2.so.2".as_ptr(),
+            libc::RTLD_LAZY | libc::RTLD_LOCAL,
+        );
         if handle.is_null() {
             return false;
         }
@@ -86,9 +93,9 @@ pub fn defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::defaults;
     #[cfg(target_os = "linux")]
     use super::Gpu;
+    use super::defaults;
 
     fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |k| {
@@ -100,9 +107,17 @@ mod tests {
 
     // Linux only, like the tests that use them: on macOS and Windows an unused constant fails clippy -D warnings.
     #[cfg(target_os = "linux")]
-    const GPU: Gpu = Gpu { render_node: true, gles: true, nvidia_proprietary: false };
+    const GPU: Gpu = Gpu {
+        render_node: true,
+        gles: true,
+        nvidia_proprietary: false,
+    };
     #[cfg(target_os = "linux")]
-    const NO_GPU: Gpu = Gpu { render_node: false, gles: false, nvidia_proprietary: false };
+    const NO_GPU: Gpu = Gpu {
+        render_node: false,
+        gles: false,
+        nvidia_proprietary: false,
+    };
 
     #[test]
     #[cfg(target_os = "linux")]
@@ -119,12 +134,27 @@ mod tests {
         let shm = vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
         // a virtual display: no render node, no GL ES (the CI case that left the window blank)
         assert_eq!(defaults(env(&[]), || NO_GPU), shm);
-        assert_eq!(defaults(env(&[]), || Gpu { render_node: false, ..GPU }), shm);
+        assert_eq!(
+            defaults(env(&[]), || Gpu {
+                render_node: false,
+                ..GPU
+            }),
+            shm
+        );
         assert_eq!(defaults(env(&[]), || Gpu { gles: false, ..GPU }), shm);
-        assert_eq!(defaults(env(&[]), || Gpu { nvidia_proprietary: true, ..GPU }), shm);
+        assert_eq!(
+            defaults(env(&[]), || Gpu {
+                nvidia_proprietary: true,
+                ..GPU
+            }),
+            shm
+        );
         assert_eq!(
             defaults(env(&[("XDG_CURRENT_DESKTOP", "GNOME")]), || NO_GPU),
-            vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1"), ("GTK_USE_PORTAL", "1")]
+            vec![
+                ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+                ("GTK_USE_PORTAL", "1")
+            ]
         );
     }
 
@@ -150,6 +180,9 @@ mod tests {
     fn the_probe_runs_on_this_machine() {
         // whatever this machine has, probing it must not fail or hang
         let gpu = Gpu::probe();
-        assert_eq!(gpu.dmabuf_works(), gpu.render_node && gpu.gles && !gpu.nvidia_proprietary);
+        assert_eq!(
+            gpu.dmabuf_works(),
+            gpu.render_node && gpu.gles && !gpu.nvidia_proprietary
+        );
     }
 }
