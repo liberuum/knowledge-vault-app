@@ -7,11 +7,13 @@ import {
   setReactorClient,
   setPHToast,
   setReactorClientModule,
+  setSelectedNode,
   setSwitchboardUrl,
   setVetraPackageManager,
   StaticPackageManager,
 } from "@powerhousedao/reactor-browser";
 import type { DocumentModelLib } from "document-model";
+import { setHistoryEditorRestorer } from "./shell/history-guard.js";
 import { hostToasts } from "./components/HostToasts.js";
 import { remoteClientModule } from "./remote-client-module.js";
 import type { SidecarInfo } from "./sidecar.js";
@@ -71,6 +73,8 @@ export function activate(target: Target): GraphQLReactorClient {
  */
 export function installReactor(info: SidecarInfo, packages: readonly DocumentModelLib[], tokenProvider?: Target["tokenProvider"]): GraphQLReactorClient {
   ensurePHEventHandlers();
+  // Back and forward reopen the editor each history entry had open (shell/history-guard.ts).
+  setHistoryEditorRestorer((nodeId) => setSelectedNode(nodeId));
   libs = packages;
   setVetraPackageManager(new StaticPackageManager(packages));
   // Mounted apps report through usePHToast(); Connect provides that service, here the host does.

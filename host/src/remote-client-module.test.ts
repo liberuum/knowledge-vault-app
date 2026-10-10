@@ -3,7 +3,7 @@ import { remoteClientModule, type ModuleClient } from "./remote-client-module.js
 
 type Call = { query: string; variables?: Record<string, unknown> };
 
-function fakeClient(nodes: { id: string; kind: string }[] = []) {
+function fakeClient(nodes: { id: string; kind: string; parentFolder?: string }[] = []) {
   const calls: Call[] = [];
   const deleted: string[] = [];
   const client: ModuleClient = {
@@ -57,13 +57,24 @@ describe("remoteClientModule", () => {
     expect(calls[1]!.variables).toEqual({ drive: "drive-1", input: { id: "new-generic", name: "Thing" } });
   });
 
-  it("deletes a document through the engine, and a folder through the drive", async () => {
-    const files = fakeClient([{ id: "doc-1", kind: "file" }, { id: "dir-1", kind: "folder" }]);
+  it("deletes a document through the engine, and a folder through the drive — its documents first, or they keep running", async () => {
+    // A workflow's home folder (Studio, 6.2.3-dev.47), with a nested folder, and a document outside it.
+    const tree = [
+      { id: "doc-1", kind: "file" },
+      { id: "dir-1", kind: "folder" },
+      { id: "wf-1", kind: "file", parentFolder: "dir-1" },
+      { id: "dir-2", kind: "folder", parentFolder: "dir-1" },
+      { id: "conn-1", kind: "file", parentFolder: "dir-2" },
+    ];
+    const files = fakeClient(tree);
     const m = remoteClientModule(files.client, libs);
     await m.client.drives.removeNode("drive-1", "doc-1");
     expect(files.deleted).toEqual(["doc-1"]);
     await m.client.drives.removeNode("drive-1", "dir-1");
+    expect(files.deleted).toEqual(["doc-1", "wf-1", "conn-1"]);
     expect(files.calls.at(-1)!.query).toMatch(/DocumentDrive\s*\{\s*deleteNode\(/);
+    // The engine's model mutations take `input: <Model>_<Op>Input!`: a nullable variable fails validation there.
+    for (const { query } of files.calls) for (const m of query.matchAll(/\$input: (DocumentDrive_\w+Input)(!?)/g)) expect(m[2], m[1]).toBe("!");
     expect(files.calls.at(-1)!.variables).toEqual({ drive: "drive-1", input: { id: "dir-1" } });
   });
 

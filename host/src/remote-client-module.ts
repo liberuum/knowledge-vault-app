@@ -10,7 +10,7 @@ export type ModuleClient = {
   deleteDocument(id: string): Promise<void>;
 };
 
-type DriveNode = { id: string; kind: string };
+type DriveNode = { id: string; kind: string; parentFolder?: string | null };
 
 /** A model's GraphQL namespace: its name in PascalCase ("Workflow", "Connection"). */
 function namespaceOf(module: DocumentModelModule): string | undefined {
@@ -67,7 +67,7 @@ export function remoteClientModule(
     const id = data.createEmptyDocument?.id;
     if (!id) throw new Error(`The engine did not create the ${type} document`);
     await client.request(
-      `mutation DesktopName($drive: String, $input: DocumentDrive_UpdateNodeInput) {
+      `mutation DesktopName($drive: String, $input: DocumentDrive_UpdateNodeInput!) {
          DocumentDrive { updateNode(documentIdOrSlug: $drive, input: $input) { id } }
        }`,
       { drive: driveId, input: { id, name } },
@@ -92,7 +92,7 @@ export function remoteClientModule(
         const id = await createInDrive(driveId, document.header.documentType, document.header.name, editor ?? undefined);
         if (parentFolder) {
           await client.request(
-            `mutation DesktopMove($drive: String, $input: DocumentDrive_MoveNodeInput) {
+            `mutation DesktopMove($drive: String, $input: DocumentDrive_MoveNodeInput!) {
                DocumentDrive { moveNode(documentIdOrSlug: $drive, input: $input) { id } }
              }`,
             { drive: driveId, input: { srcFolder: id, targetParentFolder: parentFolder } },
@@ -107,8 +107,22 @@ export function remoteClientModule(
         const nodes = ((drive.state as { global?: { nodes?: DriveNode[] } }).global?.nodes ?? []);
         const node = nodes.find((n) => n.id === nodeId);
         if (node?.kind === "folder") {
+          // DELETE_NODE removes only the drive's entry: the documents under it stay alive, and a workflow
+          // keeps firing. Studio deletes a workflow through its home folder (6.2.3-dev.47), so every
+          // document under the folder goes first, as upstream's DriveClient.deleteNode does.
+          const under = new Set([nodeId]);
+          for (let grew = true; grew; ) {
+            grew = false;
+            for (const n of nodes) {
+              if (n.parentFolder && under.has(n.parentFolder) && !under.has(n.id)) {
+                under.add(n.id);
+                grew = true;
+              }
+            }
+          }
+          for (const n of nodes) if (n.kind === "file" && under.has(n.id)) await client.deleteDocument(n.id);
           await client.request(
-            `mutation DesktopDeleteNode($drive: String, $input: DocumentDrive_DeleteNodeInput) {
+            `mutation DesktopDeleteNode($drive: String, $input: DocumentDrive_DeleteNodeInput!) {
                DocumentDrive { deleteNode(documentIdOrSlug: $drive, input: $input) { id } }
              }`,
             { drive: driveId, input: { id: nodeId } },

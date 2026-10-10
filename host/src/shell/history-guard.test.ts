@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { installHistoryGuard } from "./history-guard.js";
+import { installHistoryGuard, setHistoryEditorRestorer } from "./history-guard.js";
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
@@ -38,3 +38,27 @@ describe("history guard — the shell's hash route stays authoritative", () => {
     uninstall();
   });
 });
+
+describe("history guard — back and forward keep the app open and walk its editors", () => {
+  it("records the open editor on each entry, and on popstate keeps reactor-browser's path handlers out and reopens that editor", () => {
+    const uninstall = installHistoryGuard();
+    const ph = { selectedDriveId: "workflows", selectedNodeId: "wf-1" };
+    (window as unknown as { ph: typeof ph }).ph = ph;
+    window.history.pushState(null, "", "/#wf-1"); // Studio selecting wf-1 with its editor open
+    expect(window.history.state).toEqual({ phNode: "wf-1" });
+
+    const restored: Array<string | undefined> = [];
+    setHistoryEditorRestorer((id) => restored.push(id));
+    let reachedLater = false;
+    const later = () => (reachedLater = true); // stands in for reactor-browser's own popstate handlers
+    window.addEventListener("popstate", later);
+    ph.selectedNodeId = "wf-2";
+    window.dispatchEvent(new PopStateEvent("popstate", { state: { phNode: "wf-1" } }));
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null })); // an entry the router made: no editor
+    expect(reachedLater, "reactor-browser would deselect the drive: the path never names it here").toBe(false);
+    expect(restored).toEqual(["wf-1", undefined]);
+    window.removeEventListener("popstate", later);
+    uninstall();
+  });
+});
+
