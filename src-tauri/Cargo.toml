@@ -38,3 +38,5 @@ signal-hook = "0.4"
 # Reading a drop's full file list from GTK (drop_capture.rs): the same gtk the webview uses.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+# Whether WebKit's GPU renderer can load its GL ES library (webkit_env.rs).
+libc = "0.2"
