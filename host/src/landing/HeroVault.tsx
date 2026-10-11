@@ -106,7 +106,8 @@ export function HeroVault({ vault, remote, opened, sample, full = null, saved, o
               <path d="M5 12h14M13 6l6 6-6 6" />
             </svg>
           </button>
-          {onOpenView && notes > 0 && (
+          {/* Every local vault, an empty one too: Sources is where its first file goes. */}
+          {onOpenView && (
             <span className="kv-hero-jumps" role="group" aria-label={`Open ${vault.name} on`}>
               {JUMPS.map((j) => (
                 <button key={j.view} type="button" className="kv-hero-jump" onClick={() => onOpenView(j.view)}>
