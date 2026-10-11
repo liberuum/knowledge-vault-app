@@ -41,8 +41,14 @@ jobs:
             echo "$tag exists as a draft from an earlier run; it will be replaced"
           fi
 
-  build:
+  # Every check a push to main gets (ci.yml), on the tagged commit itself: a tag on a commit that fails
+  # them — or that never went through CI — builds nothing.
+  checks:
     needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [preflight, checks]
     permissions:
       contents: write
     strategy:

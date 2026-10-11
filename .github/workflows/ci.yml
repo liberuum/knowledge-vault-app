@@ -1,5 +1,6 @@
 # Checks on every push to main and on pull requests: formatting, lint, type check and the unit tests, plus a
-# Windows compile of the shell. Releases are a separate workflow (release.yml), run by a version tag. Not run
+# Windows compile of the shell. Releases are a separate workflow (release.yml), run by a version tag; it calls
+# this one first and builds nothing unless every check here passes on the tagged commit. Not run
 # here, run them locally: the end-to-end tests (bun run e2e; the release's smoke test covers the packaged app)
 # and converter:check (needs the sibling docling checkout).
 name: CI
@@ -7,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # release.yml, before it builds
 
 permissions:
   contents: read
