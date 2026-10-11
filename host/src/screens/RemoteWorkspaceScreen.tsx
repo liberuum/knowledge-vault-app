@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createTokenProvider } from "../api/identity.js";
 import type { RemoteVault } from "../api/remote.js";
 import { declareDesktopHost, type HostIdentity } from "../bootstrap.js";
-import { activate } from "../reactor.js";
+import { activate, activateAfterCleanup } from "../reactor.js";
 import type { SidecarInfo } from "../sidecar.js";
 import { AppBar } from "../shell/AppBar.js";
 import { VaultLoader } from "../components/VaultLoader.js";
@@ -62,9 +62,8 @@ export function RemoteWorkspaceScreen({
   // sign-in landing after mount re-declares without ever flipping the client to the local engine.
   useEffect(() => {
     setClient(activate({ origin: vault.switchboardUrl, tokenProvider }));
-    return () => {
-      activate({ origin: info.origin });
-    };
+    // Back to the local engine after the vault app inside has closed too (reactor.ts).
+    return () => activateAfterCleanup({ origin: info.origin });
   }, [info.origin, vault.switchboardUrl, tokenProvider]);
   useEffect(() => {
     declareDesktopHost(vault.switchboardUrl, { bearer: tokenProvider, identity });

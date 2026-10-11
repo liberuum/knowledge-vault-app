@@ -27,6 +27,8 @@ export type Target = {
 
 let libs: readonly DocumentModelLib[] = [];
 const clients = new Map<string, GraphQLReactorClient>();
+/** Counts `activate` calls, so a deferred switch can tell whether another target took over meanwhile. */
+let activations = 0;
 
 /**
  * What Connect's boot does for us, minus the in-browser reactor: one
@@ -50,6 +52,7 @@ export function clientFor(target: Target): GraphQLReactorClient {
 
 /** Make `target` the Switchboard the mounted apps talk to. Returns its client. */
 export function activate(target: Target): GraphQLReactorClient {
+  activations += 1;
   const client = clientFor(target);
   setReactorClient(client);
   const cache = new DocumentCache(client);
@@ -64,6 +67,22 @@ export function activate(target: Target): GraphQLReactorClient {
   // manager here, so the default drives URL names the active engine.
   setDefaultDrivesUrl(`${target.origin}/d/workflows`);
   return client;
+}
+
+/**
+ * Make `target` active once the current round of unmount cleanups has run,
+ * unless something else was made active meanwhile. For a screen that moved the
+ * window to another server and is closing: the vault app inside it, as it
+ * closes after the screen, puts back the client and cache it found when it
+ * opened (that server's), which would undo an immediate switch and leave every
+ * later read asking the server. React's development remount activates again
+ * before the deferred switch runs, which is what the check is for.
+ */
+export function activateAfterCleanup(target: Target): void {
+  const seen = activations;
+  queueMicrotask(() => {
+    if (activations === seen) activate(target);
+  });
 }
 
 /**
