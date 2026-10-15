@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localContextProbe } from "./context.js";
+import { catalogContextOf, localContextProbe } from "./context.js";
 
 /** A llama.cpp server on 8084: its model, and the context its slot runs with. */
 const llamaCpp = (calls: string[]) =>
@@ -31,5 +31,14 @@ describe("the context a model on this computer runs with", () => {
     expect(await probe("http://192.168.1.20:8084/v1", "m")).toBeNull();
     expect(calls).toEqual([]);
     expect(await probe("http://127.0.0.1:9999/v1", "m")).toBeNull();
+  });
+});
+
+describe("the context the model catalog lists", () => {
+  it("is a positive number for a model it knows, and null for one it does not", () => {
+    const google = "https://generativelanguage.googleapis.com/v1beta/openai";
+    expect(catalogContextOf(google, "gemini-2.5-flash")).toBeGreaterThan(64_000);
+    expect(catalogContextOf(google, "no-such-model-anywhere")).toBeNull();
+    expect(catalogContextOf("http://127.0.0.1:8084/v1", "gemini-2.5-flash")).toBeNull();
   });
 });

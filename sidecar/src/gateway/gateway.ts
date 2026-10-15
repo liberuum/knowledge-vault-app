@@ -9,7 +9,7 @@ import { adaptPayload, withoutRefusedParameter } from "./compat.js";
 import { cleanJsonReply, withJsonInstruction } from "./json.js";
 import { createSignatureMemory, signatureTap, withGeminiToolSchemas, withThoughtSignatures } from "./gemini.js";
 import { isGeminiEndpoint } from "../provider-auth.js";
-import { localContextProbe } from "./context.js";
+import { catalogContextOf, localContextProbe } from "./context.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -26,6 +26,8 @@ export type GatewayDeps = {
   chatgpt?: ChatGptBridge;
   /** The context size of the model set up on this computer (context.ts); tests pass their own. */
   contextFor?: (endpoint: string, model: string) => Promise<number | null>;
+  /** The context the app's model catalog lists for a model; defaults to the committed catalog. */
+  catalogContext?: (endpoint: string, model: string) => number | null;
 };
 
 const limitFor = (s: AppSettings) => (s.models.local ? 1 : 4);
@@ -38,6 +40,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, cors: Reco
 export function createGateway(deps: GatewayDeps) {
   const f = deps.fetchImpl ?? fetch;
   const contextFor = deps.contextFor ?? localContextProbe(f);
+  const catalogContext = deps.catalogContext ?? catalogContextOf;
   const queue = createQueue();
   const anthropicJson = deps.anthropicJson ?? defaultAnthropicJson;
   // Gemini 3's tool-call signatures, kept as answers pass so the next turn can carry them (gemini.ts).
@@ -54,7 +57,8 @@ export function createGateway(deps: GatewayDeps) {
         return sendJson(res, 500, openAiError(500, "The model gateway could not read its settings.", "gateway_error"), cors);
       }
       const model = settings.models.model.trim() || null;
-      const contextTokens = settings.models.local && model ? await contextFor(settings.models.endpoint, model).catch(() => null) : null;
+      const probed = settings.models.local && model ? await contextFor(settings.models.endpoint, model).catch(() => null) : null;
+      const contextTokens = typeof probed === "number" && probed > 0 ? probed : model ? catalogContext(settings.models.endpoint, model) : null;
       return sendJson(res, 200, { model, locality: settings.models.local ? "local" : "hosted", contextTokens }, cors);
     }
     const isChat = req.method === "POST" && path === "/chat/completions";

@@ -176,10 +176,18 @@ describe("which model answers now", () => {
   });
   it("leaves the context unknown for a hosted model, and the model empty when none is set up", async () => {
     let asked = 0;
-    const hosted = await mount(createGateway({ readSettings: () => settingsFor("https://api.openai.com/v1", "gpt-6.1-sol", "chatgpt"), readModelKey: () => "k", contextFor: async () => { asked++; return 1; } }));
+    const hosted = await mount(createGateway({ readSettings: () => settingsFor("https://api.openai.com/v1", "gpt-6.1-sol", "chatgpt"), readModelKey: () => "k", contextFor: async () => { asked++; return 1; }, catalogContext: () => null }));
     expect(await (await fetch(`${hosted}${GATEWAY_PATH}/active`)).json()).toEqual({ model: "gpt-6.1-sol", locality: "hosted", contextTokens: null });
     expect(asked).toBe(0);
     const none = await mount(createGateway({ readSettings: () => settingsFor("http://127.0.0.1:8084/v1", " ", "local"), readModelKey: () => undefined, contextFor: async () => 1 }));
     expect(await (await fetch(`${none}${GATEWAY_PATH}/active`)).json()).toEqual({ model: null, locality: "local", contextTokens: null });
+  });
+  it("takes a hosted model's context from the app's model catalog, and a local one's from its server first", async () => {
+    const hosted = await mount(createGateway({ readSettings: () => settingsFor("https://api.openai.com/v1", "gpt-6.1-sol", "chatgpt"), readModelKey: () => "k", contextFor: async () => 1, catalogContext: (_e, m) => (m === "gpt-6.1-sol" ? 400_000 : null) }));
+    expect(await (await fetch(`${hosted}${GATEWAY_PATH}/active`)).json()).toEqual({ model: "gpt-6.1-sol", locality: "hosted", contextTokens: 400_000 });
+    const local = await mount(createGateway({ readSettings: () => settingsFor("http://127.0.0.1:8084/v1", "gpt-oss-20b-vault", "local"), readModelKey: () => undefined, contextFor: async () => null, catalogContext: () => 131_072 }));
+    expect(await (await fetch(`${local}${GATEWAY_PATH}/active`)).json()).toMatchObject({ contextTokens: 131_072 });
+    const probed = await mount(createGateway({ readSettings: () => settingsFor("http://127.0.0.1:8084/v1", "gpt-oss-20b-vault", "local"), readModelKey: () => undefined, contextFor: async () => 32_768, catalogContext: () => 131_072 }));
+    expect(await (await fetch(`${probed}${GATEWAY_PATH}/active`)).json()).toMatchObject({ contextTokens: 32_768 });
   });
 });

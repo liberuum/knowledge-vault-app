@@ -1,4 +1,5 @@
 import { probeServer } from "../model-discovery.js";
+import { describeFromKnowledge } from "../model-knowledge.js";
 
 /** How long a model server's reported context is trusted: it changes only when the server restarts. */
 const TTL_MS = 60_000;
@@ -29,4 +30,11 @@ export function localContextProbe(f: typeof fetch = fetch, now: () => number = D
     cache.set(key, { at: now(), value });
     return value;
   };
+}
+
+/** The context the app's model catalog lists for a model on this endpoint; null when it does not know the model. */
+export function catalogContextOf(endpoint: string, model: string): number | null {
+  const [described] = describeFromKnowledge(endpoint, [{ id: model, name: model, free: false }]);
+  const n = described?.contextLength;
+  return typeof n === "number" && n > 0 ? n : null;
 }
