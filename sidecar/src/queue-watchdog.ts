@@ -67,7 +67,16 @@ export type SourceState = {
   claims: number;
   /** An extraction ran to the end and recorded its stats: "extracted, no claims" is then its result, not a loss. */
   statsRecorded?: boolean;
+  /** Who recorded the stats: the old extractor wrote "extract-claims · <model>", the current one "extract-claims 2 · <model>". */
+  extractedBy?: string | null;
+  /** Notes derived from the source, by the graph; counted only for a source the old extractor left empty. */
+  derivedNotes?: number;
 };
+
+/** Stats written by the extractor from before windows and the revised prompt. */
+export const OLD_EXTRACTOR = /^extract-claims · /;
+/** A source the old extractor ran to the end and found nothing in: it gets one more go with the new one. */
+export const isOldEmptyExtraction = (s: SourceState): boolean => s.status === "EXTRACTED" && s.claims === 0 && s.statsRecorded === true && OLD_EXTRACTOR.test(s.extractedBy ?? "");
 export type SourceRepair =
   | { kind: "reopen"; source: SourceState; reason: string }
   | { kind: "queue"; source: SourceState; reason: string };
@@ -81,7 +90,10 @@ export function planSourceRepairs(sources: readonly SourceState[], tasks: readon
   const open = new Set(tasks.filter((t) => t.taskType === "claim" && (t.status === "PENDING" || t.status === "IN_PROGRESS")).map((t) => t.documentRef ?? ""));
   const out: SourceRepair[] = [];
   for (const s of sources) {
-    if (s.status === "EXTRACTED" && s.claims === 0 && !s.statsRecorded) {
+    if (isOldEmptyExtraction(s) && s.derivedNotes === 0) {
+      out.push({ kind: "reopen", source: s, reason: "the old extractor found nothing in it; extracting it again with the new one" });
+      if (!open.has(s.id)) out.push({ kind: "queue", source: s, reason: "queued again" });
+    } else if (s.status === "EXTRACTED" && s.claims === 0 && !s.statsRecorded) {
       out.push({ kind: "reopen", source: s, reason: "marked extracted but no claims were ever made" });
       if (!open.has(s.id)) out.push({ kind: "queue", source: s, reason: "queued again" });
     } else if (s.status === "EXTRACTING" && !open.has(s.id)) {
@@ -129,6 +141,21 @@ export type PassOptions = {
   /** Runs that began before this moment belong to a previous life of the engine: they are not in progress. */
   engineStartedAt?: string;
 };
+
+/** Notes that derive from the source, by the graph's backlinks; Infinity when the graph cannot say, so nothing is reopened on a guess. */
+async function derivedNoteCount(deps: WatchdogDeps, vaultId: string, sourceId: string, f: typeof fetch): Promise<number> {
+  try {
+    const data = await gql<{ knowledgeGraphBacklinks: { linkType: string }[] | null }>(
+      deps.origin,
+      `query($d: ID!, $id: String!) { knowledgeGraphBacklinks(driveId: $d, documentId: $id) { linkType } }`,
+      { d: vaultId, id: sourceId },
+      f,
+    );
+    return (data.knowledgeGraphBacklinks ?? []).filter((l) => l.linkType === "DERIVED_FROM").length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
 
 /** One pass over a vault's queue (and, on start-up, its sources). */
 export async function repairQueue(deps: WatchdogDeps, vaultId: string, workflowId: string, pass: PassOptions = {}): Promise<WatchdogResult> {
@@ -182,14 +209,16 @@ export async function repairQueue(deps: WatchdogDeps, vaultId: string, workflowI
     // The sources, once per launch: never "extracted" without claims, never "extracting" without a task.
     const sources: SourceState[] = [];
     for (const id of sourceIds) {
-      const doc = await gql<{ document: { document: { name: string; state: { global: { status?: string; extractedClaims?: unknown[]; extractionStats?: unknown } } } } }>(
+      const doc = await gql<{ document: { document: { name: string; state: { global: { status?: string; extractedClaims?: unknown[]; extractionStats?: { extractedBy?: string | null } | null } } } } }>(
         deps.origin,
         `query($id: String!) { document(idOrSlug: $id) { document { name state } } }`,
         { id },
         f,
       );
       const g = doc.document.document.state.global;
-      sources.push({ id, name: doc.document.document.name, status: g.status ?? "", claims: g.extractedClaims?.length ?? 0, statsRecorded: !!g.extractionStats });
+      const state: SourceState = { id, name: doc.document.document.name, status: g.status ?? "", claims: g.extractedClaims?.length ?? 0, statsRecorded: !!g.extractionStats, extractedBy: g.extractionStats?.extractedBy ?? null };
+      if (isOldEmptyExtraction(state)) state.derivedNotes = await derivedNoteCount(deps, vaultId, id, f);
+      sources.push(state);
     }
     // Tasks this pass is adding count as open for the sources they cover.
     const afterRepairs = [...tasks, ...repairs.filter((r) => r.kind === "requeue").map((r) => ({ ...r.task, status: "PENDING" }))];
@@ -243,7 +272,7 @@ export function startQueueWatchdog(opts: {
           const r = await repairQueue(opts.deps, p.vaultId, p.workflowId, { startup, engineStartedAt: opts.engineStartedAt });
           startedUp.add(p.vaultId);
           const touched = r.requeued.length + r.dropped.length + (r.reopened?.length ?? 0) + (r.queued?.length ?? 0);
-          if (touched) log(`queue watchdog (${p.vaultId}${startup ? ", start-up" : ""}): queued again ${r.requeued.length + (r.queued?.length ?? 0)} (${[...r.requeued, ...(r.queued ?? [])].join(", ")}); dropped ${r.dropped.length} for a missing source; reopened ${r.reopened?.length ?? 0} marked extracted without claims`);
+          if (touched) log(`queue watchdog (${p.vaultId}${startup ? ", start-up" : ""}): queued again ${r.requeued.length + (r.queued?.length ?? 0)} (${[...r.requeued, ...(r.queued ?? [])].join(", ")}); dropped ${r.dropped.length} for a missing source; reopened ${r.reopened?.length ?? 0} to extract again (${(r.reopened ?? []).join(", ")})`);
           if (r.caughtUp?.length) log(`queue watchdog (${p.vaultId}): caught up from the vault: ${r.caughtUp.join("; ")}`);
         } catch (error) {
           log(

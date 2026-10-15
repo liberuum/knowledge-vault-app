@@ -47,6 +47,23 @@ describe("planSourceRepairs", () => {
       ["queue", "Waiting"],
     ]);
   });
+  it("reopens and queues, once, a source the old extractor ran to the end and found nothing in", () => {
+    const old = { status: "EXTRACTED", claims: 0, statsRecorded: true, extractedBy: "extract-claims · gpt-oss-20b-vault" };
+    const sources = [
+      { id: "s1", name: "Chapter 3", ...old, derivedNotes: 0 },
+      { id: "s2", name: "Re-run already", ...old, extractedBy: "extract-claims 2 · gpt-oss-20b-vault", derivedNotes: 0 },
+      { id: "s3", name: "Has notes", ...old, derivedNotes: 2 },
+      { id: "s4", name: "Not counted", ...old },
+      { id: "s5", name: "By the plugin", ...old, extractedBy: "knowledge-agent", derivedNotes: 0 },
+      { id: "s6", name: "Queued", ...old, derivedNotes: 0 },
+    ];
+    const tasks = [t({ id: "q", documentRef: "s6", status: "PENDING" })];
+    expect(planSourceRepairs(sources, tasks).map((r) => [r.kind, r.source.name])).toEqual([
+      ["reopen", "Chapter 3"],
+      ["queue", "Chapter 3"],
+      ["reopen", "Queued"],
+    ]);
+  });
   it("leaves a source whose extraction ran to the end and found nothing: its stats say so", () => {
     const sources = [{ id: "s1", name: "Contacts page", status: "EXTRACTED", claims: 0, statsRecorded: true }];
     expect(planSourceRepairs(sources, [])).toEqual([]);
@@ -54,7 +71,7 @@ describe("planSourceRepairs", () => {
 });
 
 describe("repairQueue", () => {
-  function engine(tasks: QueueTask[], runStatus = "SUCCEEDED", sourceStatus = "EXTRACTING", catchUp: { status: number; body?: unknown } = { status: 404 }) {
+  function engine(tasks: QueueTask[], runStatus = "SUCCEEDED", sourceStatus = "EXTRACTING", catchUp: { status: number; body?: unknown } = { status: 404 }, sourceExtra: Record<string, unknown> = {}, backlinks: { linkType: string }[] = []) {
     const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
     const caughtUp: unknown[] = [];
     const fetchImpl = vi.fn(async (u: unknown, init?: { body?: unknown }) => {
@@ -64,10 +81,11 @@ describe("repairQueue", () => {
       }
       const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
       calls.push(body);
+      if (body.query.includes("knowledgeGraphBacklinks")) return { ok: true, json: async () => ({ data: { knowledgeGraphBacklinks: backlinks } }) };
       if (body.query.includes("runsPage")) return { ok: true, json: async () => ({ data: { workflowRuntime: { runsPage: { items: [{ status: runStatus, startedAt: "2026-10-08T10:20:00.000Z" }] } } } }) };
       if (body.query.includes("document { state }") && body.variables.id === "vault1") return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { nodes: [{ id: "q1", documentType: "bai/pipeline-queue" }, { id: "src1", documentType: "bai/source" }] } } } } } }) };
       if (body.query.includes("document { state }") && body.variables.id === "q1") return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { tasks } } } } } }) };
-      if (body.query.includes("document { name state }") && body.variables.id === "src1") return { ok: true, json: async () => ({ data: { document: { document: { name: "Foreword", state: { global: { status: sourceStatus, extractedClaims: [] } } } } } }) };
+      if (body.query.includes("document { name state }") && body.variables.id === "src1") return { ok: true, json: async () => ({ data: { document: { document: { name: "Foreword", state: { global: { status: sourceStatus, extractedClaims: [], ...sourceExtra } } } } } }) };
       if (body.query.includes("execute(")) return { ok: true, json: async () => ({ data: { execute: { id: "q1" } } }) };
       if (body.query.includes("operations(")) {
         // as many applied operations as the last execute sent, none rejected
@@ -81,6 +99,16 @@ describe("repairQueue", () => {
   }
   const deps = (fetchImpl: typeof fetch) => ({ origin: "http://127.0.0.1:4201", fetchImpl, now: () => NOW, newId: () => "new-id" });
 
+  it("on start-up, reopens and queues a source the old extractor found nothing in, after counting its notes in the graph", async () => {
+    const stats = { extractionStats: { claimCount: 0, extractedBy: "extract-claims · gpt-oss-20b-vault" } };
+    const e = engine([], "SUCCEEDED", "EXTRACTED", { status: 404 }, stats);
+    const r = await repairQueue(deps(e.fetchImpl), "vault1", "wf-1", { startup: true, engineStartedAt: "2026-10-08T10:25:00.000Z" });
+    expect(r).toEqual({ requeued: [], dropped: [], reopened: ["Foreword"], queued: ["Foreword"] });
+    expect(e.calls.some((c) => c.query.includes("knowledgeGraphBacklinks") && c.variables.d === "vault1" && c.variables.id === "src1")).toBe(true);
+    // A source with notes derived from it is the queue's business, not a re-run.
+    const withNotes = engine([], "SUCCEEDED", "EXTRACTED", { status: 404 }, stats, [{ linkType: "DERIVED_FROM" }]);
+    expect(await repairQueue(deps(withNotes.fetchImpl), "vault1", "wf-1", { startup: true, engineStartedAt: "2026-10-08T10:25:00.000Z" })).toEqual({ requeued: [], dropped: [], reopened: [], queued: [] });
+  });
   it("fails a stuck task and adds a fresh one for the same source; fails an orphan outright", async () => {
     const e = engine([t({ id: "stuck", status: "IN_PROGRESS", updatedAt: "2026-10-08T10:05:00.000Z" }), t({ id: "orphan", documentRef: "gone", target: "Old" }), t({ id: "fine", status: "PENDING" })]);
     expect(await repairQueue(deps(e.fetchImpl), "vault1", "wf-1")).toEqual({ requeued: ["Foreword"], dropped: ["Old"] });
