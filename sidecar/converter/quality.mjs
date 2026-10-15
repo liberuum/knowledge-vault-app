@@ -13,6 +13,7 @@
  * The counts are the losses the converter announces itself: formulas it saw
  * but did not decode, pictures it saw but did not transcribe.
  */
+import { spellLigatures } from "./textrepair.mjs";
 
 /**
  * Tokens: letters and digits, lower-cased, at least two characters (single glyphs are noise on both sides).
@@ -35,7 +36,8 @@ export function tokens(text) {
  */
 export function conversionQuality(rawText, markdown) {
   const raw = new Map();
-  for (const t of tokens(rawText)) raw.set(t, (raw.get(t) ?? 0) + 1);
+  // Ligatures as letters (textrepair.mjs): pdf.js's "efÏciency" is the document's "efficiency".
+  for (const t of tokens(spellLigatures(rawText))) raw.set(t, (raw.get(t) ?? 0) + 1);
   const got = new Map();
   for (const t of tokens(markdown)) got.set(t, (got.get(t) ?? 0) + 1);
   let total = 0;

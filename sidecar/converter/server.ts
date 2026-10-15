@@ -86,6 +86,9 @@ import {
 } from "./routing.mjs";
 import { conversionQuality, type ConversionQuality } from "./quality.mjs";
 import { restorePlaceholders } from "./docjson.mjs";
+import { repairDocument } from "./textrepair.mjs";
+import { mergeDoclingDocuments } from "./docmerge.mjs";
+import { planWindows, type OutlineEntry, type Window } from "./windows.mjs";
 import {
   documentToBlocks,
   insertFigurePlaceholders,
@@ -559,7 +562,7 @@ interface Conversion {
   chunks: Chunk[];
   format: string;
   inputName: string;
-  timings: { convertMs: number; chunkMs: number };
+  timings: { convertMs: number; chunkMs: number; repairs?: number };
   /**
    * The docling JSON the Markdown and chunks were derived from, when a model
    * conversion produced them: the figures are cut from the same document, so
@@ -710,6 +713,10 @@ async function convertOnce(
   file: string,
   usePipeline: boolean,
   progress: ProgressHooks = {},
+  /** The PDF's pages as pdf.js read them: the letters docling.rs loses are put back from them (textrepair.mjs). */
+  pageTexts?: readonly string[],
+  /** A long PDF's page windows (windows.mjs): read one by one and joined; null reads it whole. */
+  windows: readonly Window[] | null = null,
 ): Promise<Conversion> {
   const library = await docling();
   progress.onPhase?.("reading");
@@ -729,15 +736,35 @@ async function convertOnce(
       json: null,
     };
   }
-  const asJson = await pipelineFor(library.Pipeline).convertFileAsync(file, {
-    to: "json",
-  });
+  let content: string;
+  if (windows && windows.length > 0) {
+    // One call per window, its models loaded and freed with it: a pipeline
+    // kept per window would hold ~1.5 GB each until the GC found it. The end
+    // of each window moves the progress bar.
+    const parts: string[] = [];
+    for (const window of windows) {
+      const part = await library.convertFileAsync(file, {
+        to: "json",
+        pages: `${window.from}-${window.to}`,
+        ...(window.backMatter ? { noTableFormer: true } : {}),
+      });
+      parts.push(part.content);
+      progress.onPage?.(window.to);
+    }
+    content = mergeDoclingDocuments(parts);
+  } else {
+    content = (await pipelineFor(library.Pipeline).convertFileAsync(file, { to: "json" })).content;
+  }
   progress.onPhase?.("structuring");
-  return conversionFromJson(library, asJson.content, {
+  const repaired = pageTexts?.length
+    ? repairDocument(content, pageTexts)
+    : { json: content, fixes: 0 };
+  const conversion = await conversionFromJson(library, repaired.json, {
     format: extname(file).slice(1).toLowerCase() || "pdf",
     inputName: basename(file),
     convertMs: Date.now() - convertStart,
   });
+  return { ...conversion, timings: { ...conversion.timings, repairs: repaired.fixes } };
 }
 
 // --- what this machine can do ------------------------------------------------
@@ -846,6 +873,10 @@ async function extractTextWithPdfjs(bytes: Uint8Array): Promise<{
   pages: number;
   headings: number;
   blocks: PageBlocks[];
+  /** Each page's text, in order: what the letters docling.rs loses are put back from. */
+  pageTexts: string[];
+  /** The PDF's own outline, top level, each entry with its page: what a long PDF's windows are planned from. */
+  outline: OutlineEntry[];
 }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({
@@ -863,6 +894,22 @@ async function extractTextWithPdfjs(bytes: Uint8Array): Promise<{
     pages.push(runs);
   }
   const count = doc.numPages;
+  const outline: OutlineEntry[] = [];
+  try {
+    for (const item of (await doc.getOutline()) ?? []) {
+      const dest = typeof item.dest === "string" ? await doc.getDestination(item.dest) : item.dest;
+      const target: unknown = Array.isArray(dest) ? dest[0] : null;
+      const index =
+        target && typeof target === "object"
+          ? await doc.getPageIndex(target as Parameters<typeof doc.getPageIndex>[0])
+          : typeof target === "number"
+            ? target
+            : null;
+      if (index !== null) outline.push({ title: item.title, page: index + 1 });
+    }
+  } catch {
+    // No outline, or one pdf.js cannot follow: the windows are planned from the pages alone.
+  }
   await task.destroy();
   // `text` is the flat layer (garble check, coverage); `markdown` has the
   // headings and paragraphs the geometry gives away — see textlayer.mjs.
@@ -880,14 +927,13 @@ async function extractTextWithPdfjs(bytes: Uint8Array): Promise<{
     ),
   }));
   const markdown = renderPages(blocks);
-  const flat = pages
-    .map((runs) =>
-      runs
-        .map((r) => r.str + (r.eol ? "\n" : " "))
-        .join("")
-        .trim(),
-    )
-    .join("\n\n");
+  const pageTexts = pages.map((runs) =>
+    runs
+      .map((r) => r.str + (r.eol ? "\n" : " "))
+      .join("")
+      .trim(),
+  );
+  const flat = pageTexts.join("\n\n");
   return {
     text: flat,
     markdown,
@@ -896,6 +942,8 @@ async function extractTextWithPdfjs(bytes: Uint8Array): Promise<{
     // The same blocks, so a figure can be placed among them when this rung's
     // markdown is the one that ships.
     blocks,
+    pageTexts,
+    outline,
   };
 }
 
@@ -1601,6 +1649,8 @@ async function convertJob(
       markdown: string;
       pages: number;
       blocks: PageBlocks[];
+      pageTexts: string[];
+      outline: OutlineEntry[];
     } | null = null;
     if (isPdf) {
       try {
@@ -1612,6 +1662,8 @@ async function convertJob(
           markdown: extracted.markdown,
           pages: extracted.pages,
           blocks: extracted.blocks,
+          pageTexts: extracted.pageTexts,
+          outline: extracted.outline,
         };
         job.pages = extracted.pages;
       } catch {
@@ -1624,7 +1676,11 @@ async function convertJob(
     let refusal: unknown = null;
 
     try {
-      result = await convertOnce(file, usePipeline, hooks);
+      const windows =
+        usePipeline && layer
+          ? planWindows({ pages: layer.pages, outline: layer.outline, pageTexts: layer.pageTexts })
+          : null;
+      result = await convertOnce(file, usePipeline, hooks, layer?.pageTexts, windows);
     } catch (error) {
       // Rewrite only when the parser actually refused the file, and only for PDFs.
       if (!isPdf || !isFormatError(error)) throw error;
@@ -1639,7 +1695,7 @@ async function convertJob(
         const target = join(dir, `normalised-${rewriter.tool}.pdf`);
         if (!(await run(rewriter.tool, rewriter.args(file, target)))) continue;
         try {
-          result = await convertOnce(target, usePipeline, hooks);
+          result = await convertOnce(target, usePipeline, hooks, layer?.pageTexts, null);
           normalised = rewriter.tool;
           break;
         } catch {
