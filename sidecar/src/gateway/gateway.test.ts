@@ -155,3 +155,31 @@ describe("gateway", () => {
     expect(next.status).toBe(200);
   });
 });
+
+describe("which model answers now", () => {
+  const mount = (gw: ReturnType<typeof createGateway>) =>
+    listen(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      await gw.handle(req, res, Buffer.concat(chunks), {});
+    });
+  it("says the model, where it runs, and the context its local server reports", async () => {
+    const asked: string[] = [];
+    const gw = createGateway({
+      readSettings: () => settingsFor("http://127.0.0.1:8084/v1", "gpt-oss-20b-vault", "local"),
+      readModelKey: () => undefined,
+      contextFor: async (endpoint, model) => { asked.push(`${endpoint} ${model}`); return 32_768; },
+    });
+    const base = await mount(gw);
+    expect(await (await fetch(`${base}${GATEWAY_PATH}/active`)).json()).toEqual({ model: "gpt-oss-20b-vault", locality: "local", contextTokens: 32_768 });
+    expect(asked).toEqual(["http://127.0.0.1:8084/v1 gpt-oss-20b-vault"]);
+  });
+  it("leaves the context unknown for a hosted model, and the model empty when none is set up", async () => {
+    let asked = 0;
+    const hosted = await mount(createGateway({ readSettings: () => settingsFor("https://api.openai.com/v1", "gpt-6.1-sol", "chatgpt"), readModelKey: () => "k", contextFor: async () => { asked++; return 1; } }));
+    expect(await (await fetch(`${hosted}${GATEWAY_PATH}/active`)).json()).toEqual({ model: "gpt-6.1-sol", locality: "hosted", contextTokens: null });
+    expect(asked).toBe(0);
+    const none = await mount(createGateway({ readSettings: () => settingsFor("http://127.0.0.1:8084/v1", " ", "local"), readModelKey: () => undefined, contextFor: async () => 1 }));
+    expect(await (await fetch(`${none}${GATEWAY_PATH}/active`)).json()).toEqual({ model: null, locality: "local", contextTokens: null });
+  });
+});

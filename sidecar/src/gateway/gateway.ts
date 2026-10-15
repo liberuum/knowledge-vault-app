@@ -9,6 +9,7 @@ import { adaptPayload, withoutRefusedParameter } from "./compat.js";
 import { cleanJsonReply, withJsonInstruction } from "./json.js";
 import { createSignatureMemory, signatureTap, withGeminiToolSchemas, withThoughtSignatures } from "./gemini.js";
 import { isGeminiEndpoint } from "../provider-auth.js";
+import { localContextProbe } from "./context.js";
 
 export const GATEWAY_PATH = "/llm/v1";
 const NO_MODEL = "No AI model is set up yet. Choose one in Settings › Models.";
@@ -23,6 +24,8 @@ export type GatewayDeps = {
   anthropicJson?: AnthropicJson;
   /** Provider "chatgpt": the user's ChatGPT plan, through the Responses API (gateway/chatgpt.ts). */
   chatgpt?: ChatGptBridge;
+  /** The context size of the model set up on this computer (context.ts); tests pass their own. */
+  contextFor?: (endpoint: string, model: string) => Promise<number | null>;
 };
 
 const limitFor = (s: AppSettings) => (s.models.local ? 1 : 4);
@@ -34,6 +37,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, cors: Reco
 
 export function createGateway(deps: GatewayDeps) {
   const f = deps.fetchImpl ?? fetch;
+  const contextFor = deps.contextFor ?? localContextProbe(f);
   const queue = createQueue();
   const anthropicJson = deps.anthropicJson ?? defaultAnthropicJson;
   // Gemini 3's tool-call signatures, kept as answers pass so the next turn can carry them (gemini.ts).
@@ -41,6 +45,18 @@ export function createGateway(deps: GatewayDeps) {
 
   async function handle(req: IncomingMessage, res: ServerResponse, body: Buffer, cors: Record<string, string>): Promise<void> {
     const path = new URL(req.url ?? "/", "http://gateway").pathname.slice(GATEWAY_PATH.length);
+    // Which model answers now: the pipeline sizes and times its calls by it, and follows a switch mid-run.
+    if (req.method === "GET" && path === "/active") {
+      let settings: AppSettings;
+      try {
+        settings = deps.readSettings();
+      } catch {
+        return sendJson(res, 500, openAiError(500, "The model gateway could not read its settings.", "gateway_error"), cors);
+      }
+      const model = settings.models.model.trim() || null;
+      const contextTokens = settings.models.local && model ? await contextFor(settings.models.endpoint, model).catch(() => null) : null;
+      return sendJson(res, 200, { model, locality: settings.models.local ? "local" : "hosted", contextTokens }, cors);
+    }
     const isChat = req.method === "POST" && path === "/chat/completions";
     const isModels = req.method === "GET" && path === "/models";
     if (!isChat && !isModels) return sendJson(res, 404, openAiError(404, "No such gateway route."), cors);
