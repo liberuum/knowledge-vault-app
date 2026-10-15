@@ -17,16 +17,16 @@ import { BINDING_VERSION } from "./install.js";
  * The download script of the binding's own version, never master: the file list moves with the
  * binding — 1.81 dropped pdfium, which 1.58 needs (verified the hard way: 720 MB fetched,
  * `missing: ["pdfium"]`); 1.98 added the PP-OCRv6 recognizer. Both the URL and the hash are pinned;
- * a changed script fails closed. A Mac on the fallback binding (install.ts) gets 1.58's script.
+ * a changed script fails closed. A Mac on the fallback binding (install.ts) gets 2.13's script.
  */
 export const DOWNLOAD_SCRIPTS: Record<string, { url: string; sha256: string }> = {
+  "2.30.1": {
+    url: "https://raw.githubusercontent.com/docling-project/docling.rs/v2.30.1/scripts/install/download_dependencies.sh",
+    sha256: "7183cb90c33991920a24060c416d151fdf8394bf4c714c6d0a66394114c2c57c",
+  },
   "2.13.0": {
     url: "https://raw.githubusercontent.com/docling-project/docling.rs/v2.13.0/scripts/install/download_dependencies.sh",
     sha256: "78425527c90826c49ed38e859d240dab5f8469d941dff5ba3c360ca6bb2f4273",
-  },
-  "1.58.0": {
-    url: "https://raw.githubusercontent.com/docling-project/docling.rs/v1.58.0/scripts/install/download_dependencies.sh",
-    sha256: "a56bd5ee5039f3bffae5adb58d7c9f6d18261ecb1db04d2c807865147613e963",
   },
 };
 /** The script for a binding version; the current one's for a version with none of its own. */

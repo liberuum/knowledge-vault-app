@@ -11,7 +11,7 @@ on:
     inputs:
       version:
         description: docling.rs version (the one BINDING_VERSION pins)
-        default: "2.13.0"
+        default: "2.30.1"
       publish:
         description: Attach the binding to the docling-binding-v<version> pre-release if it has none yet
         type: boolean
@@ -38,7 +38,7 @@ jobs:
     permissions:
       contents: write
     env:
-      VERSION: ${{ inputs.version || '2.13.0' }}
+      VERSION: ${{ inputs.version || '2.30.1' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

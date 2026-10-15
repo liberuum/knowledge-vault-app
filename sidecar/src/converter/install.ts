@@ -16,25 +16,25 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
  * into a staging dir, then swapped into `node_modules/` in one rename. The
  * version is the one the vendored service is tested against.
  */
-export const BINDING_VERSION = "2.13.0";
+export const BINDING_VERSION = "2.30.1";
 /**
  * Where this project's macOS build of `BINDING_VERSION` is not published yet, a Mac keeps the last
  * version that was — it converts with that until the new build is recorded in `SELF_BUILT`, then
  * upgrades on its own (converter.ts `autoInstall`). The vendored service runs on either.
  */
-export const DARWIN_FALLBACK_VERSION = "1.58.0";
+export const DARWIN_FALLBACK_VERSION = "2.13.0";
 export const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 /**
  * The registry's integrity strings for the pinned versions: a registry answer that differs is refused
- * before any download. 2.13.0 recorded 2026-10-10 (each tarball re-hashed after download); the
- * 1.58.0 JS package stays for Macs on `DARWIN_FALLBACK_VERSION`.
+ * before any download. 2.30.1 recorded 2026-10-15 from the registry's `dist.integrity`; the
+ * 2.13.0 JS package stays for Macs on `DARWIN_FALLBACK_VERSION`.
  */
 export const PINNED_INTEGRITY: Record<string, string> = {
+  "docling.rs@2.30.1": "sha512-12eKuSRhoEDnmHyfKpmgfcoXa5ECQK850k34Uvg0G3mNFX/Q7aTloFreZ4USsvdih+l58jBoOmtUCETFmShsqQ==",
+  "docling.rs-linux-x64-gnu@2.30.1": "sha512-folfRaOq3HpvlsOTCiUNQARRgmHUzapdE0sHp4uKBkrIWpum3qdA1MRZZ4Tfv47EJEZ8yg3ZBXkKv+PJ0QcRYQ==",
+  "docling.rs-linux-arm64-gnu@2.30.1": "sha512-vFtBrKB9UPIMVlu77VLCYTTltuevNIGQO19Uzxd9UFCBSm0ghqqotLQ3oFkfT8ZVZyI9/juX8hLad3W5lBhdFw==",
+  "docling.rs-win32-x64-msvc@2.30.1": "sha512-GsdXJ0DesYlREFS1NzDKI8z+2aRTJyk66mN/pl1TL5ty03Iay3AblYtgMHcub7YLD7UlJGa+Xoo/q8FRjzhEQA==",
   "docling.rs@2.13.0": "sha512-dR14cshbSXJavGDuTGHZFXY6CtSmFx8MzEr7s652i6j7Jc6uGtm1CkgrOpfRMbawA/vQp/qWAJZa39bVLIDe9Q==",
-  "docling.rs-linux-x64-gnu@2.13.0": "sha512-DD76TNrxZGOwx2n0Yq9nzQHZoOsGvIGOaqGR4WPw1ffSm8076KtcGttoeUqP0dGVWfZ98LsVRlWuqJLpUqi2iQ==",
-  "docling.rs-linux-arm64-gnu@2.13.0": "sha512-WyT5x7V4K3M1JMw3FtekLITdO7jW4k4YKnmKy1Ob37hkOcoV0dA0r/ZTtOnAVztWR5/nekyuFlMzJlAakp+1Qw==",
-  "docling.rs-win32-x64-msvc@2.13.0": "sha512-sT16Zhe1J1jbqGTnG4x9nwAAUhLw48o/3dxXz/E89zQU/y1RGJUsjartYXyt1sxVS7p/qk1972XpxfO4GqAxIg==",
-  "docling.rs@1.58.0": "sha512-6PkJ2g1O44FjPFIzrRANZSVR5gv95OYDg/rjy5Ellmkc1YIuSPJN3AXzEbJg4W0lNURsCkqMizW+G6ogj6qHLw==",
 };
 
 /**
@@ -49,11 +49,6 @@ export const SELF_BUILT: Record<string, SelfBuiltPackage> = {
     // Published by the converter-binding workflow (run 38084239444: built, loaded on macOS, converted a sample),
     // recorded 2026-10-10 and re-hashed from the downloaded asset.
     integrity: "sha512-sFN3ES4yezKrYAelLdSuAweRuMMVMn/dXY2bFUqhk2uRv/eXw1ICZISa/CxCda5x5GyogzU3rgLwwT9Z/byoRg==",
-  },
-  "docling.rs-darwin-arm64@1.58.0": {
-    url: "https://github.com/liberuum/knowledge-vault-app/releases/download/docling-binding-v1.58.0/docling.rs-darwin-arm64-1.58.0.tgz",
-    // Published by the converter-binding workflow (run 37761132274, Xcode 15.4), recorded 2026-10-08.
-    integrity: "sha512-iMpG0OcQ/jX1kIfmWmolx8ZtQQWCOYymuhSHMcEVdbiLfaJQ8wpqDRTQrv68TWF9ksOeyQT7iamMZM0lONg2oA==",
   },
 };
 

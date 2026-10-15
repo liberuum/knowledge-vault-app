@@ -1986,6 +1986,20 @@ async function slotsReport(): Promise<{
 /** A worker's environment: this process's, with the PDF thread budget split when several model slots share it. */
 function workerEnv(lane: Lane): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, CONVERT_ROLE: "worker" };
+  // glibc raises its mmap threshold each time a large block is freed; past it,
+  // page bitmaps and model tensors are carved from per-thread arenas, where
+  // they fragment and stay resident. Measured upstream (docling.rs 2.19.0,
+  // 5375f47d): a warm reader crept from 0.53 to 0.75 GB over six conversions;
+  // a fixed 4 MiB threshold held it near 0.59 GB at the same speed. glibc
+  // reads this at start, so it is set here, for the worker. An operator's own
+  // setting wins; other C libraries ignore it.
+  if (
+    process.platform === "linux" &&
+    env.MALLOC_MMAP_THRESHOLD_ === undefined &&
+    !env.GLIBC_TUNABLES?.includes("mmap_threshold")
+  ) {
+    env.MALLOC_MMAP_THRESHOLD_ = String(4 * 1024 * 1024);
+  }
   if (lane === "models" && MODEL_SLOTS > 1) {
     const share = Math.max(1, Math.floor(PDF_THREAD_BUDGET / MODEL_SLOTS));
     env.DOCLING_RS_PDF_THREADS = String(share);

@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
  */
 const SCRIPT_URL =
   process.env.DOCLING_DOWNLOAD_SCRIPT_URL ??
-  "https://raw.githubusercontent.com/docling-project/docling.rs/v2.13.0/scripts/install/download_dependencies.sh";
+  "https://raw.githubusercontent.com/docling-project/docling.rs/v2.30.1/scripts/install/download_dependencies.sh";
 
 // ASR is Whisper-tiny and is for audio/video only; the vault converts documents.
 const SCRIPT_ARGS = ["--no-asr"];
