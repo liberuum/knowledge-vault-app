@@ -5,8 +5,41 @@ export function openAiError(status: number, message: string, code?: string) {
   return { error: { message, type: status >= 500 ? "server_error" : "invalid_request_error", ...(code ? { code } : {}) } };
 }
 
+/** What a status is called, for an error page cut short before its title. */
+const STATUS_NAME: Record<number, string> = {
+  408: "Request timeout",
+  502: "Bad gateway",
+  503: "Service unavailable",
+  504: "Gateway time-out",
+  520: "Unknown error",
+  521: "Web server is down",
+  522: "Connection timed out",
+  523: "Origin is unreachable",
+  524: "A timeout occurred",
+  529: "Overloaded",
+};
+
+/** Statuses of a service failing for a moment: slow, overloaded, a proxy's timeout. Worth trying again soon. */
+const MOMENTARY = new Set([408, 502, 504, 520, 521, 522, 523, 524, 529]);
+
+/**
+ * An HTML error page — Cloudflare's "504: Gateway time-out" in front of ChatGPT, a load balancer's 502 — named
+ * rather than pasted into a sentence a person reads: its title, or the status's usual name. Undefined when the
+ * body is not a page.
+ */
+export function pageName(bodyText: string, status?: number): string | undefined {
+  if (!/<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]/i.test(bodyText)) return undefined;
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i
+    .exec(bodyText)?.[1]
+    ?.replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[^|]*\|\s*/, "")
+    .replace(/^\d{3}:\s*/, "");
+  return title || (status !== undefined ? STATUS_NAME[status] : undefined) || "an error page";
+}
+
 /** The provider's own sentence, when its body carries one. */
-function detailOf(bodyText: string): string {
+function detailOf(bodyText: string, status?: number): string {
   try {
     // Google answers with a list of errors; the first one speaks for the rest.
     const raw = JSON.parse(bodyText) as unknown;
@@ -14,19 +47,22 @@ function detailOf(bodyText: string): string {
     const m = typeof parsed.error === "string" ? parsed.error : parsed.error?.message ?? parsed.message;
     return typeof m === "string" ? m.trim() : "";
   } catch {
-    return bodyText.trim().slice(0, 300);
+    return pageName(bodyText, status) ?? bodyText.trim().slice(0, 300);
   }
 }
 
 /** What a provider's refusal means, in words a person can act on. */
 export function providerMessage(provider: ModelProvider, status: number, bodyText: string): { message: string; code: string } {
   const who = provider === "local" ? "The model server on this computer" : PROVIDER_LABELS[provider];
-  const detail = detailOf(bodyText);
+  const detail = detailOf(bodyText, status);
   const tail = detail ? `: ${detail}` : ".";
   if (refusesKey(status, detail)) return { message: `${who} refused the API key${tail}`, code: "provider_auth" };
   if (status === 402) return { message: `${who} says the account is out of credit${tail}`, code: "provider_credit" };
   if (status === 429) return { message: `${who} is rate-limiting requests${tail}`, code: "provider_rate_limit" };
   if (status === 404) return { message: `${who} does not have this model${tail}`, code: "provider_model" };
+  if (MOMENTARY.has(status)) {
+    return { message: `${who} did not answer in time (HTTP ${status}${detail ? `: ${detail}` : ""}). This is on its side; try again in a minute.`, code: "provider_error" };
+  }
   return { message: `${who} answered ${status}${tail}`, code: "provider_error" };
 }
 
@@ -104,6 +140,9 @@ export function chatGptFailure(status: number | undefined, error: { code?: unkno
   if (s === 403) return { status: 403, message: withDetail("ChatGPT refused the request", detail), code: "chatgpt_refused", ...extra };
   if (s === 429) return { status: 429, message: withDetail("ChatGPT is rate-limiting requests", detail), code: "provider_rate_limit", ...extra };
   if (s === 503) return { status: 503, message: `ChatGPT plan use is not available right now${detail ? ` (${detail})` : ""}. Try again in a few minutes.`, code: "chatgpt_unavailable", ...extra };
+  if (MOMENTARY.has(s)) {
+    return { status: s, message: `ChatGPT did not answer in time (HTTP ${s}${detail ? `: ${detail}` : ""}). This is on ChatGPT's side; try again in a minute.`, code: "provider_error", ...extra };
+  }
   return { status: s, message: withDetail(status === undefined ? "ChatGPT could not answer" : `ChatGPT answered ${s}`, detail), code: "provider_error", ...extra };
 }
 
@@ -116,7 +155,7 @@ export function chatGptFailureFromBody(status: number, bodyText: string, request
     else if (typeof parsed.error === "string") error = { message: parsed.error };
     else error = { detail: parsed.detail ?? parsed.message };
   } catch {
-    error = { detail: bodyText.trim().slice(0, 300) };
+    error = { detail: pageName(bodyText, status) ?? bodyText.trim().slice(0, 300) };
   }
   return chatGptFailure(status, error, requestId);
 }

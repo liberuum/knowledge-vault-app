@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSignatureMemory, PLACEHOLDER_SIGNATURE, signatureTap, withThoughtSignatures } from "./gemini.js";
+import { createSignatureMemory, PLACEHOLDER_SIGNATURE, signatureTap, withGeminiToolSchemas, withThoughtSignatures } from "./gemini.js";
 
 const call = (id: string, signature?: string) => ({ id, type: "function", function: { name: "search_vault", arguments: "{}" }, ...(signature ? { extra_content: { google: { thought_signature: signature } } } : {}) });
 const turn = (...calls: object[]) => ({ model: "gemini-3.8-flash", messages: [{ role: "user", content: "q" }, { role: "assistant", content: null, tool_calls: calls }, { role: "tool", tool_call_id: "c1", content: "r" }] });
@@ -28,5 +28,27 @@ describe("Gemini's thought signatures", () => {
     expect(withThoughtSignatures(already, memory)).toBe(already);
     const plain = { model: "m", messages: [{ role: "user", content: "hi" }] };
     expect(withThoughtSignatures(plain, memory)).toBe(plain);
+  });
+});
+
+describe("Gemini's tool declarations", () => {
+  const tool = (name: string, parameters?: unknown) => ({ type: "function", function: { name, description: "d", ...(parameters ? { parameters } : {}) } });
+
+  it("declares a tool that takes nothing without parameters, which Gemini refuses empty", () => {
+    const out = withGeminiToolSchemas({
+      model: "gemini-3-pro",
+      tools: [tool("vault_stats", { type: "object", properties: {} }), tool("search", { type: "object", properties: { q: { type: "string" } }, required: ["q"] })],
+    });
+    expect(out.tools).toEqual([
+      { type: "function", function: { name: "vault_stats", description: "d" } },
+      tool("search", { type: "object", properties: { q: { type: "string" } }, required: ["q"] }),
+    ]);
+  });
+
+  it("leaves a request with nothing to change exactly as it was", () => {
+    const payload = { model: "m", tools: [tool("search", { type: "object", properties: { q: { type: "string" } } })] };
+    expect(withGeminiToolSchemas(payload)).toBe(payload);
+    const noTools = { model: "m", messages: [] };
+    expect(withGeminiToolSchemas(noTools)).toBe(noTools);
   });
 });

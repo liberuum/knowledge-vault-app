@@ -7,7 +7,7 @@ import { createQueue } from "./queue.js";
 import { modelsUrl, providerHeaders } from "../provider-auth.js";
 import { adaptPayload, withoutRefusedParameter } from "./compat.js";
 import { cleanJsonReply, withJsonInstruction } from "./json.js";
-import { createSignatureMemory, signatureTap, withThoughtSignatures } from "./gemini.js";
+import { createSignatureMemory, signatureTap, withGeminiToolSchemas, withThoughtSignatures } from "./gemini.js";
 import { isGeminiEndpoint } from "../provider-auth.js";
 
 export const GATEWAY_PATH = "/llm/v1";
@@ -101,7 +101,7 @@ export function createGateway(deps: GatewayDeps) {
       const wantsJson = isChat && payload.response_format !== undefined && payload.stream !== true;
       if (isChat) payload = adaptPayload(endpoint, payload);
       const gemini = isChat && isGeminiEndpoint(endpoint);
-      if (gemini) payload = withThoughtSignatures(payload, signatures);
+      if (gemini) payload = withGeminiToolSchemas(withThoughtSignatures(payload, signatures));
       // A model that refuses one parameter by name (a newer OpenAI model and `temperature`) is asked again without it.
       let overloaded = 0;
       for (let retries = 0; ; retries++) {

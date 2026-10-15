@@ -88,3 +88,22 @@ export function signatureTap(memory: SignatureMemory, contentType: string) {
     },
   };
 }
+
+/**
+ * Gemini refuses a function declared with an empty parameter list ("properties: should be non-empty for OBJECT
+ * type") — and with it the whole request — while OpenAI requires the list to be present. Callers write tools the
+ * OpenAI way; for Gemini, a tool that takes nothing is declared without parameters at all.
+ */
+export function withGeminiToolSchemas(payload: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(payload.tools)) return payload;
+  let changed = false;
+  const tools = payload.tools.map((tool: unknown) => {
+    const fn = (tool as { function?: Record<string, unknown> } | null)?.function;
+    const params = fn?.parameters as { properties?: Record<string, unknown> } | undefined;
+    if (!fn || !params || (params.properties && Object.keys(params.properties).length > 0)) return tool;
+    changed = true;
+    const { parameters: _dropped, ...rest } = fn;
+    return { ...(tool as Record<string, unknown>), function: rest };
+  });
+  return changed ? { ...payload, tools } : payload;
+}
