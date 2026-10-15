@@ -30,6 +30,7 @@
     "allow-host-loaded",
     "allow-take-dropped-paths",
     "allow-choose-backup-destination",
-    "allow-choose-backup-file"
+    "allow-choose-backup-file",
+    "allow-set-busy"
   ]
 }

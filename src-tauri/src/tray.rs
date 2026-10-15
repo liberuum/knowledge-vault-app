@@ -61,7 +61,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main(app),
-            "quit" => crate::quit(app),
+            // The person's own Quit: asks first while sources are being added (lib.rs, may_quit).
+            "quit" => crate::quit_asking(app),
             _ => {}
         });
     if let Some(icon) = app.default_window_icon() {

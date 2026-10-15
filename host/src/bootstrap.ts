@@ -4,6 +4,7 @@
  * dispatches the package's change event so its hooks re-read it.
  */
 import { takeIntakeFiles, takeOpenView } from "./onboarding/pending-files.js";
+import { invokeIfTauri } from "./shell/tauri.js";
 
 export const HOST_SLOT = "__knowledgeVaultHost";
 export const HOST_CHANGED_EVENT = "knowledge-vault-host:changed";
@@ -44,6 +45,11 @@ export function setHostModel(model: HostModel | null | undefined, openSettings?:
   openModelSettings = openSettings;
 }
 
+/** What a vault is in the middle of, for the shell's quit question; `null` once it is done. */
+function setBusy(reason: string | null): void {
+  void invokeIfTauri("set_busy", { reason }).catch(() => {});
+}
+
 export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras = {}): void {
   (globalThis as Record<string, unknown>)[HOST_SLOT] = {
     kind: "desktop",
@@ -58,6 +64,8 @@ export function declareDesktopHost(switchboardOrigin: string, extras: HostExtras
     // The view a vault opens on, when the guide's overview sent the person somewhere specific.
     takeOpenView,
     ...(droppedFileReader ? { readDroppedFiles: droppedFileReader } : {}),
+    // Sources being added: the shell asks before a quit would cut them short (lib.rs, set_busy).
+    setBusy,
   };
   if (typeof globalThis.dispatchEvent === "function" && typeof Event === "function") globalThis.dispatchEvent(new Event(HOST_CHANGED_EVENT));
 }

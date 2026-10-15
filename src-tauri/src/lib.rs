@@ -20,8 +20,9 @@ use config::{
 use sidecar::{ReadyInfo, SidecarState, sidecar_info, spawn_sidecar, stop_sidecar_blocking};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// The engine's data directory, known once the engine is spawned or adopted (open_logs, reveal_path, close-to-tray).
 #[derive(Default)]
@@ -42,10 +43,76 @@ pub(crate) fn quit(app: &AppHandle) {
     });
 }
 
+/// The person's own quit — the tray's Quit, a close that quits: as `quit`, but while the page is in
+/// the middle of something quitting would cut short (sources being added) it asks first, and
+/// "Keep adding" leaves the app running. A signal (logout, `kill`) never asks: the session is ending.
+pub(crate) fn quit_asking(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if !may_quit(&app) {
+            return;
+        }
+        stop_sidecar_blocking(&app);
+        app.exit(0);
+    });
+}
+
+/// What the page is in the middle of that quitting would cut short — a vault adding sources — or
+/// nothing. The page sets it (set_busy) and a page that loads anew clears it (host_loaded).
+#[derive(Default)]
+struct Busy {
+    reason: Mutex<Option<String>>,
+    /// The question is on screen: a second Quit while it is up does not stack another.
+    asking: AtomicBool,
+}
+
+#[tauri::command]
+fn set_busy(busy: tauri::State<'_, Busy>, reason: Option<String>) {
+    if let Ok(mut current) = busy.reason.lock() {
+        *current = reason.filter(|r| !r.trim().is_empty());
+    }
+}
+
+/// Whether to go ahead with a quit the person asked for: yes when nothing is under way, else their
+/// answer — asked over the window, brought forward so they see what is being added. Closing the
+/// question keeps the app. Blocks until answered: never on the main thread.
+fn may_quit(app: &AppHandle) -> bool {
+    let busy = app.state::<Busy>();
+    let Some(reason) = busy.reason.lock().ok().and_then(|r| r.clone()) else {
+        return true;
+    };
+    if busy.asking.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    tray::show_main(app);
+    let quit = app
+        .dialog()
+        .message(quit_question(&reason))
+        .title("Quit Knowledge Vault?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit anyway".into(),
+            "Keep adding".into(),
+        ))
+        .blocking_show();
+    busy.asking.store(false, Ordering::SeqCst);
+    quit
+}
+
+fn quit_question(reason: &str) -> String {
+    format!(
+        "{reason} If you quit now, adding stops part-way; the rest is added the next time you open the vault."
+    )
+}
+
 /// The host page reached the shell over IPC (it calls this once at boot): the smoke check's proof
 /// that the window loaded and its capability works.
 #[tauri::command]
-fn host_loaded(state: tauri::State<'_, smoke::HostLoaded>) {
+fn host_loaded(state: tauri::State<'_, smoke::HostLoaded>, busy: tauri::State<'_, Busy>) {
+    // A page that loads anew runs nothing of the one before: what that one was adding is not under way.
+    if let Ok(mut reason) = busy.reason.lock() {
+        *reason = None;
+    }
     if !state.0.swap(true, std::sync::atomic::Ordering::SeqCst) {
         println!("[shell] the page loaded and reached the shell over IPC");
     }
@@ -154,9 +221,10 @@ fn quit_app(app: AppHandle) {
 }
 
 /// A downloaded update (update.rs): its installer is opened, then the app quits so it can be replaced.
-/// Only one of this app's release installers, and only from the Downloads folder.
+/// Only one of this app's release installers, and only from the Downloads folder. Async: the quit
+/// question (may_quit) waits for an answer, which must not hold the main thread.
 #[tauri::command]
-fn install_update(app: AppHandle, path: String) -> Result<(), String> {
+async fn install_update(app: AppHandle, path: String) -> Result<(), String> {
     let target = PathBuf::from(&path)
         .canonicalize()
         .map_err(|e| e.to_string())?;
@@ -173,6 +241,12 @@ fn install_update(app: AppHandle, path: String) -> Result<(), String> {
         .and_then(|n| n.to_str())
         .and_then(update::installer_kind)
         .ok_or("That file is not an installer of this app.")?;
+    // Asked before the installer opens: "Keep adding" leaves the update for later.
+    if !may_quit(&app) {
+        return Err(
+            "Not installed yet: sources are still being added. Install once they are in.".into(),
+        );
+    }
     // Opened by the path as given: canonical paths on Windows carry a `\\?\` prefix not every opener takes.
     update::launch(&PathBuf::from(&path), kind)?;
     quit(&app);
@@ -224,6 +298,7 @@ pub fn run() {
         .manage(ChosenPaths::default())
         .manage(DataDir::default())
         .manage(tray::Tray::default())
+        .manage(Busy::default())
         .plugin(tauri_plugin_dialog::init())
         .manage(download::Downloads::default())
         .manage(smoke::HostLoaded::default())
@@ -238,7 +313,8 @@ pub fn run() {
             host_loaded,
             take_dropped_paths,
             choose_backup_destination,
-            choose_backup_file
+            choose_backup_file,
+            set_busy
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -513,7 +589,7 @@ pub fn run() {
                     let _ = window.hide();
                 } else {
                     // Wait for the engine before exiting: the process must not end while it flushes.
-                    quit(app);
+                    quit_asking(app);
                 }
             }
         })
@@ -634,6 +710,7 @@ mod capability_tests {
             "take_dropped_paths",
             "choose_backup_destination",
             "choose_backup_file",
+            "set_busy",
         ] {
             let perm = format!("allow-{}", cmd.replace('_', "-"));
             assert!(

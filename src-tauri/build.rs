@@ -12,6 +12,7 @@ const COMMANDS: &[&str] = &[
     "take_dropped_paths",
     "choose_backup_destination",
     "choose_backup_file",
+    "set_busy",
 ];
 
 fn main() {
