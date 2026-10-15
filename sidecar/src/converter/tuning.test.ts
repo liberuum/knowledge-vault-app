@@ -1,9 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { converterThreads, converterTuning, lowPriorityLaunch } from "./tuning.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { converterThreads, converterTuning, lowPriorityLaunch, physicalCores } from "./tuning.js";
 
 describe("converter tuning", () => {
-  it("gives a PDF half the cores — never all of them, at least one, at most eight", () => {
-    expect([1, 2, 4, 8, 12, 16, 64].map(converterThreads)).toEqual([1, 1, 2, 4, 6, 8, 8]);
+  it("gives a PDF one thread per physical core: at least one, at most sixteen, six under 12 GB", () => {
+    // No physical count (Windows): half the logical cores.
+    expect([1, 2, 4, 8, 12, 16, 64].map((n) => converterThreads(n))).toEqual([1, 1, 2, 4, 6, 8, 16]);
+    // A Ryzen 7 5800X (16 threads, 8 cores): eight, its measured best. An M1 (8 cores, no hyper-threads).
+    expect(converterThreads(16, 8, 32)).toBe(8);
+    expect(converterThreads(8, 8, 16)).toBe(8);
+    expect(converterThreads(8, 8, 8)).toBe(6);
+    expect(converterThreads(64, 32, 128)).toBe(16);
+  });
+
+  it("counts physical cores from Linux's CPU topology, a hyper-thread once", () => {
+    const sys = mkdtempSync(join(tmpdir(), "cpu-"));
+    // Two cores, each with two hyper-threads, and an offline CPU with no topology.
+    [["cpu0", "0"], ["cpu1", "1"], ["cpu2", "0"], ["cpu3", "1"]].forEach(([cpu, core]) => {
+      mkdirSync(join(sys, cpu, "topology"), { recursive: true });
+      writeFileSync(join(sys, cpu, "topology", "core_id"), `${core}\n`);
+      writeFileSync(join(sys, cpu, "topology", "physical_package_id"), "0\n");
+    });
+    mkdirSync(join(sys, "cpu4"));
+    expect(physicalCores("linux", sys)).toBe(2);
+    expect(physicalCores("win32", sys)).toBeNull();
   });
 
   it("caps TableFormer at two threads, and never above the budget", () => {

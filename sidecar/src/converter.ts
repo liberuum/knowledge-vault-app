@@ -2,12 +2,12 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { clearHelperPid, stopOrphanedHelper, writeHelperPid } from "./orphans.js";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { createServer } from "node:net";
-import { availableParallelism, setPriority } from "node:os";
+import { availableParallelism, setPriority, totalmem } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { bindingVersionFor, installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
 import { downloadScriptFor, installModels, modelsInstalled, removeModels, speechModelInstalled, type ModelsProgress } from "./converter/models.js";
 import { platformTriple, type PlatformTriple } from "./converter/platform.js";
-import { CONVERTER_NICE, converterTuning, lowPriorityLaunch } from "./converter/tuning.js";
+import { CONVERTER_NICE, converterTuning, lowPriorityLaunch, physicalCores } from "./converter/tuning.js";
 import { engineEnvironment } from "./environment.js";
 import type { ConversionSettings } from "./settings.js";
 
@@ -238,14 +238,21 @@ export function createConverterManager(deps: ConverterDeps) {
     }
     const url = `http://127.0.0.1:${port}`;
     mkdirSync(join(deps.dataDir, "logs"), { recursive: true });
-    // At background priority and on half the cores, so a long PDF converts while the computer stays usable.
+    // At background priority, one thread per physical core (tuning.ts), so a long PDF converts while the computer stays usable.
     const launch = lowPriorityLaunch(platformName, deps.nodePath, ["--import", hooksUrl, deps.entry], deps.niceExists);
     const cacheDir = join(converterDir, "graph-cache");
     mkdirSync(cacheDir, { recursive: true });
     const proc = spawnImpl(launch.cmd, launch.args, {
       env: {
         ...deps.env,
-        ...converterTuning({ cores: deps.cores ?? availableParallelism(), modelsDir, cacheDir }),
+        ...converterTuning({
+          cores: deps.cores ?? availableParallelism(),
+          // A test's `cores` stands for the whole machine; a real start reads this one.
+          physicalCores: deps.cores === undefined ? physicalCores() : null,
+          memoryGb: deps.cores === undefined ? totalmem() / 2 ** 30 : null,
+          modelsDir,
+          cacheDir,
+        }),
         CONVERTER_MODULES_DIR: modulesDir,
         CONVERT_SERVICE_HOST: "127.0.0.1",
         CONVERT_SERVICE_PORT: String(port),

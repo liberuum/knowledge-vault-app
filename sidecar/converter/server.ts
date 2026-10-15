@@ -74,6 +74,7 @@ import {
 } from "node:http";
 import { availableParallelism, cpus, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type * as DoclingRs from "docling.rs";
 import type { Chunk, Pipeline } from "docling.rs";
@@ -246,10 +247,52 @@ const BINDING_DISABLED = /^(1|true|yes|on)$/i.test(
 );
 
 /** Import the native binding once, on first use — not at start-up. */
-const load = (): Promise<typeof DoclingRs> =>
-  BINDING_DISABLED
-    ? Promise.reject(new Error("CONVERT_DISABLE_BINDING is set"))
-    : import("docling.rs");
+const load = async (): Promise<typeof DoclingRs> => {
+  if (BINDING_DISABLED) throw new Error("CONVERT_DISABLE_BINDING is set");
+  preferQuantizedLayout();
+  return import("docling.rs");
+};
+
+/**
+ * docling.rs reads PDFs with the int8 layout model when it sits next to the
+ * fp32 one — upstream measured layout 2.4× faster; here 1.46× on a 60-page
+ * book slice, 1.24× end to end — and re-reads a page whose int8 detections
+ * look doubtful on the fp32 model. Its Node wrapper defeats both: before every
+ * conversion it pins DOCLING_LAYOUT_ONNX to the fp32 file (deps.js
+ * `exportEnv`), and an explicit path wins over the engine's own choice.
+ *
+ * So the wrapper's check is wrapped before the binding loads (its index.js
+ * takes the function then): once the wrapper has pinned the fp32 file and the
+ * int8 one is beside it, the pin is taken back and the native loader is given
+ * the folder instead (DOCLING_RS_MODELS_DIR), where it makes its own choice.
+ * An operator's own DOCLING_LAYOUT_ONNX, set before start, still wins; a
+ * wrapper laid out differently is left alone (the fp32 speed, as before).
+ */
+function preferQuantizedLayout(): void {
+  if (process.env.DOCLING_LAYOUT_ONNX) return;
+  try {
+    const require = createRequire(import.meta.url);
+    const deps = require(join(dirname(require.resolve("docling.rs")), "deps.js")) as {
+      assertMlReady?: (...args: unknown[]) => unknown;
+    };
+    const check = deps.assertMlReady;
+    if (typeof check !== "function") return;
+    deps.assertMlReady = (...args: unknown[]) => {
+      const result = check(...args);
+      const pinned = process.env.DOCLING_LAYOUT_ONNX;
+      if (pinned && basename(pinned) === "layout_heron.onnx") {
+        const models = dirname(pinned);
+        if (existsSync(join(models, "layout_heron_int8.onnx"))) {
+          delete process.env.DOCLING_LAYOUT_ONNX;
+          process.env.DOCLING_RS_MODELS_DIR ??= models;
+        }
+      }
+      return result;
+    };
+  } catch {
+    // No wrapper to adjust (or a different one): the binding loads as it is.
+  }
+}
 
 let binding: ReturnType<typeof load> | null = null;
 

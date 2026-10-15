@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -35,15 +36,64 @@ export const CONVERTER_IDLE_RELEASE_MS = 5 * 60_000;
 /** Below-normal: work the person is doing comes first. `nice -n 10` on macOS and Linux, BELOW_NORMAL on Windows. */
 export const CONVERTER_NICE = 10;
 
-/** Threads docling.rs may use for one PDF: half the cores, so the other half stays free for the person; 1–8. */
-export function converterThreads(cores: number): number {
-  return Math.max(1, Math.min(8, Math.floor(cores / 2)));
+/**
+ * Threads docling.rs may use for one PDF: one per physical core, at most 16 — at background priority,
+ * so the person's own work still comes first. Measured with docling.rs 2.30.1 on a Ryzen 7 5800X
+ * (8 cores, 16 threads; 60 book pages, int8 layout, nice 10): 8 threads 15.3 s, 12 → 15.4 s,
+ * 16 → 16.5 s. The model math already fills a core, so a hyper-thread adds heat and memory
+ * (1.45 → 2.3 GB) and no speed. A Mac's cores have no hyper-threads: it gets all of them. Under 12 GB
+ * of memory at most six (each thread holds page images and model state). Without a physical count
+ * (Windows), half the logical cores — what hyper-threading makes physical.
+ */
+export function converterThreads(cores: number, physical: number | null = null, memoryGb: number | null = null): number {
+  const base = physical ?? Math.floor(cores / 2);
+  const threads = Math.max(1, Math.min(16, base));
+  return memoryGb !== null && memoryGb < 12 ? Math.min(threads, 6) : threads;
+}
+
+/**
+ * This computer's physical cores, where the system says so cheaply: Linux's CPU topology (one core per
+ * package and core id), macOS's `hw.physicalcpu`. Null elsewhere, or when the answer is unreadable.
+ */
+export function physicalCores(platform: NodeJS.Platform = process.platform, sysCpu = "/sys/devices/system/cpu"): number | null {
+  try {
+    if (platform === "linux") {
+      const cores = new Set<string>();
+      for (const name of readdirSync(sysCpu)) {
+        if (!/^cpu\d+$/.test(name)) continue;
+        try {
+          const core = readFileSync(join(sysCpu, name, "topology", "core_id"), "utf8").trim();
+          const pkg = readFileSync(join(sysCpu, name, "topology", "physical_package_id"), "utf8").trim();
+          cores.add(`${pkg}:${core}`);
+        } catch {
+          // An offline CPU has no topology: not a core this process gets.
+        }
+      }
+      return cores.size > 0 ? cores.size : null;
+    }
+    if (platform === "darwin") {
+      const n = Number(execFileSync("sysctl", ["-n", "hw.physicalcpu"], { encoding: "utf8", timeout: 2_000 }).trim());
+      return Number.isInteger(n) && n > 0 ? n : null;
+    }
+  } catch {
+    // No answer: the caller falls back to half the logical cores.
+  }
+  return null;
 }
 
 /** The environment the helper starts with, beyond the OS allowlist. Recomputed at every start: models may arrive later. */
-export function converterTuning(opts: { cores: number; modelsDir: string; cacheDir: string; exists?: (path: string) => boolean }): Record<string, string> {
+export function converterTuning(opts: {
+  cores: number;
+  /** Physical cores, when known (`physicalCores`); null = half of `cores`. */
+  physicalCores?: number | null;
+  /** Installed memory, in GiB, when known. */
+  memoryGb?: number | null;
+  modelsDir: string;
+  cacheDir: string;
+  exists?: (path: string) => boolean;
+}): Record<string, string> {
   const exists = opts.exists ?? existsSync;
-  const threads = converterThreads(opts.cores);
+  const threads = converterThreads(opts.cores, opts.physicalCores ?? null, opts.memoryGb ?? null);
   const env: Record<string, string> = {
     DOCLING_RS_PDF_THREADS: String(threads),
     DOCLING_RS_TF_INTRA: String(Math.min(2, threads)),
