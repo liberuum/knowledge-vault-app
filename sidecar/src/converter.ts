@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { availableParallelism, setPriority } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { bindingVersionFor, installBinding, installedBinding, removeBinding, type BindingManifest, type InstallProgress } from "./converter/install.js";
-import { downloadScriptFor, installModels, modelsInstalled, removeModels, type ModelsProgress } from "./converter/models.js";
+import { downloadScriptFor, installModels, modelsInstalled, removeModels, speechModelInstalled, type ModelsProgress } from "./converter/models.js";
 import { platformTriple, type PlatformTriple } from "./converter/platform.js";
 import { CONVERTER_NICE, converterTuning, lowPriorityLaunch } from "./converter/tuning.js";
 import { engineEnvironment } from "./environment.js";
@@ -69,6 +69,8 @@ export type Installer = {
   removeModels(): void;
   bindingInstalled(): BindingManifest | null;
   modelsInstalled(): boolean;
+  /** Whisper, for recordings: absent on an install from before 2.30.1 (models.ts). Unset = present. */
+  speechModelInstalled?(): boolean;
 };
 
 /** Another install is running (the control API answers 409). */
@@ -172,6 +174,7 @@ export function createConverterManager(deps: ConverterDeps) {
     removeModels: () => removeModels(modelsDir),
     bindingInstalled: () => installedBinding(converterDir),
     modelsInstalled: () => modelsInstalled(modelsDir),
+    speechModelInstalled: () => speechModelInstalled(modelsDir),
   };
   let job: InstallJob | null = null;
   let starting: Promise<void> | null = null;
@@ -491,12 +494,21 @@ export function createConverterManager(deps: ConverterDeps) {
       const installed = component === "binding" ? installer.bindingInstalled() : null;
       const target = bindingVersionFor(platform.triple);
       const upgrade = installed !== null && installed.version !== target;
-      if (component === "binding" ? installed !== null && !upgrade : installer.modelsInstalled()) return;
+      // The models are complete with the speech model too: an install from before 2.30.1 fetches
+      // it once (the fetch keeps every file already there).
+      const speechMissing = component === "models" && installer.modelsInstalled() && installer.speechModelInstalled?.() === false;
+      if (component === "binding" ? installed !== null && !upgrade : installer.modelsInstalled() && !speechMissing) return;
       if (component === "binding" && !platform.triple) return;
       if (component === "models" && (installer.bindingInstalled() === null || !modelsSupport().supported)) return;
       await running; // never two jobs at once
       if (jobActive()) return;
-      log(upgrade ? `upgrading the converter binding ${installed.version} → ${target}` : `installing the ${component} on its own (first use)`);
+      log(
+        upgrade
+          ? `upgrading the converter binding ${installed.version} → ${target}`
+          : speechMissing
+            ? "fetching the speech model (Whisper) on its own, for recordings"
+            : `installing the ${component} on its own (first use)`,
+      );
       await install(component);
       await running;
       if (job?.component === component && job.phase === "done") done.push(component);

@@ -48,6 +48,16 @@ export function modelsInstalled(modelsDir: string): boolean {
   return existsSync(join(modelsDir, "models.json")) && existsSync(join(modelsDir, ".models", "layout_heron.onnx"));
 }
 
+/**
+ * Whisper, which recordings are transcribed with (~150 MB): fetched with the PDF models since
+ * docling.rs 2.30.1. An install from before has the PDF models and not these — `autoInstall` then
+ * runs the fetch again, which keeps every file already there and adds only these.
+ */
+export function speechModelInstalled(modelsDir: string): boolean {
+  const asr = join(modelsDir, ".models", "asr");
+  return ["encoder_model.onnx", "decoder_model.onnx", "vocab.json"].every((file) => existsSync(join(asr, file)));
+}
+
 export function removeModels(modelsDir: string): void {
   rmSync(modelsDir, { recursive: true, force: true, ...RM_RETRY });
 }

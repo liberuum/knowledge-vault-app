@@ -1,7 +1,7 @@
 /**
- * The docling.rs model download, in Node — what `download_dependencies.sh` (v2.13.0, run with
- * `--no-asr`) does, without `sh`, `curl` or `tar`. Windows has no Unix shell, and the upstream
- * script has no Windows branch at all.
+ * The docling.rs model download, in Node — what `download_dependencies.sh` (v2.30.1) does, without
+ * `sh`, `curl` or `tar`. Windows has no Unix shell, and the upstream script has no Windows branch
+ * at all.
  *
  * Same files, same places (`.models/…` under DOCLING_RS_HOME), same idempotence (a file already
  * present is kept), the same progress lines the app parses (`  > dest`, `  = dest (already
@@ -19,6 +19,8 @@ import { pipeline } from "node:stream/promises";
 export const MODELS_BASE_URL = "https://github.com/docling-project/docling.rs/releases/download/models-v1";
 
 const RAPIDOCR = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2";
+/** Whisper tiny, the speech model recordings are transcribed with (the script's ASR step). */
+const WHISPER = "https://huggingface.co/onnx-community/whisper-tiny/resolve/main";
 
 /** The files, in the script's order: required, mirrored (first URL that lands wins), optional. */
 export function modelPlan(base = MODELS_BASE_URL) {
@@ -48,6 +50,12 @@ export function modelPlan(base = MODELS_BASE_URL) {
     { dest: ".models/tableformer/decoder_kv_int8.onnx", urls: [`${base}/decoder_kv_int8.onnx`], optional: true },
     { dest: ".models/tableformer/decoder_kv_int8.onnx.data", urls: [`${base}/decoder_kv_int8.onnx.data`], optional: true },
     { dest: ".models/tableformer/encoder_fp16.onnx", urls: [`${base}/encoder_fp16.onnx`], optional: true },
+    // Whisper tiny, for recordings: the release mirror, then Hugging Face. Optional here, so a blocked
+    // download never costs the PDF models; the service reports `speech: false` until it lands.
+    { dest: ".models/asr/encoder_model.onnx", urls: [`${base}/asr_encoder_model.onnx`, `${WHISPER}/onnx/encoder_model.onnx`], optional: true },
+    { dest: ".models/asr/decoder_model.onnx", urls: [`${base}/asr_decoder_model.onnx`, `${WHISPER}/onnx/decoder_model.onnx`], optional: true },
+    { dest: ".models/asr/vocab.json", urls: [`${base}/asr_vocab.json`, `${WHISPER}/vocab.json`], optional: true },
+    { dest: ".models/asr/added_tokens.json", urls: [`${base}/asr_added_tokens.json`, `${WHISPER}/added_tokens.json`], optional: true },
   ];
 }
 

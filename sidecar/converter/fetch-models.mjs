@@ -40,8 +40,9 @@ const SCRIPT_URL =
   process.env.DOCLING_DOWNLOAD_SCRIPT_URL ??
   "https://raw.githubusercontent.com/docling-project/docling.rs/v2.30.1/scripts/install/download_dependencies.sh";
 
-// ASR is Whisper-tiny and is for audio/video only; the vault converts documents.
-const SCRIPT_ARGS = ["--no-asr"];
+// Whisper tiny (~150 MB) comes too: the vault transcribes recordings — audio,
+// a video's soundtrack — into Transcript sources.
+const SCRIPT_ARGS = [];
 
 // Same default as `server.ts`: the package root, not the CWD, so the fetch and
 // the service agree no matter where either is started from.

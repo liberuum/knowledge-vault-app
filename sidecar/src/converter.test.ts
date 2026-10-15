@@ -212,7 +212,7 @@ describe("converter manager", () => {
 
 /** An installer whose state the tests control; the binding install can be held open. */
 function fakeInstaller(opts: { hold?: boolean } = {}) {
-  const state = { binding: null as BindingManifest | null, models: false, holdResolve: null as null | (() => void) };
+  const state = { binding: null as BindingManifest | null, models: false, speech: null as boolean | null, holdResolve: null as null | (() => void) };
   const installer: Installer = {
     installBinding: async (onProgress) => {
       onProgress({ phase: "metadata", file: "docling.rs" });
@@ -227,11 +227,13 @@ function fakeInstaller(opts: { hold?: boolean } = {}) {
     installModels: async (onProgress) => {
       onProgress({ file: ".models/layout_heron.onnx", bytes: 4096, lines: [] });
       state.models = true;
+      state.speech = true;
     },
     removeBinding: () => void (state.binding = null),
     removeModels: () => void (state.models = false),
     bindingInstalled: () => state.binding,
     modelsInstalled: () => state.models,
+    speechModelInstalled: () => state.speech ?? state.models,
   };
   return { installer, state };
 }
@@ -436,6 +438,19 @@ describe("converter manager — installing on its own", () => {
     expect(state.binding).not.toBeNull();
     expect(state.models).toBe(true);
     expect(await h.manager.autoInstall()).toEqual([]); // nothing left to do
+  });
+
+  it("fetches the speech model an install from before lacks, once", async () => {
+    const { installer, state } = fakeInstaller();
+    state.binding = { version: BINDING_VERSION, platform: "linux-x64-gnu", installedAt: "2026-10-01T00:00:00.000Z", bytes: 100 };
+    state.models = true;
+    state.speech = false;
+    const h = harness({ installer, platform: linux });
+    await h.manager.apply({ mode: "local", remoteUrl: "" });
+    expect(await h.manager.autoInstall()).toEqual(["models"]);
+    expect(state.speech).toBe(true);
+    expect(await h.manager.autoInstall()).toEqual([]);
+    await h.manager.stop();
   });
 
   it("upgrades a binding of another version, stopping the helper that loaded it before the swap", async () => {

@@ -58,7 +58,7 @@
  */
 import { fork, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import {
   mkdtemp,
   readdir,
@@ -122,6 +122,37 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // repo, from anywhere else, or by the subgraph. An explicit `DOCLING_RS_HOME`
 // still wins, which is the knob a real deployment sets (a mounted volume).
 process.env.DOCLING_RS_HOME ??= PACKAGE_ROOT;
+
+/**
+ * Whisper, the speech model a recording is transcribed with, is looked up as
+ * `.models/asr/…` under the *working directory* (docling.rs 2.30.1), not under
+ * `DOCLING_RS_HOME` like the PDF models — measured: started from anywhere
+ * else, an audio file fails with "Whisper model files not found". So the
+ * files are named outright, each once it is on disk (a model fetched after
+ * start is picked up by the next recording: `pointAtSpeechModel` runs again
+ * before each). An operator's own paths win.
+ */
+const SPEECH_MODEL_DIR = join(process.env.DOCLING_RS_HOME ?? PACKAGE_ROOT, ".models", "asr");
+const SPEECH_MODEL_FILES = {
+  DOCLING_ASR_ENCODER: "encoder_model.onnx",
+  DOCLING_ASR_DECODER: "decoder_model.onnx",
+  DOCLING_ASR_VOCAB: "vocab.json",
+  DOCLING_ASR_ADDED_TOKENS: "added_tokens.json",
+} as const;
+function pointAtSpeechModel(): void {
+  for (const [name, file] of Object.entries(SPEECH_MODEL_FILES)) {
+    const path = join(SPEECH_MODEL_DIR, file);
+    if (process.env[name] === undefined && existsSync(path)) process.env[name] = path;
+  }
+}
+pointAtSpeechModel();
+
+/** Whether a recording can be transcribed: Whisper's encoder, decoder and vocabulary are on disk. */
+function speechModelReady(): boolean {
+  return (["DOCLING_ASR_ENCODER", "DOCLING_ASR_DECODER", "DOCLING_ASR_VOCAB"] as const).every((name) =>
+    existsSync(process.env[name] ?? join(SPEECH_MODEL_DIR, SPEECH_MODEL_FILES[name])),
+  );
+}
 const MAX_BYTES = Number(process.env.CONVERT_MAX_BYTES ?? 256 * 1024 * 1024);
 /**
  * How often to emit a keep-alive byte during a conversion, in ms. 0 disables it.
@@ -196,6 +227,12 @@ function boundedInt(
 
 /** Format ids that cannot be converted without the downloaded models. */
 const MODEL_BACKED_FORMATS = new Set(["pdf", "image", "mets_gbs"]);
+/**
+ * Formats docling.rs transcribes with Whisper: a recording, or a video's
+ * soundtrack. They need the speech model, not the PDF models, and go to the
+ * model lane — a long recording is minutes of CPU, like a long PDF.
+ */
+const SPEECH_FORMATS = new Set(["audio", "video"]);
 
 // --- binding, resolved on demand -------------------------------------------
 
@@ -1464,6 +1501,23 @@ async function convertJob(
   const usePipeline = format !== null && MODEL_BACKED_FORMATS.has(format);
   const dependencies = library.checkDependencies();
 
+  // A recording needs the speech model. Without it docling.rs fails deep in
+  // the conversion ("Whisper model files not found"); say what is missing
+  // instead, the way the PDF models are asked for below.
+  if (format !== null && SPEECH_FORMATS.has(format)) {
+    pointAtSpeechModel();
+    if (!speechModelReady()) {
+      finishJob(jobId, job, "failed");
+      reply(415, {
+        error: "Transcribing a recording needs the speech model (Whisper, about 150 MB), which is not downloaded yet.",
+        code: "SPEECH_MODEL_REQUIRED",
+        modelsDir: SPEECH_MODEL_DIR,
+        hintForOperators: "npm run fetch-models — fetches the speech model with the PDF models",
+      });
+      return;
+    }
+  }
+
   // Models are only needed for the model-backed formats. Everything else works
   // on a fresh install, which is what lets the UI offer the 700 MB download
   // instead of failing.
@@ -1838,6 +1892,8 @@ async function handleHealth(res: ServerResponse): Promise<void> {
       // A model worker alive keeps the models warm (they load in the worker).
       modelsLoaded: lanes.models.idle.length > 0 || [...lanes.models.running].some((r) => r.worker !== null),
       formats: library.supportedFormats(),
+      // Whether a recording (audio, a video's soundtrack) can be transcribed.
+      speech: speechModelReady(),
       // What this machine can do about a scan, so a UI can say "fast", "slow" or
       // "install …" before anyone drops a file.
       capabilities: { ...(await capabilities()), doclingOcr: dependencies.ocr },
@@ -1946,16 +2002,18 @@ type Settled =
 
 /** Image extensions docling.rs may read as `image`; filtered through the binding's own naming. */
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif"];
+/** Recordings and videos docling.rs reads (its `audio` and `video` formats). */
+const SPEECH_EXTENSIONS = ["mp3", "wav", "m4a", "aac", "ogg", "flac", "mp4", "mov", "mkv", "webm", "avi", "mpeg"];
 
 let modelExtensionsProbe: Promise<string[]> | null = null;
-/** The extensions that go to the model lane: PDF always, images when the binding reads them. */
+/** The extensions that go to the model lane: PDF always, images and recordings when the binding reads them. */
 function modelExtensions(): Promise<string[]> {
   modelExtensionsProbe ??= (async () => {
     if (!(await bindingAvailable())) return ["pdf"];
     const library = await docling();
-    const backed = IMAGE_EXTENSIONS.filter((ext) => {
+    const backed = [...IMAGE_EXTENSIONS, ...SPEECH_EXTENSIONS].filter((ext) => {
       const format = library.formatFromName(`file.${ext}`);
-      return format !== null && MODEL_BACKED_FORMATS.has(format);
+      return format !== null && (MODEL_BACKED_FORMATS.has(format) || SPEECH_FORMATS.has(format));
     });
     return ["pdf", ...backed];
   })();

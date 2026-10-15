@@ -1,7 +1,7 @@
 {
   "source": "@powerhousedao/docling-service (../docling/src)",
-  "commit": "59ec307d2a92066669715cbff21bf91a5733c635",
-  "syncedAt": "2026-10-15T15:07:47.010Z",
+  "commit": "393f92495315a7b2c87f41412f21123e657a5344",
+  "syncedAt": "2026-10-15T15:18:36.237Z",
   "files": [
     "docjson.d.mts",
     "docjson.mjs",
