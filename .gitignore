@@ -49,3 +49,6 @@ src-tauri/permissions/
 
 # `bun run dev:vault` writes the vault source stylesheet wrapper here (host/vite.config.ts).
 host/.vault-dev/
+
+# The ori tool's per-machine workspace state (a live SQLite database)
+.ori/
