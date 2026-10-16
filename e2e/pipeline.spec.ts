@@ -76,24 +76,24 @@ test("pipeline: template instantiated per vault, a queued source runs, a failed 
     }
     expect(queued.status(), await queued.text()).toBeLessThan(300);
 
-    // The trigger polls the queue; the run reaches the model, which fails; the runtime records FAILED.
+    // The trigger polls the queue; the run reaches the model, which fails; the runtime records FAILED, and its
+    // source still waits (the task stays held until the watchdog queues it again), so the failure counts.
     const deadline = Date.now() + 240_000;
-    let lastRun: { status: string; error: string | null } | undefined;
+    let seen: { running?: number; hasRuns?: boolean; failures?: Array<{ runId: string; error: string | null }> } = {};
     while (Date.now() < deadline) {
-      const p = (await (await request.get(`${CONTROL}/vaults/${vault!.id}/pipeline`, { headers: auth })).json()).pipeline;
-      lastRun = p.lastRun;
-      if (lastRun && lastRun.status !== "RUNNING") break;
+      seen = (await (await request.get(`${CONTROL}/vaults/${vault!.id}/pipeline`, { headers: auth })).json()).pipeline;
+      if ((seen.failures?.length ?? 0) > 0 && seen.running === 0) break;
       await new Promise((r) => setTimeout(r, 3000));
     }
-    expect(lastRun, "the trigger fired and a run was recorded").toBeTruthy();
-    expect(lastRun!.status).toBe("FAILED");
+    expect(seen.hasRuns, "the trigger fired and a run was recorded").toBe(true);
+    expect(seen.failures?.length, "the failed run counts while its source still waits").toBeGreaterThan(0);
     expect(completions.length, "the piece reached the model through the connection").toBeGreaterThan(0);
     expect(completions[0] ?? "").toBe(""); // a model on this computer is never sent the key (the gateway keeps it for hosted providers)
 
     // The chip surfaces it, and leads to the runs.
     await page.goto(`/#/vault/${encodeURIComponent(vault!.id)}`);
-    // The chip names the problem when it can ("the model refused the request"), else "Last processing run failed".
-    await expect(page.getByText(/^(Processing stopped: |Last processing run failed)/)).toBeVisible({ timeout: 60_000 });
+    // The chip names the problem when it can ("the model refused the request"), else counts the failed sources.
+    await expect(page.getByText(/^(Processing stopped: |Processing: \d+ sources? failed)/)).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: "See runs" }).click();
     // "See runs" opens Workflow Studio on this vault's own pipeline: the address is the workflow's id, and its runs show.
     const workflowId = String(pipeline.pipeline.workflowId);
