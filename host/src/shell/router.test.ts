@@ -14,6 +14,11 @@ describe("routes", () => {
     expect(parseRoute("#/workflows")).toEqual({ name: "workflows" });
   });
 
+  it("opens the setup guide's Workflow Studio side trip in its vault", () => {
+    expect(routeHash({ name: "welcome", step: "workflows", vault: "v1" })).toBe("#/welcome/workflows/v1");
+    expect(parseRoute("#/welcome/workflows/v1")).toEqual({ name: "welcome", step: "workflows", vault: "v1" });
+  });
+
   it("lands on the vaults for an empty, unknown or malformed hash, and on the Vaults section for an unknown settings section", () => {
     expect(parseRoute("")).toEqual({ name: "vaults" });
     expect(parseRoute("#/nowhere/at/all")).toEqual({ name: "vaults" });

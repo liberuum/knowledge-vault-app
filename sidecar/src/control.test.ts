@@ -1,5 +1,6 @@
 import { ConnectionError } from "./connections.js";
 import { afterEach, describe, expect, it } from "vitest";
+import { StarterError, type StarterRequest } from "./starters.js";
 import { ChatGptError } from "./chatgpt/session.js";
 import { ConverterBusyError, ConverterInputError } from "./converter.js";
 import { createControlServer } from "./control.js";
@@ -618,5 +619,53 @@ describe("Sign in with ChatGPT over the control API", () => {
     const res = await fetch(`${base}/chatgpt/login`, { method: "POST", headers: h, body: JSON.stringify({ newAccount: true }) });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "Sign out of ChatGPT first, then sign in with the other account.", code: "chatgpt_signed_in" });
+  });
+});
+
+describe("starter workflows over the control API", () => {
+  async function startWithStarters() {
+    const added: Array<{ vaultId: string; request: StarterRequest }> = [];
+    const removed: string[] = [];
+    const deps = await harnessDeps();
+    deps.starters = {
+      list: async (vaultId) => (vaultId === "v1" ? [{ workflowId: "wf1", starter: "feed", label: "Feed: example.com", name: "Research — Feed: example.com", createdAt: "2026-10-15T10:00:00.000Z", status: "ENABLED" }] : []),
+      add: async (vaultId, request) => {
+        added.push({ vaultId, request });
+        if (request.starter === "granola") throw new StarterError("Granola did not accept that key: Invalid API key.");
+        if (vaultId === "bare") throw new StarterError("This vault's processing is not set up yet.", 409);
+        return { workflowId: "wf2", starter: "papers", label: "Papers on “graphs”", name: "Research — Papers on “graphs”", createdAt: "2026-10-15T10:00:00.000Z", status: "ENABLED", added: 3 };
+      },
+      removeVault: async (vaultId) => {
+        removed.push(vaultId);
+      },
+    };
+    const server = createControlServer(deps);
+    close = server.close;
+    return { base: `http://127.0.0.1:${await server.listen()}`, added, removed };
+  }
+  const h = { authorization: "Bearer secret", "content-type": "application/json" };
+
+  it("lists a vault's starters and adds one, passing what the form sent", async () => {
+    const { base, added } = await startWithStarters();
+    expect(await (await fetch(`${base}/vaults/v1/starters`, { headers: h })).json()).toEqual({ starters: [expect.objectContaining({ workflowId: "wf1", label: "Feed: example.com" })] });
+    const res = await fetch(`${base}/vaults/v1/starters`, { method: "POST", headers: h, body: JSON.stringify({ starter: "papers", topic: "graphs", process: false }) });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ starter: expect.objectContaining({ workflowId: "wf2", added: 3 }) });
+    expect(added).toEqual([{ vaultId: "v1", request: { starter: "papers", topic: "graphs", process: false } }]);
+  });
+
+  it("answers a refused key with 400 and a vault without processing with 409, with the reason", async () => {
+    const { base } = await startWithStarters();
+    const refused = await fetch(`${base}/vaults/v1/starters`, { method: "POST", headers: h, body: JSON.stringify({ starter: "granola", apiKey: "bad" }) });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "Granola did not accept that key: Invalid API key." });
+    const bare = await fetch(`${base}/vaults/bare/starters`, { method: "POST", headers: h, body: JSON.stringify({ starter: "papers", topic: "graphs" }) });
+    expect(bare.status).toBe(409);
+  });
+
+  it("removes a vault's starters when the vault is deleted", async () => {
+    const { base, removed } = await startWithStarters();
+    expect((await fetch(`${base}/vaults/v1`, { method: "DELETE", headers: h })).status).toBe(200);
+    expect(removed).toEqual(["v1"]);
   });
 });

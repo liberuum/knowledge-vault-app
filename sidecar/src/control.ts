@@ -17,6 +17,7 @@ import { RemoteAccessError, RemoteAuthError, RemoteInputError, RemoteNotFoundErr
 import { ConverterBusyError, ConverterInputError, type ConverterStatus } from "./converter.js";
 import { ConnectionError, type FillResult } from "./connections.js";
 import type { EnsureResult, PipelineStatus } from "./pipelines.js";
+import { StarterError, type AddedStarter, type StarterRequest, type StarterSummary } from "./starters.js";
 import { PROVIDER_ENDPOINTS, SettingsError, type AppSettings, type ConversionMode, type ConversionSettings, type SettingsPatch, type LocalProtection } from "./settings.js";
 import { NotAVaultError, type DriveRef, type VaultSummary } from "./vaults.js";
 import { BackupNotFoundError, BackupTooNewError, NotEnoughSpaceError, type BackupInfo, type BackupVault } from "./backups.js";
@@ -81,6 +82,12 @@ export type ControlDeps = {
     disableAll: (reason: string) => Promise<void>;
     /** Settings › Models changed: every pipeline follows (its connection rewritten, or set up again). */
     applyModels: () => Promise<{ updated: string[]; recreated: string[] }>;
+  };
+  /** Starter workflows for a vault (starters.ts): list them, add one, and remove them with the vault. */
+  starters?: {
+    list: (vaultId: string) => Promise<StarterSummary[]>;
+    add: (vaultId: string, request: StarterRequest) => Promise<AddedStarter>;
+    removeVault: (vaultId: string) => Promise<void>;
   };
   /** Spec §4.4: the protection switch. `set` writes config.json's `local` section and schedules the engine's restart. */
   protection: {
@@ -371,6 +378,15 @@ export function createControlServer(deps: ControlDeps) {
         return send(res, 200, { pipeline: result }, allowed);
       }
       if (pipelineOf && req.method === "GET") return send(res, 200, { pipeline: await deps.pipelines.status(decodePart(pipelineOf[1]!)) }, allowed);
+      const startersOf = url.pathname.match(/^\/vaults\/([^/]+)\/starters$/);
+      if (startersOf && deps.starters) {
+        const vaultId = decodePart(startersOf[1]!);
+        if (req.method === "GET") return send(res, 200, { starters: await deps.starters.list(vaultId) }, allowed);
+        if (req.method === "POST") {
+          const body = await readJson(req);
+          return send(res, 201, { starter: await deps.starters.add(vaultId, { ...body, starter: typeof body.starter === "string" ? body.starter : "" }) }, allowed);
+        }
+      }
       const vault = url.pathname.match(/^\/vaults\/([^/]+)$/);
       if (vault && req.method === "PATCH") {
         const body = await readJson(req);
@@ -381,6 +397,7 @@ export function createControlServer(deps: ControlDeps) {
       if (vault && req.method === "DELETE") {
         const id = decodePart(vault[1]!);
         await deps.pipelines.remove(id).catch(() => undefined); // its workflow, connection and secrets go with it
+        await deps.starters?.removeVault(id).catch(() => undefined); // and its starter workflows, with their keys
         await deps.deleteVault(id);
         return send(res, 200, { deleted: id }, allowed);
       }
@@ -584,6 +601,7 @@ export function createControlServer(deps: ControlDeps) {
     } catch (error) {
       if (error instanceof BadRequestError || error instanceof SettingsError || error instanceof ConnectionError || error instanceof ConverterInputError) return send(res, 400, { error: error.message }, allowed);
       if (error instanceof ConverterBusyError) return send(res, 409, { error: error.message }, allowed);
+      if (error instanceof StarterError) return send(res, error.status, { error: error.message }, allowed);
       if (error instanceof ArchivePathError || error instanceof NotABackupFileError) return send(res, 400, { error: error.message }, allowed);
       if (error instanceof BackupNotFoundError) return send(res, 404, { error: error.message }, allowed);
       if (error instanceof TransferBusyError || error instanceof BackupTooNewError) return send(res, 409, { error: error.message }, allowed);

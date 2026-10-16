@@ -185,3 +185,113 @@
 .kv-onb-card:disabled .kv-onb-card-icon { color: var(--bai-text-tertiary); background: color-mix(in srgb, var(--bai-text) 8%, transparent); }
 
 @media (prefers-reduced-motion: reduce) { .kv-onb-vault-use { transition: none; } }
+
+/*
+ * The overview's door to the Workflow Studio side trip (spec 2026-10-15): set apart from the cards — an accent edge,
+ * its own button — so it reads as a way out and back, not as one more view of the vault.
+ */
+.kv-onb-trip { margin: 18px 0 0; padding: 14px 16px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 14px; align-items: center; border: 1px solid color-mix(in srgb, var(--bai-accent) 45%, var(--bai-border)); border-radius: 12px; background: linear-gradient(120deg, color-mix(in srgb, var(--bai-accent) 10%, var(--bai-surface)), var(--bai-surface) 70%); }
+.kv-onb-trip-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 15%, transparent); }
+.kv-onb-trip-body { display: grid; gap: 3px; min-width: 0; }
+.kv-onb-trip-body strong { font-weight: 600; }
+.kv-onb-trip-body span { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-onb-trip .kv-button { white-space: nowrap; }
+@media (max-width: 560px) { .kv-onb-trip { grid-template-columns: 36px minmax(0, 1fr); } .kv-onb-trip .kv-button { grid-column: 1 / -1; justify-self: start; } }
+
+/* --- the side trip itself ---------------------------------------------------------------------------------- */
+
+/* Wayfinding: where this is (a side trip off "Your vault is filling up") and the way back, above the title */
+.kv-wf-crumbs { display: flex; align-items: center; gap: 10px; margin: -6px 0 14px; font-size: 14px; }
+.kv-wf-crumb-back { display: inline-flex; align-items: center; gap: 6px; color: var(--bai-text-secondary); }
+.kv-wf-crumb-back:hover { color: var(--bai-text); }
+.kv-wf-trip { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 13%, transparent); }
+
+/* three numbered landmarks, in the order the questions come: what, how, which */
+.kv-wf-sections { list-style: none; counter-reset: wf; margin: 8px 0 0; padding: 0; display: grid; gap: 28px; }
+.kv-wf-section { counter-increment: wf; min-width: 0; }
+.kv-wf-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.kv-wf-heading::before { content: counter(wf); flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--bai-accent-soft); color: var(--bai-accent); font-size: 12.5px; font-weight: 700; }
+
+/* 1 — the vault's own processing, drawn as Studio draws a workflow: what starts it, then its steps */
+.kv-wf-flow-card { padding: 14px 16px 12px; border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); display: grid; gap: 12px; }
+.kv-wf-flow-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; }
+.kv-wf-live { display: inline-flex; align-items: center; gap: 8px; color: var(--bai-text-secondary); font-weight: 500; }
+.kv-wf-live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--bai-text) 25%, transparent); }
+.kv-wf-live[data-live="true"]::before { background: var(--bai-ok); box-shadow: 0 0 0 4px var(--bai-ok-soft); }
+/* one row, five equal places, an arrow between each: the shape a workflow has in Studio */
+.kv-wf-flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: 18px; row-gap: 12px; }
+.kv-wf-flow li { position: relative; display: grid; grid-template-rows: 1fr auto; justify-items: stretch; gap: 5px; min-width: 0; }
+.kv-wf-flow li:not(:last-child)::after { content: "→"; position: absolute; right: -14px; top: 5px; color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-wf-chip { display: grid; place-items: center; padding: 5px 6px; border: 1px solid var(--bai-border); border-radius: 8px; background: var(--bai-deep); font-size: 12.5px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+.kv-wf-flow li { text-align: center; }
+@media (max-width: 560px) { .kv-wf-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); } .kv-wf-flow li:nth-child(3)::after { content: none; } }
+.kv-wf-flow li[data-kind="trigger"] .kv-wf-chip { border-color: color-mix(in srgb, var(--bai-accent) 55%, var(--bai-border)); background: var(--bai-accent-soft); color: var(--bai-text); font-weight: 500; }
+.kv-wf-chip-kind { font-size: 11px; color: var(--bai-text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+.kv-wf-flow-note { margin: 0; }
+.kv-wf-flow-note em { font-style: normal; font-weight: 600; color: var(--bai-text-secondary); }
+
+/* 2 — how one is started: three short steps, then the connectors (the website's "Works with" strip) */
+.kv-wf-how { list-style: none; counter-reset: how; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.kv-wf-how li { counter-increment: how; display: grid; gap: 4px; align-content: start; padding: 12px 14px; border: 1px solid var(--bai-border); border-radius: 10px; background: var(--bai-surface); }
+.kv-wf-how li::before { content: counter(how); font-size: 12px; font-weight: 700; color: var(--bai-accent); }
+.kv-wf-how strong { font-weight: 600; font-size: 14.5px; }
+.kv-wf-how span { color: var(--bai-text-secondary); font-size: 13.5px; }
+.kv-wf-works { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 18px; margin: 16px 0 0; padding: 12px 8px; border-top: 1px solid var(--bai-border); border-bottom: 1px solid var(--bai-border); font-size: 13.5px; }
+.kv-wf-works-label { color: var(--bai-text-tertiary); }
+.kv-wf-works-item { display: inline-flex; align-items: center; gap: 6px; color: var(--bai-text); }
+.kv-wf-works-item img { border-radius: 4px; }
+.kv-wf-works-more { color: var(--bai-text-secondary); text-decoration: underline; text-underline-offset: 4px; }
+.kv-wf-works-more:hover { color: var(--bai-text); }
+.kv-wf-works-note { margin: 8px 0 0; text-align: center; font-size: 13px; }
+@media (max-width: 560px) { .kv-wf-how { grid-template-columns: 1fr; } }
+
+/* 3 — templates: a logo pair says where things come from and where they go before a word is read */
+.kv-wf-templates-lead { margin: -4px 0 10px; }
+.kv-wf-blocked { margin: 0 0 10px; grid-template-columns: minmax(0, 1fr); }
+.kv-wf-templates { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.kv-wf-template { border: 1px solid var(--bai-border); border-radius: 12px; background: var(--bai-surface); overflow: hidden; transition: border-color 140ms ease, box-shadow 140ms ease; }
+.kv-wf-template[data-open="true"] { border-color: var(--bai-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--bai-accent) 12%, transparent); }
+.kv-wf-template-head { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 14px; align-items: center; gap: 14px; padding: 14px 16px; border: 0; background: none; color: var(--bai-text); font: inherit; text-align: left; cursor: pointer; }
+.kv-wf-template-head:hover:not(:disabled) { background: color-mix(in srgb, var(--bai-accent) 5%, transparent); }
+.kv-wf-template-head:focus-visible { outline: 2px solid var(--bai-ring); outline-offset: -2px; border-radius: 12px; }
+.kv-wf-template-head:disabled { cursor: default; opacity: 0.55; }
+.kv-wf-pair { display: inline-flex; align-items: center; gap: 6px; }
+.kv-wf-logo { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; background: var(--bai-deep); }
+.kv-wf-logo-mark { display: grid; place-items: center; color: var(--bai-accent); background: color-mix(in srgb, var(--bai-accent) 15%, transparent); }
+.kv-wf-logo-vault { padding: 3px; box-sizing: border-box; border: 1px solid var(--bai-border); }
+.kv-wf-arrow { color: var(--bai-text-tertiary); font-size: 13px; }
+.kv-wf-template-text { display: grid; gap: 2px; min-width: 0; }
+.kv-wf-template-text strong { font-weight: 600; }
+.kv-wf-template-text span { color: var(--bai-text-secondary); font-size: 14px; }
+.kv-wf-tag { flex: none; font-size: 11.5px; line-height: 20px; padding: 0 9px; border-radius: 999px; white-space: nowrap; color: var(--bai-ok); background: var(--bai-ok-soft); }
+.kv-wf-tag[data-key="true"] { color: var(--bai-text-secondary); background: color-mix(in srgb, var(--bai-text) 8%, transparent); }
+.kv-wf-chevron { width: 8px; height: 8px; border-right: 1.6px solid var(--bai-text-tertiary); border-bottom: 1.6px solid var(--bai-text-tertiary); transform: rotate(45deg) translate(-2px, -2px); transition: transform 160ms ease; }
+.kv-wf-template[data-open="true"] .kv-wf-chevron { transform: rotate(225deg) translate(-2px, -2px); }
+@media (max-width: 560px) {
+  .kv-wf-template-head { grid-template-columns: auto minmax(0, 1fr) 14px; }
+  .kv-wf-tag { grid-column: 2; grid-row: 2; justify-self: start; }
+}
+
+/* what is already on in this vault, under its template */
+.kv-wf-running { list-style: none; margin: 0; padding: 0 16px 12px; display: grid; gap: 6px; }
+.kv-wf-running li { display: flex; align-items: baseline; gap: 10px; font-size: 13.5px; min-width: 0; }
+.kv-wf-running-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bai-text-secondary); }
+.kv-wf-on { flex: none; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 999px; line-height: 18px; color: var(--bai-text-tertiary); background: color-mix(in srgb, var(--bai-text) 8%, transparent); }
+.kv-wf-on[data-on="true"] { color: var(--bai-ok); background: var(--bai-ok-soft); }
+
+/* the open card: its one field, two choices, the reassurance, then the action — the card grows in place */
+.kv-wf-template-body { padding: 2px 16px 16px; border-top: 1px solid var(--bai-border); animation: kv-wf-open 200ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes kv-wf-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.kv-wf-field-hint { margin: 6px 0 0; font-size: 13px; }
+.kv-wf-options { display: grid; gap: 10px; margin: 14px 0 0; }
+.kv-wf-option-hint { margin: 2px 0 0 23px; font-size: 13px; }
+.kv-wf-error { margin: 12px 0 0; }
+.kv-wf-form-actions { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 16px 0 0; }
+.kv-wf-chain { margin: 0; min-width: 0; font-size: 12px; line-height: 1.45; }
+.kv-wf-chain span { color: var(--bai-text-tertiary); }
+.kv-wf-form-actions .kv-button-primary { flex: none; }
+.kv-wf-done { padding-top: 6px; }
+.kv-wf-done .kv-onb-ok { align-items: flex-start; }
+.kv-wf-done-actions { display: flex; align-items: center; gap: 14px; margin: 12px 0 0; }
+
+@media (prefers-reduced-motion: reduce) { .kv-wf-template-body { animation: none; } .kv-wf-chevron, .kv-wf-template { transition: none; } }

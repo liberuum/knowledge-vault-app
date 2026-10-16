@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onboardingStart, railState } from "./onboarding-state.js";
+import { isSideTrip, lineStep, onboardingStart, railState } from "./onboarding-state.js";
 import type { ModelSettings } from "../vaults.js";
 
 const none: ModelSettings = { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, provider: "openrouter" };
@@ -27,5 +27,12 @@ describe("onboardingStart", () => {
   it("lights the rail up to the current step", () => {
     expect((["ai", "vault", "sources", "notes"] as const).map((s) => railState("notes", s))).toEqual(["done", "done", "done", "current"]);
     expect(railState("welcome", "ai")).toBe("todo");
+  });
+  it("keeps the step a side trip left from lit on the rail while the trip is open", () => {
+    expect(isSideTrip("workflows")).toBe(true);
+    expect(isSideTrip("notes")).toBe(false);
+    expect(lineStep("workflows")).toBe("notes");
+    expect(lineStep("sources")).toBe("sources");
+    expect((["ai", "vault", "sources", "notes"] as const).map((s) => railState("workflows", s))).toEqual(["done", "done", "done", "current"]);
   });
 });

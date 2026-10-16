@@ -5,7 +5,7 @@ import { desktopRenown } from "./shell/desktop-renown.js";
 import * as knowledgeNote from "@powerhousedao/knowledge-note";
 import * as workflow from "@powerhousedao/workflow";
 import type { DocumentModelLib } from "document-model";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIdentity } from "./state/use-identity.js";
 import { useReturnHomeAfterSignIn } from "./state/return-home-after-sign-in.js";
 import { fetchRemoteVaults, type RemoteVault } from "./api/remote.js";
@@ -49,6 +49,8 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   const inWorkspace = route.name === "vault" || route.name === "workflows" || route.name === "remote";
   const toIdentity = useCallback(() => navigate({ name: "settings", section: "identity" }), [navigate]);
   const toGuide = useCallback((step: OnboardingStep = "welcome", vault?: string) => navigate({ name: "welcome", step, ...(vault ? { vault } : {}) }), [navigate]);
+  // The guide screen that last sent the person into Workflow Studio: Studio's "Setup guide" goes back to it.
+  const guideReturn = useRef<OnboardingStep | null>(null);
   // A new install (or one stopped half-way) opens the setup guide from the landing, once per start.
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const gateDecided = useOnboardingGate(info, route.name === "vaults", appSettings, toGuide);
@@ -141,9 +143,11 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
     case "vault":
       screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} onGuide={guideProgress()?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
       break;
-    case "workflows":
-      screen = <WorkflowsScreen info={info} client={client} onBack={toVaults} onSettings={toSettings} />;
+    case "workflows": {
+      const guide = guideProgress();
+      screen = <WorkflowsScreen info={info} client={client} onBack={toVaults} onSettings={toSettings} onGuide={guide ? () => toGuide(guideReturn.current ?? guide.step, guide.vault) : undefined} />;
       break;
+    }
     case "remote":
       screen = <RemoteRoute info={info} id={route.id} identity={hostIdentity} auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} />;
       break;
@@ -162,7 +166,10 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
             setOpenView(id, view);
             navigate({ name: "vault", id });
           }}
-          onRuns={(workflow) => navigate({ name: "workflows", workflow })}
+          onRuns={(workflow) => {
+            guideReturn.current = route.step ?? "notes";
+            navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" });
+          }}
           onLeave={toVaults}
         />
       );

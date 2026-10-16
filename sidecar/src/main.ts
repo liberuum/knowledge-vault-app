@@ -35,6 +35,7 @@ import { stopOrphanedHelper } from "./orphans.js";
 import { exportVault } from "./export.js";
 import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
 import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelines.js";
+import { createStarterManager } from "./starters.js";
 import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, probeLocalModels, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
@@ -315,6 +316,17 @@ async function main(): Promise<void> {
     engineProtected: cfg.protected,
   });
 
+  // Starter workflows (the setup guide's side trip): on the vault pipeline's connection, followed when it changes.
+  const starters = createStarterManager({
+    dataDir: cfg.dataDir,
+    origin,
+    fetchImpl: engineFetch,
+    pieceVersion: VAULT_PACKAGE_VERSION,
+    workflowsDrive,
+    vaultName: async (id) => (await listVaultDrives(origin, engineFetch)).find((v) => v.id === id)?.name ?? "Vault",
+    vaultConnection: (id) => readPipelines(cfg.dataDir)[id]?.connectionId,
+  });
+
   // Studio's Knowledge Vault connections: this engine's address and a token from the sign-in, on request.
   const fillConnectionHere = (connectionId: string, options: { token: boolean }) =>
     fillConnection(
@@ -383,6 +395,7 @@ async function main(): Promise<void> {
     deleteVault: (id) => deleteVaultDrive(origin, id, engineFetch),
     workflowsDrive,
     pipelines,
+    starters,
     repairQueue: (vaultId) => {
       const record = readPipelines(cfg.dataDir)[vaultId];
       if (!record || record.disabled) return Promise.resolve({ requeued: [], dropped: [], skipped: "no pipeline" });
@@ -537,7 +550,14 @@ async function main(): Promise<void> {
       if (r.created.length) console.log(`[sidecar] ${r.created.length} vault(s) got their Reweave notes workflow`);
       if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} vault(s) could not get their Reweave notes workflow; tried again at the next start: ${r.failed.join(", ")}`);
     })
-    .catch((e: unknown) => console.warn(`[sidecar] could not set up the Reweave notes workflows: ${e instanceof Error ? e.message : String(e)}`));
+    .catch((e: unknown) => console.warn(`[sidecar] could not set up the Reweave notes workflows: ${e instanceof Error ? e.message : String(e)}`))
+    // Starter workflows run on their vault pipeline's connection: one set up again gave them a new one to follow.
+    .then(() => starters.follow())
+    .then((r) => {
+      if (r.moved.length) console.log(`[sidecar] ${r.moved.length} starter workflow(s) now run on their vault's current connection`);
+      if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} starter workflow(s) could not follow their vault's connection: ${r.failed.join(", ")}`);
+    })
+    .catch(() => undefined);
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
 
   // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).

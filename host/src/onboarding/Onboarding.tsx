@@ -3,14 +3,16 @@ import "./onboarding.css";
 import type { SidecarInfo } from "../sidecar.js";
 import { finishOnboarding } from "./api.js";
 import { AiStep } from "./AiStep.js";
-import { RAIL, railState, type OnboardingStep } from "./onboarding-state.js";
+import { lineStep, RAIL, railState, type OnboardingStep } from "./onboarding-state.js";
 import { OverviewStep, type VaultView } from "./OverviewStep.js";
 import { forgetGuide } from "./progress.js";
 import { SourcesStep } from "./SourcesStep.js";
 import { VaultStep } from "./VaultStep.js";
 import { WelcomeStep } from "./WelcomeStep.js";
+import { WorkflowsStep } from "./WorkflowsStep.js";
 
-const ORDER: readonly OnboardingStep[] = ["welcome", "ai", "vault", "sources", "notes"];
+// A side trip sits after the step it leaves from: it slides in from the right, and back out to the left.
+const ORDER: readonly OnboardingStep[] = ["welcome", "ai", "vault", "sources", "notes", "workflows"];
 
 type Props = {
   info: SidecarInfo;
@@ -22,8 +24,8 @@ type Props = {
   onFinish: (vaultId: string, view?: VaultView) => void;
   /** Open the vault on a view while the guide stays open (a card on the overview). */
   onVisit: (vaultId: string, view: VaultView) => void;
-  /** Open the vault's processing, live, in Workflow Studio — the guide stays open. */
-  onRuns: (workflowId: string) => void;
+  /** Open Workflow Studio — on one workflow (the vault's processing, live) when given; the guide stays open. */
+  onRuns: (workflowId?: string) => void;
   /** Skipped: back to the landing. */
   onLeave: () => void;
 };
@@ -73,7 +75,7 @@ export function Onboarding({ info, step, vaultId, onStep, onFinish, onVisit, onR
         <img src="/vault-icon.png" alt="" width={44} height={44} />
         <h1>Knowledge Vault</h1>
         <div className="kv-header-actions">
-          {step !== "notes" && (
+          {lineStep(step) !== "notes" && (
             <button type="button" className="kv-button kv-button-quiet" onClick={skip}>Skip for now</button>
           )}
         </div>
@@ -85,8 +87,9 @@ export function Onboarding({ info, step, vaultId, onStep, onFinish, onVisit, onR
           {step === "ai" && <AiStep info={info} onBack={() => go("welcome", vaultId)} onContinue={() => go("vault", vaultId)} />}
           {step === "vault" && <VaultStep info={info} vaultId={vaultId} onBack={() => go("ai", vaultId)} onReady={(id) => go("sources", id)} />}
           {step === "sources" && <SourcesStep info={info} vaultId={vaultId} onBack={() => go("vault", vaultId)} onStarted={(id) => go("notes", id)} />}
-          {step === "notes" && vaultId && <OverviewStep info={info} vaultId={vaultId} onVisit={(view) => onVisit(vaultId, view)} onRuns={onRuns} onFinish={() => finish(vaultId)} />}
-          {step === "notes" && !vaultId && <p className="kv-error">This step needs the vault the guide made. <button type="button" className="kv-link" onClick={() => go("vault")}>Back to the vault step</button></p>}
+          {step === "notes" && vaultId && <OverviewStep info={info} vaultId={vaultId} onVisit={(view) => onVisit(vaultId, view)} onRuns={onRuns} onWorkflows={() => go("workflows", vaultId)} onFinish={() => finish(vaultId)} />}
+          {step === "workflows" && vaultId && <WorkflowsStep info={info} vaultId={vaultId} onBack={() => go("notes", vaultId)} onStudio={onRuns} />}
+          {(step === "notes" || step === "workflows") && !vaultId && <p className="kv-error">This step needs the vault the guide made. <button type="button" className="kv-link" onClick={() => go("vault")}>Back to the vault step</button></p>}
         </div>
       </main>
       <p className="kv-onb-foot">You can change all of this later in Settings.</p>
