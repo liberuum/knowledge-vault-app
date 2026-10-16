@@ -318,6 +318,16 @@ describe("pipeline manager — Update in place", () => {
     expect(readPipelines(h.dataDir).vault1?.workflowId).toBe("wf-1");
   });
 
+  it("a removal issued while an Update of the same vault runs waits for it, and leaves no record", async () => {
+    const h = deps({ template: inPlace });
+    const manager = createPipelineManager({ ...h.d, fetchImpl: slow(h) });
+    const ensuring = manager.ensure("vault1");
+    const removing = manager.remove("vault1");
+    await Promise.all([ensuring, removing]);
+    expect(readPipelines(h.dataDir)).toEqual({});
+    expect(h.engine.calls.filter((c) => c.query.includes("deleteDocument")).length).toBe(2);
+  });
+
   it("two vaults' Updates still run at the same time: the lock is per vault", async () => {
     const h = deps({ template: inPlace });
     writePipelines(h.dataDir, { vault1: existing("wf-1", "conn-1"), vault2: existing("wf-2", "conn-2") });

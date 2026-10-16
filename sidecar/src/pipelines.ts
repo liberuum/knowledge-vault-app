@@ -826,14 +826,15 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     },
 
     /** Delete the pipeline's documents and secrets and forget the record; a vault without one is left alone. */
-    async remove(vaultId: string): Promise<void> {
-      const records = readPipelines(deps.dataDir);
-      const record = records[vaultId];
-      if (!record) return;
-      await discard(record);
-      delete records[vaultId];
-      writePipelines(deps.dataDir, records);
-    },
+    remove: (vaultId: string): Promise<void> =>
+      exclusive(vaultId, async () => {
+        const records = readPipelines(deps.dataDir);
+        const record = records[vaultId];
+        if (!record) return;
+        await discard(record);
+        delete records[vaultId];
+        writePipelines(deps.dataDir, records);
+      }),
   };
 }
 export type PipelineManager = ReturnType<typeof createPipelineManager>;
