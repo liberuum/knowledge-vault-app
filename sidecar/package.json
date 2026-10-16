@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.15",
-    "@powerhousedao/knowledge-note": "1.0.54-dev.36",
-    "@powerhousedao/switchboard": "6.2.3-dev.52",
-    "@powerhousedao/workflow": "6.2.3-dev.52",
-    "@renown/sdk": "6.2.3-dev.52",
+    "@powerhousedao/knowledge-note": "1.0.54-dev.37",
+    "@powerhousedao/switchboard": "6.2.3-dev.60",
+    "@powerhousedao/workflow": "6.2.3-dev.60",
+    "@renown/sdk": "6.2.3-dev.60",
     "pdfjs-dist": "^6.3.289",
     "tar": "7"
   },

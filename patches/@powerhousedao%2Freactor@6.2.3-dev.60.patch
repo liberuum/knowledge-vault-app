@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 91a189a31a3e8d99b42f87b5163f3a69ea7eb09f..37f2e43c3ff9b52629c6aa11360d019c61ef1886 100644
+index 3201c84bc9747823d95ab08960c978a8e5c73d74..43b251234dfbe3d0af6bc8ef53cbc0457a7866fa 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -4991,9 +4991,21 @@ function addEntry(map, entry) {
@@ -7,7 +7,7 @@ index 91a189a31a3e8d99b42f87b5163f3a69ea7eb09f..37f2e43c3ff9b52629c6aa11360d019c
  	if (!existing.spec && entry.spec) existing.spec = entry.spec;
  }
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.52.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.60.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
@@ -26,7 +26,7 @@ index 91a189a31a3e8d99b42f87b5163f3a69ea7eb09f..37f2e43c3ff9b52629c6aa11360d019c
  	let moduleNs;
  	try {
 diff --git a/dist/load-spec-ZLjuyhxz.js b/dist/load-spec-ZLjuyhxz.js
-index 913cef73a286096c6611f079783936b045f599ec..ba8a26c219e33450f04789c8310b042a1dbbee13 100644
+index 913cef73a286096c6611f079783936b045f599ec..5b905d076eae4b8613c8629b22790b85b7483ccc 100644
 --- a/dist/load-spec-ZLjuyhxz.js
 +++ b/dist/load-spec-ZLjuyhxz.js
 @@ -230,9 +230,21 @@ var DocumentModelRegistry = class {
@@ -34,7 +34,7 @@ index 913cef73a286096c6611f079783936b045f599ec..ba8a26c219e33450f04789c8310b042a
  //#region src/executor/worker/load-spec.ts
  /** Imports `spec.module` and calls the export with `spec.initArgs`, or returns it if not a function. */
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.52.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.60.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
