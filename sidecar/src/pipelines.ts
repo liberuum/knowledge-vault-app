@@ -215,6 +215,23 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     return undefined;
   }
 
+  /**
+   * One change at a time per vault: `work` runs once the vault's previous change has settled (failed or not). Every
+   * change to a vault's pipeline (ensure, the start-up upkeep, applyModels, disableAll) runs under it, so an Update
+   * never races another Update or the start-up followers. Work that holds a vault's lock calls the unlocked inner
+   * functions (ensurePipeline, ensureReweave), never a locked one for the same vault. Different vaults run concurrently.
+   */
+  const chains = new Map<string, Promise<unknown>>();
+  function exclusive<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
+    const next = (chains.get(vaultId) ?? Promise.resolve()).catch(() => undefined).then(work);
+    chains.set(vaultId, next);
+    const settle = () => {
+      if (chains.get(vaultId) === next) chains.delete(vaultId);
+    };
+    next.then(settle, settle);
+    return next;
+  }
+
   /** Change one vault's record as it is on disk now (another step may have written it meanwhile); a vault without one is left alone. */
   function save(vaultId: string, change: (record: PipelineRecord) => PipelineRecord): void {
     const records = readPipelines(deps.dataDir);
@@ -302,9 +319,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   /**
    * Set up this vault's pipeline, or Update it. A pipeline whose workflow still exists is brought to the template in
    * place (updateInPlace): the workflow, its id and its runs stay. Without a record, or when the workflow was deleted
-   * in Studio, it is created. Nothing happens without a model key and a model.
+   * in Studio, it is created. Nothing happens without a model key and a model. Unlocked: the caller holds the vault's lock.
    */
-  async function ensure(vaultId: string): Promise<EnsureResult> {
+  async function ensurePipeline(vaultId: string): Promise<EnsureResult> {
     const settings = deps.readSettings();
     const key = keyFor(settings);
     if (!modelsConfigured(settings) || !key) return { state: "unconfigured" };
@@ -465,7 +482,8 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   }
 
   return {
-    ensure,
+    /** ensurePipeline, one change at a time for this vault. */
+    ensure: (vaultId: string): Promise<EnsureResult> => exclusive(vaultId, () => ensurePipeline(vaultId)),
 
     /**
      * At start: every pipeline's connection points at this launch's gateway, older ones get the gateway key.
@@ -477,7 +495,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     async followGateway(): Promise<{ moved: string[]; failed: string[] }> {
       const settings = deps.readSettings();
       const out = { moved: [] as string[], failed: [] as string[] };
-      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId]; // as it is now, under the lock: an Update may have just written it
+        if (!record) return;
         let created: string | undefined; // the gateway-key secret made for this pipeline, until its record holds it
         try {
           const data = await gql<{ document: { document: { state: { global: { config?: Record<string, unknown> } } } } }>(
@@ -486,10 +506,10 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             { id: record.connectionId },
             f,
           ).catch(() => null);
-          if (!data) continue; // the connection was deleted in Studio: nothing to point anywhere
+          if (!data) return; // the connection was deleted in Studio: nothing to point anywhere
           const current = data.document.document.state.global.config ?? {};
           if (record.gatewayKeyed) {
-            if (current.llm_base_url === deps.gateway.url()) continue;
+            if (current.llm_base_url === deps.gateway.url()) return;
             await updateConnectionModels(record.connectionId, settings);
           } else {
             created = await createSecret(deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
@@ -505,7 +525,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
           console.warn(`[pipelines] could not move the pipeline of vault ${vaultId} to the gateway: ${error instanceof Error ? error.message : String(error)}`);
           out.failed.push(vaultId);
         }
-      }
+      });
       return out;
     },
 
@@ -525,8 +545,9 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       if (!want && wantPoll === undefined) return out;
       type Binding = { id: string; pieceName: string; pieceVersion: string; triggerName: string; connectionId?: string | null; reactorConnectionId?: string | null; config?: Record<string, unknown>; propertySettings?: unknown[] | null };
       type Published = { version?: number; policy?: Record<string, unknown>; trigger?: Binding | null };
-      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
-        if (record.disabled) continue; // set up again from the template when it is enabled
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId];
+        if (!record || record.disabled) return; // set up again from the template when it is enabled
         try {
           const data = await gql<{ document: { document: { state: { global: { version?: number; trigger?: Binding | null; published?: Published | null } } } } }>(
             deps.origin,
@@ -534,16 +555,16 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             { id: record.workflowId },
             f,
           ).catch(() => null);
-          if (!data) continue; // the workflow was deleted in Studio
+          if (!data) return; // the workflow was deleted in Studio
           const global = data.document.document.state.global;
           const published = global.published?.policy ?? {};
           const policyStale = want !== undefined && !Object.entries(want).every(([k, v]) => published[k] === v);
           const trigger = global.trigger;
           const pollStale = wantPoll !== undefined && !!trigger && global.published?.trigger?.config?.[POLL_KEY] !== wantPoll;
-          if (!policyStale && !pollStale) continue;
+          if (!policyStale && !pollStale) return;
           if (global.published && global.version !== global.published.version) {
             out.skipped.push(vaultId);
-            continue;
+            return;
           }
           const ops: Array<{ type: string; input: unknown }> = [];
           if (policyStale) ops.push({ type: "SET_POLICY", input: want });
@@ -570,7 +591,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
           console.warn(`[pipelines] could not bring vault ${vaultId}'s pipeline up to the template: ${error instanceof Error ? error.message : String(error)}`);
           out.failed.push(vaultId);
         }
-      }
+      });
       return out;
     },
 
@@ -578,7 +599,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     async followReweave(): Promise<{ created: string[]; updated: string[]; failed: string[] }> {
       const out = { created: [] as string[], updated: [] as string[], failed: [] as string[] };
       for (const vaultId of Object.keys(readPipelines(deps.dataDir))) {
-        const result = await ensureReweave(vaultId);
+        const result = await exclusive(vaultId, () => ensureReweave(vaultId));
         if (result === "created") out.created.push(vaultId);
         if (result === "updated") out.updated.push(vaultId);
         if (result === "failed") out.failed.push(vaultId);
@@ -596,9 +617,10 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       const settings = deps.readSettings();
       const out = { updated: [] as string[], recreated: [] as string[] };
       if (!modelsConfigured(settings)) return out;
-      for (const [vaultId, record] of Object.entries(readPipelines(deps.dataDir))) {
-        if (record.disabled) continue;
-        if (record.models && record.models.endpoint === settings.models.endpoint && record.models.model === settings.models.model) continue;
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId];
+        if (!record || record.disabled) return;
+        if (record.models && record.models.endpoint === settings.models.endpoint && record.models.model === settings.models.model) return;
         if (record.modelFromConnection && record.templateDigest === templateDigest(deps.template)) {
           await updateConnectionModels(record.connectionId, settings);
           const records = readPipelines(deps.dataDir);
@@ -609,24 +631,24 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
           }
           out.updated.push(vaultId);
         } else {
-          await ensure(vaultId);
+          await ensurePipeline(vaultId); // this vault's lock is held: the unlocked inner function
           out.recreated.push(vaultId);
         }
-      }
+      });
       return out;
     },
 
     /** The model key was removed: every recorded pipeline is disabled and its key secret deleted; the records say why. */
     async disableAll(reason: string): Promise<void> {
-      const records = readPipelines(deps.dataDir);
-      for (const [vaultId, record] of Object.entries(records)) {
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId];
+        if (!record) return;
         for (const id of [record.workflowId, ...(record.reweave ? [record.reweave.workflowId] : [])]) {
           await execute(deps.origin, id, toActions([{ type: "SET_WORKFLOW_STATUS", input: { status: "DISABLED" } }], now), f).catch(() => undefined);
         }
         await deleteSecret(record.secretRefs.llm);
-        records[vaultId] = { ...record, disabled: reason };
-      }
-      writePipelines(deps.dataDir, records);
+        save(vaultId, (r) => ({ ...r, disabled: reason }));
+      });
     },
 
     /**

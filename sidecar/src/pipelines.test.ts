@@ -281,6 +281,58 @@ describe("pipeline manager — Update in place", () => {
     expect(record.reweave).toEqual({ workflowId: "rw-1", digest: workflowDigest(reweaveTemplate) });
     expect(instantiateReweave).toHaveBeenCalledTimes(1);
   });
+
+  /** One change at a time per vault: an engine that answers a tick later, so concurrent work overlaps if nothing serializes it. */
+  const slow = (h: ReturnType<typeof deps>) =>
+    (async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      await new Promise((r) => setTimeout(r, 1));
+      return h.d.fetchImpl(url, init);
+    }) as unknown as typeof fetch;
+  const existing = (workflowId: string, connectionId: string): PipelineRecord => ({ workflowId, connectionId, secretRefs: { token: `t-${workflowId}`, llm: `l-${workflowId}` }, createdAt: "2026-10-01T00:00:00.000Z" });
+
+  it("an Update and the start-up Reweave upkeep, together, make one Reweave notes workflow, not two", async () => {
+    let made = 0;
+    const instantiateReweave = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 60)); // long enough for the Update to reach its own Reweave step meanwhile
+      return { workflowId: `rw-${++made}` };
+    });
+    const h = deps({ template: inPlace, reweaveTemplate, instantiateReweave });
+    writePipelines(h.dataDir, { vault1: existing("wf-1", "conn-1") });
+    h.engine.states["wf-1"] = running;
+    const manager = createPipelineManager({ ...h.d, fetchImpl: slow(h) });
+    const [, ensured] = await Promise.all([manager.followReweave(), manager.ensure("vault1")]);
+    expect(ensured).toEqual({ state: "ready", workflowId: "wf-1", connectionId: "conn-1" });
+    expect(instantiateReweave).toHaveBeenCalledTimes(1);
+    expect(readPipelines(h.dataDir).vault1?.reweave).toEqual({ workflowId: "rw-1", digest: workflowDigest(reweaveTemplate) });
+  });
+
+  it("two Updates of one vault, together, run one after the other: the workflow's edits never interleave", async () => {
+    const h = deps({ template: inPlace });
+    writePipelines(h.dataDir, { vault1: existing("wf-1", "conn-1") });
+    h.engine.states["wf-1"] = running;
+    const manager = createPipelineManager({ ...h.d, fetchImpl: slow(h) });
+    const results = await Promise.all([manager.ensure("vault1"), manager.ensure("vault1")]);
+    expect(results).toEqual([{ state: "ready", workflowId: "wf-1", connectionId: "conn-1" }, { state: "ready", workflowId: "wf-1", connectionId: "conn-1" }]);
+    const publish = ["PUBLISH_WORKFLOW", "SET_WORKFLOW_STATUS"];
+    expect(batches(h.engine.calls, "wf-1").map((b) => b.map((a) => a.type))).toEqual([editTypes, publish, editTypes, publish]);
+    expect(readPipelines(h.dataDir).vault1?.workflowId).toBe("wf-1");
+  });
+
+  it("two vaults' Updates still run at the same time: the lock is per vault", async () => {
+    const h = deps({ template: inPlace });
+    writePipelines(h.dataDir, { vault1: existing("wf-1", "conn-1"), vault2: existing("wf-2", "conn-2") });
+    h.engine.states["wf-1"] = running;
+    h.engine.states["wf-2"] = running;
+    const manager = createPipelineManager({ ...h.d, fetchImpl: slow(h) });
+    await Promise.all([manager.ensure("vault1"), manager.ensure("vault2")]);
+    const of = (c: Call) => {
+      const id = String(c.variables.id ?? c.variables.ref ?? c.variables.l ?? "");
+      return /wf-1|conn-1|Research/.test(id) ? "vault1" : /wf-2|conn-2|Team wiki/.test(id) ? "vault2" : undefined;
+    };
+    const owners = h.engine.calls.map(of);
+    expect(owners.indexOf("vault2")).toBeGreaterThan(-1);
+    expect(owners.indexOf("vault2")).toBeLessThan(owners.lastIndexOf("vault1"));
+  });
 });
 
 describe("pipeline manager — status and removal", () => {
