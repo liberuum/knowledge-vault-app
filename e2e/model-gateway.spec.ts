@@ -36,7 +36,8 @@ test("the vault chat answers through the app's model, with no connect form", asy
   await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
   await createVaultOnLanding(page, "Gateway vault");
 
-  await page.getByRole("button", { name: "Chat" }).first().click({ timeout: 60_000 });
+  // The vault sidebar's chat place (labelled "Ask"); its id stays whatever the label says.
+  await page.locator('[data-place="ask"]').first().click({ timeout: 60_000 });
   await expect(page.getByText("fake-model on this computer")).toBeVisible();
   await expect(page.getByText("Connect with OpenRouter")).toHaveCount(0);
   await page.getByPlaceholder("Ask Gateway vault anything").fill("Hi");

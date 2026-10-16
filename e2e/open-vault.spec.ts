@@ -19,12 +19,12 @@ test("create a vault on the landing and open the Knowledge Vault app against the
   await createVaultOnLanding(page, "E2E vault", "enter");
 
   // The vault app (from @powerhousedao/knowledge-note) renders its sidebar.
-  await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('[data-place="notes"]').first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText("Graph", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Sign in to open this vault")).toHaveCount(0); // open mode: no gate
 
   await page.getByRole("button", { name: "← Vaults" }).click();
-  await expect(page.getByRole("button", { name: "Open E2E vault" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Open (vault )?E2E vault$/ })).toBeVisible();
   await expect(page.getByText("Ready", { exact: true })).toBeVisible();
   await expect(page.getByText(/Everything stays on this computer/)).toBeVisible(); // the status strip's privacy sentence (spec §5.7)
   await page.screenshot({ path: "test-results/landing-with-vault.png" });

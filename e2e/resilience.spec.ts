@@ -23,7 +23,7 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   if (await newVault.isVisible()) await newVault.click();
   await name.fill("Resilience vault");
   await page.getByRole("button", { name: "Create vault" }).click();
-  await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('[data-place="notes"]').first()).toBeVisible({ timeout: 60_000 });
 
   // (a) The engine crashes: the banner says the app is reconnecting, the dev loop's supervisor
   // brings the engine back after 1 s, and the banner clears with the vault still open.
@@ -31,7 +31,7 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   expect(crash.status()).toBe(202);
   await expect(page.getByText(/Reconnecting…/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Reconnecting…/)).toHaveCount(0, { timeout: 90_000 });
-  await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible();
+  await expect(page.locator('[data-place="notes"]').first()).toBeVisible();
 
   // (b) Back up now: the engine restarts, makes the backup before it opens the store, and the list shows it.
   await page.getByRole("button", { name: "← Vaults" }).click();

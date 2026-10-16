@@ -9,19 +9,19 @@ test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sec
   await createVaultOnLanding(page, "Launcher vault");
 
   // Creating opens the vault. Inside, the landing's chrome is gone; the app bar is the only landmark.
-  await expect(page.getByText("Notes", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('[data-place="notes"]').first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("heading", { name: "Knowledge Vault" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Workflows" })).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "App" })).toBeVisible();
   await page.getByRole("button", { name: "← Vaults" }).click();
-  await expect(page.getByRole("button", { name: "Open Launcher vault" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Open (vault )?Launcher vault$/ })).toBeVisible();
 
   // Rename from the tile's menu.
   await page.getByRole("button", { name: "More actions for Launcher vault" }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Launcher vault renamed"); // exact: getByLabel("Name") also matches the dialog titled "Rename vault"
   await page.getByRole("button", { name: "Save name" }).click();
-  await expect(page.getByRole("button", { name: "Open Launcher vault renamed" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Open (vault )?Launcher vault renamed$/ })).toBeVisible();
 
   // Settings: the sections list, Vaults, Models, Diagnostics, Appearance.
   await page.getByRole("button", { name: "Settings" }).click();
@@ -44,7 +44,7 @@ test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sec
 
   // Workflow Studio, full view, with the runtime reachable (no "unreachable" notice).
   await page.getByRole("button", { name: "Workflows" }).click();
-  await expect(page.getByText("Automations in this drive")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Automations in this drive").or(page.getByRole("heading", { name: "Workflows", level: 2 })).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/runtime is unreachable/)).toHaveCount(0);
   await page.getByRole("button", { name: "← Vaults" }).click();
 
@@ -62,5 +62,5 @@ test("launcher: full view inside a vault, rename from the ⋯ menu, Settings sec
   await page.getByLabel("Type the vault’s name to confirm").fill("Launcher vault renamed");
   await expect(del).toBeEnabled();
   await del.click();
-  await expect(page.getByRole("button", { name: "Open Launcher vault renamed" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Open (vault )?Launcher vault renamed$/ })).toHaveCount(0);
 });

@@ -46,7 +46,7 @@ test("Workflow Studio in the app: + creates in a home folder, back and forward, 
   await expect.poll(runtimeUp, { timeout: 120_000, message: "the workflow runtime answers" }).toBe(true);
   const drive = ((await (await request.get(`${CONTROL}/workflows`, { headers: auth })).json()) as { drive: { id: string } }).drive;
   await page.goto("/#/workflows");
-  await expect(page.getByText("Automations in this drive")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Automations in this drive").or(page.getByRole("heading", { name: "Workflows", level: 2 })).first()).toBeVisible({ timeout: 60_000 });
 
   const workflows = async () => (await nodesOf(request, drive.id)).filter((n) => n.kind === "file" && n.documentType === "powerhouse/workflow");
   /** The sort key of a workflow's home folder, read fresh: a reorder renames or moves folders. */

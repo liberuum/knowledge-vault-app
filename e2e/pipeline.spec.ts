@@ -50,8 +50,8 @@ test("pipeline: template instantiated per vault, a queued source runs, a failed 
     // A vault created now gets its pipeline: the chip in its app bar says processing is ready.
     await page.goto("/#/");
     await expect(page.getByRole("heading", { name: "Vaults" })).toBeVisible();
-    // Either the first-run form is already there or the list has loaded and "New vault" opens it.
-    const newVault = page.getByRole("button", { name: "New vault" });
+    // Either the first-run form is already there or the list has loaded and "Add vault" opens it.
+    const newVault = page.getByRole("button", { name: "Add vault" });
     const nameBox = page.getByRole("textbox", { name: "Name", exact: true });
     await newVault.or(nameBox).first().waitFor({ timeout: 60_000 });
     if (await newVault.isVisible().catch(() => false)) await newVault.click();
