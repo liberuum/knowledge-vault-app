@@ -64,8 +64,6 @@ export type ControlDeps = {
   validateModels: () => Promise<{ ok: boolean; detail: string }>;
   /** Phase D: one tiny JSON request through the gateway, timed — the onboarding's "Ready". */
   checkModel?: () => Promise<ModelCheck>;
-  /** One pass of the queue watchdog for a vault, on demand (queue-watchdog.ts). */
-  repairQueue: (vaultId: string) => Promise<{ requeued: string[]; dropped: string[]; skipped?: string }>;
   /** The provider's model list with the saved key, for the picker; `endpoint` follows the form when it differs from the saved one. */
   modelCatalog: (endpoint?: string) => Promise<unknown>;
   /** The models a key just entered gives, before it is saved: a named service's, or another one's at its address. */
@@ -369,8 +367,6 @@ export function createControlServer(deps: ControlDeps) {
         const body = await readJson(req);
         return send(res, 200, { connection: await deps.fillConnection(decodePart(fillOf[1]!), { token: body.token === true }) }, allowed);
       }
-      const repairOf = url.pathname.match(/^\/vaults\/([^/]+)\/pipeline\/repair$/);
-      if (repairOf && req.method === "POST") return send(res, 200, await deps.repairQueue(decodePart(repairOf[1]!)), allowed);
       const pipelineOf = url.pathname.match(/^\/vaults\/([^/]+)\/pipeline$/);
       if (pipelineOf && req.method === "POST") {
         const result = await deps.pipelines.ensure(decodePart(pipelineOf[1]!));

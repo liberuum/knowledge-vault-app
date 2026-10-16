@@ -40,7 +40,7 @@ import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, probeLocalModels, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
 import { reapChildren } from "./child-reaper.js";
-import { repairQueue, startQueueWatchdog } from "./queue-watchdog.js";
+import { startQueueWatchdog } from "./queue-watchdog.js";
 
 /**
  * Stop this engine gracefully: run the SIGINT listeners (the Switchboard saves both PGlite stores, then
@@ -397,11 +397,6 @@ async function main(): Promise<void> {
     workflowsDrive,
     pipelines,
     starters,
-    repairQueue: (vaultId) => {
-      const record = readPipelines(cfg.dataDir)[vaultId];
-      if (!record || record.disabled) return Promise.resolve({ requeued: [], dropped: [], skipped: "no pipeline" });
-      return repairQueue({ origin, fetchImpl: engineFetch }, vaultId, record.workflowId, { engineStartedAt: ENGINE_STARTED_AT });
-    },
     readSettings: () => readSettings(cfg.dataDir),
     writeSettings: (patch) => writeSettings(cfg.dataDir, patch),
     validateModels: () => (readSettings(cfg.dataDir).models.provider === "chatgpt" ? chatgpt.validate() : validateModelEndpoint(readSettings(cfg.dataDir).models.endpoint, hostedKey())),
