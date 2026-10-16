@@ -649,7 +649,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
      * At start: every pipeline publishes the template's run policy and the trigger's poll interval.
      * Since 6.2.3-dev.50 the runtime enforces the policy, and a pipeline made before the template carried
      * one runs with the workflow model's default (QUEUE, a one-hour deadline, PARK on the first failure);
-     * one made before the 15 s interval checks the queue every 60 s. Each is patched in place —
+     * one made before the template's 10 s poll interval (a queue check on every 15 s wake-up of the runtime) checks the queue every 60 s. Each is patched in place —
      * SET_POLICY and/or SET_TRIGGER, then PUBLISH_WORKFLOW, since the runtime reads the published
      * workflow; publishing also lifts a park — keeping its runs and history. One with unpublished edits
      * from Workflow Studio is left alone (publishing would publish them too) and reported in `skipped`.

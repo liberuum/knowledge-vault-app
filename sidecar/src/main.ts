@@ -297,7 +297,8 @@ async function main(): Promise<void> {
   /**
    * The pipelines' "is a model usable?" — pipelines.ts only checks that a key exists (their connection holds the
    * gateway's key, never this one). The ChatGPT plan has no key: a sign-in allowed to use the plan stands for it.
-   * To keep processing off the ChatGPT plan (spec §7 Q4: chat only), answer undefined for "chatgpt" here.
+   * The ChatGPT plan runs processing as well as the chat (spec §7 Q4, decided by the C1 test). To keep processing
+   * off it, answer undefined for "chatgpt" here.
    */
   const pipelineModelKey = () => (readSettings(cfg.dataDir).models.provider === "chatgpt" ? (chatGptReady(cfg.dataDir) ? "chatgpt-plan" : undefined) : readModelKey(cfg.dataDir));
   const pipelines = createPipelineManager({
@@ -533,7 +534,7 @@ async function main(): Promise<void> {
       if (failed.length) console.warn(`[sidecar] ${failed.length} pipeline(s) could not be moved to the gateway and keep their previous settings: ${failed.join(", ")}`);
     })
     .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`))
-    // Pipelines made before the template's run policy (enforced since 6.2.3-dev.50) or its 15 s queue check get them.
+    // Pipelines made before the template's run policy (enforced since 6.2.3-dev.50) or the template's 10 s poll interval (a queue check on every 15 s wake-up of the runtime) get them.
     .then(() => pipelines.followTemplate())
     .then((r) => {
       if (r.updated.length) console.log(`[sidecar] ${r.updated.length} pipeline(s) now publish the template's run policy and queue check`);
