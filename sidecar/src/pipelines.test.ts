@@ -133,14 +133,153 @@ describe("pipeline manager — ensure", () => {
     await manager.ensure("vault1");
     expect(engine.calls.find((c) => c.query.includes("createSecret"))!.variables.v).toBe("open");
   });
-  it("re-creating a pipeline removes the previous documents and secrets first", async () => {
-    const { manager, engine } = deps();
+  it("an Update of a pipeline whose workflow was deleted in Studio creates it anew, removing what was left first", async () => {
+    const { manager, engine, instantiate } = deps();
     await manager.ensure("vault1");
+    engine.gone.add("wf-1");
     await manager.ensure("vault1");
-    const deletes = engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort();
-    expect(deletes).toEqual(["conn-1", "wf-1"]);
-    const secretDeletes = engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort();
-    expect(secretDeletes).toEqual(["secret://v1:1", "secret://v1:2"]);
+    expect(instantiate).toHaveBeenCalledTimes(2);
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort()).toEqual(["conn-1", "wf-1"]);
+    expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
+  });
+});
+
+describe("pipeline manager — Update in place", () => {
+  afterEach(() => vi.restoreAllMocks());
+  /** A template with what an Update replays: the connection's name, config and secrets; the workflow's trigger, step, edge and policy. */
+  const inPlace = {
+    version: 1,
+    exportedAt: "x",
+    placeholders: [],
+    connection: {
+      documentType: "powerhouse/connection",
+      operations: [
+        { type: "SET_CONNECTION_NAME", input: { name: "{{CONNECTION_NAME}}" } },
+        { type: "SET_CONFIG", input: { config: { base_url: "{{SWITCHBOARD_ORIGIN}}", llm_default_model: "{{LLM_MODEL}}", llm_base_url: "{{LLM_BASE_URL}}" } } },
+        { type: "SET_SECRET_REF", input: { id: "tok", ref: "{{TOKEN_SECRET_REF}}", name: "token" } },
+        { type: "SET_SECRET_REF", input: { id: "llm", ref: "{{LLM_SECRET_REF}}", name: "llm_api_key" } },
+      ],
+    },
+    workflow: {
+      documentType: "powerhouse/workflow",
+      operations: [
+        { type: "SET_WORKFLOW_NAME", input: { name: "{{WORKFLOW_NAME}}" } },
+        { type: "SET_TRIGGER", input: { id: "trig", config: { drive: "{{DRIVE_ID}}" }, connectionId: "{{CONNECTION_ID}}" } },
+        { type: "ADD_STEP", input: { id: "s1", config: { model: "{{LLM_MODEL}}" }, connectionId: "{{CONNECTION_ID}}" } },
+        { type: "ADD_EDGE", input: { id: "e1", from: "trig", to: "s1", port: "next" } },
+        { type: "SET_POLICY", input: { concurrency: "PARALLEL" } },
+        { type: "PUBLISH_WORKFLOW", input: { publishedAt: "{{NOW}}" } },
+        { type: "SET_WORKFLOW_STATUS", input: { status: "ENABLED" } },
+      ],
+    },
+  } as unknown as PipelineTemplate;
+  /** The pipeline's workflow as it runs: published, with the template's step and edge. */
+  const running = { status: "ENABLED", steps: [{ id: "s1" }], edges: [{ id: "e1" }], published: { version: 3 } };
+  const editTypes = ["REMOVE_EDGE", "REMOVE_STEP", "SET_WORKFLOW_NAME", "SET_TRIGGER", "ADD_STEP", "ADD_EDGE", "SET_POLICY"];
+  const deletedSecrets = (calls: Call[]) => calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref);
+
+  it("keeps the workflow, its id and its connection: new secrets first, the workflow edited then published, the connection, the record, the old secrets last", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    h.engine.states["wf-1"] = { ...running, steps: [{ id: "s1" }, { id: "s-studio" }] };
+    const order: string[] = [];
+    const fetchImpl = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const { query, variables } = JSON.parse(String(init?.body)) as Call;
+      if (query.includes("createSecret")) order.push("create a secret");
+      else if (query.includes("execute(")) order.push(`write ${String(variables.id)}`);
+      else if (query.includes("deleteSecret")) order.push(`delete ${String(variables.ref)} (the record holds ${readPipelines(h.dataDir).vault1?.secretRefs.token})`);
+      return h.d.fetchImpl(url, init);
+    }) as unknown as typeof fetch;
+
+    expect(await createPipelineManager({ ...h.d, fetchImpl }).ensure("vault1")).toEqual({ state: "ready", workflowId: "wf-1", connectionId: "conn-1" });
+    expect(order).toEqual([
+      "create a secret",
+      "create a secret",
+      "write wf-1",
+      "write wf-1",
+      "write conn-1",
+      "delete secret://v1:1 (the record holds secret://v1:3)",
+      "delete secret://v1:2 (the record holds secret://v1:3)",
+    ]);
+    expect(h.instantiate).toHaveBeenCalledTimes(1); // the first setup only
+    expect(h.engine.calls.filter((c) => c.query.includes("deleteDocument"))).toEqual([]);
+
+    const [edits, publish] = batches(h.engine.calls, "wf-1");
+    expect(edits!.map((a) => a.type)).toEqual(["REMOVE_EDGE", "REMOVE_STEP", "REMOVE_STEP", "SET_WORKFLOW_NAME", "SET_TRIGGER", "ADD_STEP", "ADD_EDGE", "SET_POLICY"]);
+    expect(edits!.find((a) => a.type === "SET_TRIGGER")!.input).toEqual({ id: "trig", config: { drive: "vault1" }, connectionId: "conn-1" });
+    expect(edits!.find((a) => a.type === "ADD_STEP")!.input).toEqual({ id: "s1", config: { model: "" }, connectionId: "conn-1" });
+    expect(publish!.map((a) => [a.type, a.input])).toEqual([["PUBLISH_WORKFLOW", { publishedAt: "2026-10-07T10:00:00.000Z" }], ["SET_WORKFLOW_STATUS", { status: "ENABLED" }]]);
+
+    const connection = batches(h.engine.calls, "conn-1").at(-1)!;
+    expect(connection.map((a) => a.type)).toEqual(["SET_CONNECTION_NAME", "SET_CONFIG", "SET_SECRET_REF", "SET_SECRET_REF"]);
+    expect(connection[1]!.input).toEqual({ config: { base_url: "http://127.0.0.1:4201", llm_default_model: "openai/gpt-6-luna", llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_locality: "hosted" } });
+    expect(connection.slice(2).map((a) => a.input)).toEqual([{ id: "tok", ref: "secret://v1:3", name: "token" }, { id: "llm", ref: "secret://v1:4", name: "llm_api_key" }]);
+
+    expect(readPipelines(h.dataDir).vault1).toEqual({
+      workflowId: "wf-1",
+      connectionId: "conn-1",
+      secretRefs: { token: "secret://v1:3", llm: "secret://v1:4" },
+      createdAt: "2026-10-07T10:00:00.000Z",
+      models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" },
+      token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" },
+      modelFromConnection: true,
+      templateDigest: templateDigest(inPlace),
+      gatewayKeyed: true,
+    });
+  });
+
+  it("a rejected workflow edit puts the workflow back as last published, never publishes, and leaves the record and the old secrets", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    const before = readPipelines(h.dataDir).vault1;
+    h.engine.states["wf-1"] = running;
+    h.engine.rejectTypes.add("ADD_EDGE");
+    await expect(h.manager.ensure("vault1")).rejects.toThrow(/ADD_EDGE was rejected/);
+    expect(batches(h.engine.calls, "wf-1").map((b) => b.map((a) => a.type))).toEqual([editTypes, ["REVERT_TO_PUBLISHED"]]);
+    expect(batches(h.engine.calls, "conn-1")).toHaveLength(1); // the first setup's model write only
+    expect(readPipelines(h.dataDir).vault1).toEqual(before);
+    expect(deletedSecrets(h.engine.calls)).toEqual(["secret://v1:3", "secret://v1:4"]);
+  });
+
+  it("a rejected connection write points the connection back at the record's secrets before the new ones go; the record stays", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    const before = readPipelines(h.dataDir).vault1;
+    h.engine.states["wf-1"] = running;
+    h.engine.rejectTypes.add("SET_CONNECTION_NAME");
+    await expect(h.manager.ensure("vault1")).rejects.toThrow(/SET_CONNECTION_NAME was rejected/);
+    // the workflow already matches the template, and is published
+    expect(batches(h.engine.calls, "wf-1").map((b) => b.map((a) => a.type))).toEqual([editTypes, ["PUBLISH_WORKFLOW", "SET_WORKFLOW_STATUS"]]);
+    const restore = batches(h.engine.calls, "conn-1").at(-1)!;
+    expect(restore.map((a) => [a.type, a.input])).toEqual([["SET_SECRET_REF", { id: "tok", ref: "secret://v1:1", name: "token" }], ["SET_SECRET_REF", { id: "llm", ref: "secret://v1:2", name: "llm_api_key" }]]);
+    expect(deletedSecrets(h.engine.calls)).toEqual(["secret://v1:3", "secret://v1:4"]);
+    expect(readPipelines(h.dataDir).vault1).toEqual(before);
+  });
+
+  it("a connection deleted in Studio is made again from the template, and the workflow is pointed at it", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    h.engine.states["wf-1"] = running;
+    h.engine.gone.add("conn-1");
+    expect(await h.manager.ensure("vault1")).toEqual({ state: "ready", workflowId: "wf-1", connectionId: "conn-new" });
+    expect(h.engine.calls.find((c) => c.query.includes("createDocument"))!.variables).toEqual({ name: "Research — Knowledge Vault", parent: "wfdrive" });
+    const [edits] = batches(h.engine.calls, "wf-1");
+    expect(edits!.find((a) => a.type === "SET_TRIGGER")!.input).toMatchObject({ connectionId: "conn-new" });
+    expect(readPipelines(h.dataDir).vault1).toMatchObject({ workflowId: "wf-1", connectionId: "conn-new", secretRefs: { token: "secret://v1:3", llm: "secret://v1:4" } });
+  });
+
+  it("brings the Reweave notes workflow along: switched on again when the app had switched it off", async () => {
+    const instantiateReweave = vi.fn(async () => ({ workflowId: "rw-1" }));
+    const h = deps({ template: inPlace, reweaveTemplate, instantiateReweave });
+    await h.manager.ensure("vault1");
+    await h.manager.disableAll("the model key was removed");
+    h.engine.states["rw-1"] = { status: "DISABLED" };
+    expect((await h.manager.ensure("vault1")).state).toBe("ready");
+    expect(batches(h.engine.calls, "rw-1").at(-1)!.map((a) => [a.type, a.input])).toEqual([["PUBLISH_WORKFLOW", { publishedAt: "2026-10-07T10:00:00.000Z" }], ["SET_WORKFLOW_STATUS", { status: "ENABLED" }]]);
+    const record = readPipelines(h.dataDir).vault1!;
+    expect(record.disabled).toBeUndefined();
+    expect(record.reweave).toEqual({ workflowId: "rw-1", digest: workflowDigest(reweaveTemplate) });
+    expect(instantiateReweave).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -192,15 +331,6 @@ describe("pipeline manager — lifecycle (review fixes)", () => {
     await expect(manager.ensure("vault1")).rejects.toThrow(/refused the write to conn-1/);
     expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort()).toEqual(["conn-1", "wf-1"]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
-    expect(readPipelines(dataDir).vault1).toBeUndefined();
-    expect(await manager.status("vault1")).toEqual({ state: "missing" });
-  });
-  it("re-creating a pipeline that then fails leaves no stale record", async () => {
-    const instantiate = vi.fn(async () => ({ workflowId: "wf-1", connectionId: "conn-1" }));
-    const { manager, dataDir } = deps({ instantiate });
-    await manager.ensure("vault1");
-    instantiate.mockImplementationOnce(async () => { throw new Error("reactor down"); });
-    await expect(manager.ensure("vault1")).rejects.toThrow(/reactor down/);
     expect(readPipelines(dataDir).vault1).toBeUndefined();
     expect(await manager.status("vault1")).toEqual({ state: "missing" });
   });
@@ -265,8 +395,8 @@ describe("pipeline manager — the model settings changed", () => {
     expect(action.input).toEqual({ config: { base_url: "http://127.0.0.1:4201", llm_base_url: "http://127.0.0.1:4202/llm/v1", llm_default_model: "anthropic/claude-sonnet-5.5", llm_locality: "hosted", llm_api_key: "secret://v1:2" } });
     const records = readPipelines(h.dataDir);
     expect(records.vault1).toMatchObject({ workflowId: "wf-1", models: { model: "anthropic/claude-sonnet-5.5" } });
-    expect(h.instantiate).toHaveBeenCalledTimes(1); // only the older pipeline was set up again
-    expect(records.vault2).toMatchObject({ workflowId: "wf-1", modelFromConnection: true, models: { model: "anthropic/claude-sonnet-5.5" } });
+    expect(h.instantiate).not.toHaveBeenCalled(); // the older pipeline is brought to the template in place
+    expect(records.vault2).toMatchObject({ workflowId: "wf-old", connectionId: "conn-old", modelFromConnection: true, models: { model: "anthropic/claude-sonnet-5.5" } });
     expect(records.vault3?.disabled).toBe("the model key was removed");
     // and status no longer reads stale
     expect((await h.manager.status("vault1")).state).toBe("ready");

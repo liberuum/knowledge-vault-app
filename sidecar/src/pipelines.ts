@@ -89,7 +89,7 @@ export type PipelineManagerDeps = {
   now?: () => string;
 };
 
-/** The bearer the piece uses lasts long enough to be forgotten about; re-creating the pipeline mints a new one. */
+/** The bearer the piece uses lasts long enough to be forgotten about; an Update mints a new one. */
 /** What a local model server is sent as its "key": llama.cpp, Ollama and LM Studio ignore it. */
 export const LOCAL_PLACEHOLDER_KEY = "local";
 /** The runtime's per-trigger poll interval, kept in the trigger's config (it never reaches the piece). */
@@ -195,6 +195,8 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   // A model on this computer needs no key; its connection gets a placeholder the server ignores.
   const modelsConfigured = (settings: AppSettings) => (settings.models.hasKey || settings.models.local) && settings.models.model.trim().length > 0;
   const keyFor = (settings: AppSettings) => (settings.models.local ? LOCAL_PLACEHOLDER_KEY : deps.readModelKey());
+  /** What a pipeline's connection says about its model: this launch's gateway, the model, and where it runs. */
+  const modelConfig = (settings: AppSettings) => ({ llm_base_url: deps.gateway.url(), llm_default_model: settings.models.model, llm_locality: settings.models.local ? "local" : "hosted" });
 
   /** Why a recorded pipeline no longer fits: disabled, other model settings, an "open" bearer on a protected engine, a token near its end. */
   function staleReason(record: PipelineRecord, settings: AppSettings): string | undefined {
@@ -297,66 +299,143 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     }
   }
 
-  /** Create (or re-create) this vault's pipeline. Nothing happens without a model key and a model. */
+  /**
+   * Set up this vault's pipeline, or Update it. A pipeline whose workflow still exists is brought to the template in
+   * place (updateInPlace): the workflow, its id and its runs stay. Without a record, or when the workflow was deleted
+   * in Studio, it is created. Nothing happens without a model key and a model.
+   */
   async function ensure(vaultId: string): Promise<EnsureResult> {
-      const settings = deps.readSettings();
-      const key = keyFor(settings);
-      if (!modelsConfigured(settings) || !key) return { state: "unconfigured" };
-      if (!deps.template) throw new Error("The installed vault package ships no pipeline template (pieces/knowledge-vault/templates/pipeline.json).");
-      const token = await engineToken(); // before anything is created: a refusal costs nothing
-      const records = readPipelines(deps.dataDir);
-      const previous = records[vaultId];
-      if (previous) {
-        // The record goes first: a failure from here on reads "missing", never "ready" for a pipeline that no longer exists.
-        delete records[vaultId];
-        writePipelines(deps.dataDir, records);
-        await discard(previous);
-      }
-      const name = await deps.vaultName(vaultId);
-      const { id: workflowsDriveId } = await deps.workflowsDrive();
-      const tokenRef = await createSecret(token.value, `${name} — engine token`);
-      const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
-      let made: { workflowId: string; connectionId: string } | undefined;
-      try {
-        made = await instantiate({
-          origin: deps.origin,
-          template: deps.template,
-          vaultName: name,
-          driveId: vaultId,
-          workflowsDriveId,
+    const settings = deps.readSettings();
+    const key = keyFor(settings);
+    if (!modelsConfigured(settings) || !key) return { state: "unconfigured" };
+    const template = deps.template;
+    if (!template) throw new Error("The installed vault package ships no pipeline template (pieces/knowledge-vault/templates/pipeline.json).");
+    const token = await engineToken(); // before anything is created: a refusal costs nothing
+    const records = readPipelines(deps.dataDir);
+    const previous = records[vaultId];
+    if (previous && (await workflowStatus(previous.workflowId)) !== null) return updateInPlace(vaultId, previous, template, settings, token);
+    if (previous) {
+      // The workflow was deleted in Studio: what is left of the pipeline goes, and it is made anew.
+      // The record goes first: a failure from here on reads "missing", never "ready" for a pipeline that no longer exists.
+      delete records[vaultId];
+      writePipelines(deps.dataDir, records);
+      await discard(previous);
+    }
+    const name = await deps.vaultName(vaultId);
+    const { id: workflowsDriveId } = await deps.workflowsDrive();
+    const tokenRef = await createSecret(token.value, `${name} — engine token`);
+    const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
+    let made: { workflowId: string; connectionId: string } | undefined;
+    try {
+      made = await instantiate({
+        origin: deps.origin,
+        template,
+        vaultName: name,
+        driveId: vaultId,
+        workflowsDriveId,
+        secretRefs: { token: tokenRef, llm: llmRef },
+        llm: { baseUrl: deps.gateway.url(), model: settings.models.model },
+        pieceVersion: deps.pieceVersion,
+        now,
+        fetchImpl: f,
+      });
+      const { workflowId, connectionId } = made;
+      await updateConnectionModels(connectionId, settings);
+      writePipelines(deps.dataDir, {
+        ...readPipelines(deps.dataDir),
+        [vaultId]: {
+          workflowId,
+          connectionId,
           secretRefs: { token: tokenRef, llm: llmRef },
-          llm: { baseUrl: deps.gateway.url(), model: settings.models.model },
-          pieceVersion: deps.pieceVersion,
-          now,
-          fetchImpl: f,
-        });
-        const { workflowId, connectionId } = made;
-        await updateConnectionModels(connectionId, settings);
-        writePipelines(deps.dataDir, {
-          ...readPipelines(deps.dataDir),
-          [vaultId]: {
-            workflowId,
-            connectionId,
-            secretRefs: { token: tokenRef, llm: llmRef },
-            createdAt: now(),
-            models: { endpoint: settings.models.endpoint, model: settings.models.model },
-            token: { kind: token.kind, expiresAt: token.expiresAt },
-            modelFromConnection: true,
-            templateDigest: templateDigest(deps.template),
-            gatewayKeyed: true,
-          },
-        });
-        await ensureReweave(vaultId);
-        return { state: "ready", workflowId, connectionId };
-      } catch (error) {
-        // A failed instantiatePipeline removed its own documents. Once it has returned they are ours: the
-        // config write or the record can still fail, and nothing would ever point at them again.
-        if (made) for (const id of [made.workflowId, made.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
-        // The two secrets are ours to remove either way.
-        await deleteSecret(tokenRef);
-        await deleteSecret(llmRef);
-        throw error;
+          createdAt: now(),
+          models: { endpoint: settings.models.endpoint, model: settings.models.model },
+          token: { kind: token.kind, expiresAt: token.expiresAt },
+          modelFromConnection: true,
+          templateDigest: templateDigest(template),
+          gatewayKeyed: true,
+        },
+      });
+      await ensureReweave(vaultId);
+      return { state: "ready", workflowId, connectionId };
+    } catch (error) {
+      // A failed instantiatePipeline removed its own documents. Once it has returned they are ours: the
+      // config write or the record can still fail, and nothing would ever point at them again.
+      if (made) for (const id of [made.workflowId, made.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
+      // The two secrets are ours to remove either way.
+      await deleteSecret(tokenRef);
+      await deleteSecret(llmRef);
+      throw error;
+    }
+  }
+
+  /**
+   * Update in place (spec §2): the pipeline keeps its workflow, the workflow's id, its runs and its place in the
+   * Workflows drive. In order:
+   *  1. two new secrets;
+   *  2. the connection kept, or made from the template when it was deleted in Studio;
+   *  3. the workflow brought to the template and published (replaceWorkflowInPlace, which rolls back to the last
+   *     publish on a rejection);
+   *  4. the template replayed onto the kept connection, with the new secret refs and the model settings, in one write;
+   *  5. the record;
+   *  6. the old secrets;
+   *  7. the Reweave notes workflow.
+   * A failure leaves the record as it was, so the chip still offers Update. Processing runs on the published workflow
+   * throughout.
+   */
+  async function updateInPlace(vaultId: string, previous: PipelineRecord, template: PipelineTemplate, settings: AppSettings, token: EngineToken): Promise<EnsureResult> {
+    const name = await deps.vaultName(vaultId);
+    const made: string[] = []; // the secrets made for this Update, until the record holds them
+    let connectionId = previous.connectionId;
+    let newConnection: string | undefined;
+    let restoreRefs: TemplateOp[] | undefined; // set once the kept connection may name the new secrets
+    try {
+      const tokenRef = await createSecret(token.value, `${name} — engine token`);
+      made.push(tokenRef);
+      const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
+      made.push(llmRef);
+      const fill = { origin: deps.origin, template, vaultName: name, driveId: vaultId, secretRefs: { token: tokenRef, llm: llmRef }, llm: { baseUrl: deps.gateway.url(), model: settings.models.model }, pieceVersion: deps.pieceVersion, now, fetchImpl: f };
+      if ((await globalState(connectionId)) === null) {
+        const { id: workflowsDriveId } = await deps.workflowsDrive();
+        newConnection = await createPipelineConnection({ ...fill, workflowsDriveId });
+        connectionId = newConnection;
       }
+      const filled = fillPipeline(fill, connectionId);
+      await replaceWorkflowInPlace({ origin: deps.origin, workflowId: previous.workflowId, operations: filled.workflow, status: "ENABLED", now, fetchImpl: f });
+      if (newConnection) {
+        await updateConnectionModels(newConnection, settings);
+      } else {
+        restoreRefs = fillPipeline({ ...fill, secretRefs: previous.secretRefs }, connectionId).connection.filter((o) => o.type === "SET_SECRET_REF");
+        const ops = filled.connection.map((o) => (o.type === "SET_CONFIG" ? { type: o.type, input: { config: { ...((o.input as { config?: Record<string, unknown> }).config ?? {}), ...modelConfig(settings) } } } : o));
+        await execute(deps.origin, connectionId, toActions(ops, now), f);
+      }
+      // This record now, re-read: what another step wrote meanwhile (the Reweave notes workflow) is kept.
+      const { disabled: _wasDisabled, ...kept } = readPipelines(deps.dataDir)[vaultId] ?? previous;
+      writePipelines(deps.dataDir, {
+        ...readPipelines(deps.dataDir),
+        [vaultId]: {
+          ...kept,
+          workflowId: previous.workflowId,
+          connectionId,
+          secretRefs: { token: tokenRef, llm: llmRef },
+          models: { endpoint: settings.models.endpoint, model: settings.models.model },
+          token: { kind: token.kind, expiresAt: token.expiresAt },
+          modelFromConnection: true,
+          templateDigest: templateDigest(template),
+          gatewayKeyed: true,
+        },
+      });
+    } catch (error) {
+      if (newConnection) await deleteDocument(deps.origin, newConnection, f).catch(() => undefined);
+      // The connection's write may have landed in part: it is pointed back at the record's secrets before the new ones go.
+      const restored = !restoreRefs || (await execute(deps.origin, connectionId, toActions(restoreRefs, now), f).then(() => true, () => false));
+      if (restored) for (const ref of made) await deleteSecret(ref);
+      else console.warn(`[pipelines] the connection of vault ${vaultId} may still name the secrets made for this Update; they are kept`);
+      throw error;
+    }
+    for (const ref of [previous.secretRefs.token, previous.secretRefs.llm]) await deleteSecret(ref);
+    // Switched off by the app (the record was disabled): switched on again, as setting it up again did.
+    await ensureReweave(vaultId, { force: true, enable: previous.disabled !== undefined });
+    return { state: "ready", workflowId: previous.workflowId, connectionId };
   }
 
   /** Point a connection at the model settings: the config is rewritten whole, the other keys kept. */
@@ -376,9 +455,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         input: {
           config: {
             ...config,
-            llm_base_url: deps.gateway.url(),
-            llm_default_model: settings.models.model,
-            llm_locality: settings.models.local ? "local" : "hosted",
+            ...modelConfig(settings),
             ...(llmSecretRef ? { llm_api_key: llmSecretRef } : {}),
           },
         },
@@ -510,9 +587,10 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     },
 
     /**
-     * Settings › Models changed: every pipeline follows. One whose steps defer to the connection gets
-     * its connection's config rewritten in place (runs and history kept); an older one, with the model
-     * baked into its steps, is set up again. Disabled pipelines stay disabled.
+     * Settings › Models changed: every pipeline follows. A pipeline whose steps defer to the connection gets its
+     * connection's config rewritten in place. An older one, with the model baked into its steps or made from another
+     * template, is brought to the template in place by ensure(); it is listed under `recreated`, a name kept for the
+     * control API. Either way its runs and history are kept. Disabled pipelines stay disabled.
      */
     async applyModels(): Promise<{ updated: string[]; recreated: string[] }> {
       const settings = deps.readSettings();
