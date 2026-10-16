@@ -3,6 +3,7 @@ import type { SidecarInfo } from "../sidecar.js";
 import { fetchPipeline, fetchVaults, type PipelineStatus } from "../vaults.js";
 import { ensureAutoPublish, vaultIntake, type IntakeFileView, type IntakeView } from "./vault-intake.js";
 import { CardIcon } from "./CardIcon.js";
+import { isWriting, processingLine } from "./processing-line.js";
 
 export type VaultView = "chat" | "notes" | "graph" | "search" | "sources";
 
@@ -19,20 +20,6 @@ function fileLine(f: IntakeFileView): { text: string; done: boolean; failed: boo
     return { text: p && p.pages ? `Reading page ${Math.min(p.pagesDone + 1, p.pages)} of ${p.pages}…` : "Reading…", done: false, failed: false };
   }
   return { text: "Waiting its turn", done: false, failed: false };
-}
-
-/** What processing is doing now, in a sentence. */
-function processingLine(p: PipelineStatus | null, notes: number): string {
-  if (!p) return "Checking the processing…";
-  if (p.state === "unconfigured") return "Processing is not set up: choose an AI in Settings › Models.";
-  if (p.state === "missing" || p.state === "stale") return "Processing needs setting up for this vault.";
-  if (p.state === "starting") return "Processing starts in a moment.";
-  const run = p.lastRun;
-  const so = notes > 0 ? ` ${notes} note${notes === 1 ? "" : "s"} so far.` : "";
-  if (run?.status === "RUNNING") return `Writing notes from your sources…${so}`;
-  if (run?.status === "FAILED") return `${run.problem?.message ?? "The last processing run failed."}${so}`;
-  if (notes > 0) return `${notes} note${notes === 1 ? "" : "s"} written. More appear as each source is read.`;
-  return "Your sources are queued; the first one starts within a minute.";
 }
 
 /** `afterNotes`: the view shows nothing until processing has written the first notes. */
@@ -122,7 +109,7 @@ export function OverviewStep({
             </ul>
           </>
         )}
-        <p className="kv-onb-processing" data-busy={pipeline?.state === "ready" && pipeline.lastRun?.status === "RUNNING"}>{processingLine(pipeline, notes)}</p>
+        <p className="kv-onb-processing" data-busy={isWriting(pipeline)}>{processingLine(pipeline, notes)}</p>
       </div>
       {notes === 0 && (
         <aside className="kv-onb-callout" aria-label="Before the first notes">
