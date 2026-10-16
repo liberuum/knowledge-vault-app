@@ -68,7 +68,7 @@ export function PipelineChip({ info, vaultId, api = realApi, onModels, onRuns, p
       )}
       {d.action && (
         <button type="button" onClick={act} disabled={busy}>
-          {busy && d.action === "setup" ? "Setting up…" : d.actionLabel}
+          {busy && d.action === "setup" ? (status.state === "stale" ? "Updating…" : "Setting up…") : d.actionLabel}
         </button>
       )}
     </span>

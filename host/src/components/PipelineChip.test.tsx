@@ -45,4 +45,21 @@ describe("PipelineChip", () => {
     expect(await screen.findByText("Processing not set up")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /open in Workflow Studio/ })).toBeNull();
   });
+  it("reads Updating… while an Update runs, and Setting up… while a first setup runs", async () => {
+    let finish: (s: PipelineStatus) => void = () => undefined;
+    const setupPipeline = vi.fn(() => new Promise<PipelineStatus>((resolve) => { finish = resolve; }));
+    const stale: PipelineStatus = { state: "stale", reason: "a newer version of the pipeline is available", workflowId: "wf", connectionId: "c" };
+    render(<PipelineChip info={info} vaultId="v1" api={{ fetchPipeline: vi.fn(async () => stale), setupPipeline }} onModels={() => {}} onRuns={() => {}} pollMs={60_000} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    expect(await screen.findByRole("button", { name: "Updating…" })).toBeTruthy();
+    finish(stale);
+    expect(await screen.findByRole("button", { name: "Update" })).toBeTruthy();
+    cleanup();
+
+    render(<PipelineChip info={info} vaultId="v1" api={{ fetchPipeline: vi.fn(async (): Promise<PipelineStatus> => ({ state: "missing" })), setupPipeline }} onModels={() => {}} onRuns={() => {}} pollMs={60_000} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Set up" }));
+    expect(await screen.findByRole("button", { name: "Setting up…" })).toBeTruthy();
+    finish({ state: "missing" });
+    expect(await screen.findByRole("button", { name: "Set up" })).toBeTruthy();
+  });
 });
