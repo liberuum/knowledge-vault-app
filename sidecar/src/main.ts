@@ -314,6 +314,7 @@ async function main(): Promise<void> {
     workflowsDrive,
     vaultName: async (id) => (await listVaultDrives(origin, engineFetch)).find((v) => v.id === id)?.name ?? "Vault",
     engineProtected: cfg.protected,
+    engineStartedAt: ENGINE_STARTED_AT,
   });
 
   // Starter workflows (the setup guide's side trip): on the vault pipeline's connection, followed when it changes.

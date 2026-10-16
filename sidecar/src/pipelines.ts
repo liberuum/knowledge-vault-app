@@ -34,6 +34,16 @@ export type PipelineRecord = {
   /** The vault's Reweave notes workflow, on this pipeline's connection, and the template digest it was made from. */
   reweave?: { workflowId: string; digest: string };
 };
+/** A failed run whose work still waits (spec §1): which source, when, and what went wrong. */
+export type PipelineFailure = {
+  runId: string;
+  /** The source's title from the run's payload (its id when the title is empty). */
+  source: string;
+  at: string | null;
+  error: string | null;
+  /** What the error means, when the engine can tell (run-problems.ts). */
+  problem?: RunProblem;
+};
 export type PipelineStatus =
   | { state: "unconfigured" }
   | { state: "missing" }
@@ -45,7 +55,14 @@ export type PipelineStatus =
       workflowId: string;
       connectionId: string;
       trigger?: { status: string; lastPollAt: string | null; lastError: string | null };
-      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; /** What the error means, when the engine can tell (run-problems.ts). */ problem?: RunProblem };
+      /** Runs in progress or queued in the runtime that began since this engine came up. */
+      running: number;
+      /** The queue's open tasks (PENDING, IN_PROGRESS, BLOCKED); null when the queue cannot be read. */
+      waiting: number | null;
+      /** Failed runs whose task is still open: newest first, one per task, at most five. */
+      failures: PipelineFailure[];
+      /** The pipeline has run at least once (among its latest runs). */
+      hasRuns: boolean;
     };
 export type EnsureResult = { state: "unconfigured" } | { state: "ready"; workflowId: string; connectionId: string };
 
@@ -85,6 +102,8 @@ export type PipelineManagerDeps = {
   gateway: { url: () => string; key: string };
   /** A protected engine answers only authenticated callers: its pipeline must run as the signed-in user. */
   engineProtected?: boolean;
+  /** When this engine came up: a run recorded as running from before then was cut off with the previous one. */
+  engineStartedAt?: string;
   instantiate?: typeof instantiatePipeline;
   now?: () => string;
 };
@@ -135,6 +154,65 @@ export function workflowDigest(template: WorkflowTemplate): string {
 
 /** The engine answered without its workflow runtime: it boots without one while another holder's lease runs out. */
 export const runtimeMissing = (error: unknown) => /Cannot query field "workflowRuntime"/.test(error instanceof Error ? error.message : String(error));
+
+/** How many of the pipeline's latest runs status() reads, and how many current failures it reports. */
+const RUNS_READ = 20;
+const MAX_FAILURES = 5;
+/** A queue task that still waits for its work (the queue's activeCount counts the same three). */
+const OPEN_TASK = new Set(["PENDING", "IN_PROGRESS", "BLOCKED"]);
+
+/** A run as status() reads it from the runtime. */
+export type RunRow = { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; triggerPayload?: unknown };
+
+/**
+ * A run in progress or queued in the runtime (the watchdog's test). One that began before this engine came up was
+ * cut off with the previous one, however its record reads.
+ */
+export function isLiveRun(run: { status: string; startedAt?: string | null }, engineStartedAt?: string): boolean {
+  return /running|pending|queued/i.test(run.status) && !(engineStartedAt && run.startedAt && run.startedAt < engineStartedAt);
+}
+
+/** The queue task a pipeline run works on, from its trigger's payload (new-pipeline-task.ts); null for a manual or test run. */
+export function runTask(payload: unknown): { taskId: string; source: string } | null {
+  let value = payload;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const p = value as Record<string, unknown>;
+  const taskId = typeof p.task_id === "string" ? p.task_id : "";
+  if (!taskId) return null;
+  const title = typeof p.source_title === "string" ? p.source_title.trim() : "";
+  const sourceId = typeof p.source_id === "string" ? p.source_id : "";
+  return { taskId, source: title || sourceId || "an untitled source" };
+}
+
+/**
+ * The failed runs that may still block work, newest first (the runtime lists runs newest first): a run that names a
+ * task, the newest failure of that task, with no later run of it in progress or succeeded. Whether the task is still
+ * open is checked against the queue afterwards.
+ */
+export function failureCandidates(runs: readonly RunRow[], engineStartedAt?: string): Array<{ taskId: string; failure: PipelineFailure }> {
+  const out: Array<{ taskId: string; failure: PipelineFailure }> = [];
+  const settled = new Set<string>();
+  for (const run of runs) {
+    const task = runTask(run.triggerPayload);
+    if (!task || settled.has(task.taskId)) continue;
+    if (run.status === "SUCCEEDED" || isLiveRun(run, engineStartedAt)) {
+      settled.add(task.taskId);
+      continue;
+    }
+    if (run.status !== "FAILED") continue;
+    settled.add(task.taskId);
+    const problem = classifyRunError(run.error);
+    out.push({ taskId: task.taskId, failure: { runId: run.id, source: task.source, at: run.endedAt ?? run.startedAt, error: run.error, ...(problem ? { problem } : {}) } });
+  }
+  return out;
+}
 
 const ENGINE_TOKEN_SECONDS = 90 * 86_400;
 /** A token this close to its end reads as stale, so the user updates before runs start failing. */
@@ -195,6 +273,44 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   // A model on this computer needs no key; its connection gets a placeholder the server ignores.
   const modelsConfigured = (settings: AppSettings) => (settings.models.hasKey || settings.models.local) && settings.models.model.trim().length > 0;
   const keyFor = (settings: AppSettings) => (settings.models.local ? LOCAL_PLACEHOLDER_KEY : deps.readModelKey());
+
+  // The vault's queue, found once in its drive (as the watchdog finds it) and remembered; read with typed queries
+  // for one field each, never the whole queue.
+  const queueIds = new Map<string, string>();
+  async function queueIdOf(vaultId: string): Promise<string | undefined> {
+    const known = queueIds.get(vaultId);
+    if (known) return known;
+    const drive = await gql<{ document: { document: { state: { global: { nodes?: Array<{ id: string; documentType?: string | null }> } } } } }>(
+      deps.origin,
+      `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+      { id: vaultId },
+      f,
+    );
+    const id = drive.document.document.state.global.nodes?.find((n) => n.documentType === "bai/pipeline-queue")?.id;
+    if (id) queueIds.set(vaultId, id);
+    return id;
+  }
+  type QueueRead<T> = { PipelineQueue: { document: { document: { state: { global: T } } } | null } };
+  async function activeCount(queueId: string): Promise<number> {
+    const data = await gql<QueueRead<{ activeCount: number }>>(
+      deps.origin,
+      `query($id: String!) { PipelineQueue { document(idOrSlug: $id) { document { state { global { activeCount } } } } } }`,
+      { id: queueId },
+      f,
+    );
+    if (!data.PipelineQueue.document) throw new Error(`the queue ${queueId} is gone`);
+    return data.PipelineQueue.document.document.state.global.activeCount;
+  }
+  async function openTaskIds(queueId: string): Promise<Set<string>> {
+    const data = await gql<QueueRead<{ tasks: Array<{ id: string; status: string }> }>>(
+      deps.origin,
+      `query($id: String!) { PipelineQueue { document(idOrSlug: $id) { document { state { global { tasks { id status } } } } } } }`,
+      { id: queueId },
+      f,
+    );
+    if (!data.PipelineQueue.document) throw new Error(`the queue ${queueId} is gone`);
+    return new Set(data.PipelineQueue.document.document.state.global.tasks.filter((t) => OPEN_TASK.has(t.status)).map((t) => t.id));
+  }
   /** What a pipeline's connection says about its model: this launch's gateway, the model, and where it runs. */
   const modelConfig = (settings: AppSettings) => ({ llm_base_url: deps.gateway.url(), llm_default_model: settings.models.model, llm_locality: settings.models.local ? "local" : "hosted" });
 
@@ -652,8 +768,10 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     },
 
     /**
-     * This vault's pipeline as the runtime sees it: its trigger (filtered to its workflow) and its
-     * last run — or `stale` with the reason when what it was set up with no longer holds.
+     * This vault's pipeline as the runtime sees it, or `stale` with the reason when what it was set up with no longer
+     * holds. Spec §1: the work, not the last run. `running` counts the runs going now, `waiting` counts the queue's open
+     * tasks, and `failures` lists the failed runs whose task is still open. A failure stops counting once its task is
+     * done or dropped, or once a later run of it is going or has succeeded.
      */
     async status(vaultId: string): Promise<PipelineStatus> {
       const settings = deps.readSettings();
@@ -665,13 +783,13 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       let data: {
         workflowRuntime: {
           triggerStates: Array<{ workflowId: string; status: string; lastPollAt: string | null; lastError: string | null }>;
-          runsPage: { items: Array<{ id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null }> };
+          runsPage: { items: RunRow[] };
         };
       };
       try {
         data = await gql(
           deps.origin,
-          `query($w: String!) { workflowRuntime { triggerStates { workflowId status lastPollAt lastError } runsPage(workflowId: $w, paging: { limit: 1 }) { items { id status startedAt endedAt error } } } }`,
+          `query($w: String!) { workflowRuntime { triggerStates { workflowId status lastPollAt lastError } runsPage(workflowId: $w, paging: { limit: ${RUNS_READ} }) { items { id status startedAt endedAt error triggerPayload } } } }`,
           { w: record.workflowId },
           f,
         );
@@ -680,13 +798,30 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         throw error;
       }
       const trigger = data.workflowRuntime.triggerStates.find((t) => t.workflowId === record.workflowId);
-      const run = data.workflowRuntime.runsPage.items[0];
+      const runs = data.workflowRuntime.runsPage.items;
+      const running = runs.filter((r) => isLiveRun(r, deps.engineStartedAt)).length;
+      const queueId = await queueIdOf(vaultId).catch(() => undefined);
+      const waiting = queueId
+        ? await activeCount(queueId).catch(() => {
+            queueIds.delete(vaultId); // found again on the next read, in case the queue was replaced
+            return null;
+          })
+        : null;
+      let candidates = failureCandidates(runs, deps.engineStartedAt);
+      // Only now are the tasks read, and only when a failure could still count. A queue that cannot be read keeps them.
+      if (candidates.length && queueId) {
+        const open = await openTaskIds(queueId).catch(() => null);
+        if (open) candidates = candidates.filter((c) => open.has(c.taskId));
+      }
       return {
         state: "ready",
         workflowId: record.workflowId,
         connectionId: record.connectionId,
         ...(trigger ? { trigger: { status: trigger.status, lastPollAt: trigger.lastPollAt, lastError: trigger.lastError } } : {}),
-        ...(run ? { lastRun: { id: run.id, status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, error: run.error, problem: classifyRunError(run.error) ?? undefined } } : {}),
+        running,
+        waiting,
+        failures: candidates.slice(0, MAX_FAILURES).map((c) => c.failure),
+        hasRuns: runs.length > 0,
       };
     },
 

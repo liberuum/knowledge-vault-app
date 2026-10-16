@@ -336,7 +336,7 @@ describe("pipeline manager — Update in place", () => {
 });
 
 describe("pipeline manager — status and removal", () => {
-  it("is unconfigured without a key, missing without a record, and otherwise this vault's trigger and last run only", async () => {
+  it("is unconfigured without a key, missing without a record, and otherwise this vault's trigger and its work only", async () => {
     const none = deps({ hasKey: false });
     expect(await none.manager.status("vault1")).toEqual({ state: "unconfigured" });
     const fresh = deps();
@@ -348,12 +348,16 @@ describe("pipeline manager — status and removal", () => {
       vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "s1", llm: "s2" }, createdAt: "x", models, token, templateDigest: templateDigest(template) },
       vault2: { workflowId: "wf-other", connectionId: "conn-2", secretRefs: { token: "s3", llm: "s4" }, createdAt: "x", models, token, templateDigest: templateDigest(template) },
     });
+    // The fake's run failed with no task in its payload (a test run): it is not a current failure. Its drive has no queue: waiting is unknown.
     expect(await two.manager.status("vault1")).toEqual({
       state: "ready",
       workflowId: "wf-1",
       connectionId: "conn-1",
       trigger: { status: "ENABLED", lastPollAt: "2026-10-07T10:00:00.000Z", lastError: null },
-      lastRun: { id: "run-wf-1", status: "FAILED", startedAt: "2026-10-07T09:59:00.000Z", endedAt: "2026-10-07T09:59:30.000Z", error: "no model here" },
+      running: 0,
+      waiting: null,
+      failures: [],
+      hasRuns: true,
     });
     expect((await two.manager.status("vault2")).state === "ready" && (await two.manager.status("vault2") as { trigger?: { status: string } }).trigger?.status).toBe("DISABLED");
   });
@@ -365,6 +369,122 @@ describe("pipeline manager — status and removal", () => {
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).length).toBe(2);
     expect(readPipelines(dataDir)).toEqual({});
     await manager.remove("nobody"); // no throw
+  });
+});
+
+describe("pipeline manager — status reads the work, not the last run", () => {
+  type Run = { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; triggerPayload?: unknown };
+  const ENGINE_UP = "2026-10-07T09:00:00.000Z";
+  /** A pipeline run as the runtime lists it; `task` gives it the trigger's payload (the queue task and its source). */
+  const run = (id: string, status: string, task?: string, over: Partial<Run> = {}): Run => ({
+    id,
+    status,
+    startedAt: "2026-10-07T09:50:00.000Z",
+    endedAt: status === "FAILED" || status === "SUCCEEDED" ? "2026-10-07T09:55:00.000Z" : null,
+    error: status === "FAILED" ? "boom" : null,
+    ...(task ? { triggerPayload: { task_id: task, source_id: `src-${task}`, source_title: `Source ${task}`, phase: "extract", queued_at: null } } : {}),
+    ...over,
+  });
+  /** The engine as status() reads it: the runs, the vault's drive (to find its queue), and the queue's typed reads. */
+  function workEngine(opts: { runs: Run[]; activeCount?: number; tasks?: Array<{ id: string; status: string }>; queueUnreadable?: boolean; noQueue?: boolean }) {
+    const queries: string[] = [];
+    const answer = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
+    const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
+      const q = (JSON.parse(String(init?.body)) as Call).query;
+      queries.push(q);
+      if (q.includes("triggerStates")) return answer({ workflowRuntime: { triggerStates: [{ workflowId: "wf-1", status: "ENABLED", lastPollAt: null, lastError: null }], runsPage: { items: opts.runs } } });
+      if (q.includes("PipelineQueue")) {
+        if (opts.queueUnreadable) return { ok: true, json: async () => ({ errors: [{ message: "Document queue-1 not found" }] }) };
+        const global = q.includes("activeCount") ? { activeCount: opts.activeCount ?? 0 } : { tasks: opts.tasks ?? [] };
+        return answer({ PipelineQueue: { document: { document: { state: { global } } } } });
+      }
+      if (q.includes("document { state }")) {
+        const nodes = opts.noQueue ? [] : [{ id: "queue-1", documentType: "bai/pipeline-queue" }, { id: "src-t1", documentType: "bai/source" }];
+        return answer({ document: { document: { state: { global: { nodes } } } } });
+      }
+      throw new Error(`unexpected query: ${q}`);
+    }) as unknown as typeof fetch;
+    return { fetchImpl, queries };
+  }
+  function setUp(opts: Parameters<typeof workEngine>[0]) {
+    const engine = workEngine(opts);
+    const h = deps({ fetchImpl: engine.fetchImpl, engineStartedAt: ENGINE_UP });
+    writePipelines(h.dataDir, {
+      vault1: { workflowId: "wf-1", connectionId: "conn-1", secretRefs: { token: "s1", llm: "s2" }, createdAt: "x", models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" }, templateDigest: templateDigest(template) },
+    });
+    return { ...h, queries: engine.queries };
+  }
+
+  it("counts the runs in progress or queued in this engine, and the queue's open tasks with a typed read", async () => {
+    const { manager, queries } = setUp({
+      runs: [run("r4", "RUNNING", "t4"), run("r3", "PENDING", "t3"), run("r2", "RUNNING", "t2", { startedAt: "2026-10-07T08:00:00.000Z" }), run("r1", "SUCCEEDED", "t1")],
+      activeCount: 869,
+    });
+    expect(await manager.status("vault1")).toEqual({
+      state: "ready",
+      workflowId: "wf-1",
+      connectionId: "conn-1",
+      trigger: { status: "ENABLED", lastPollAt: null, lastError: null },
+      running: 2, // r2 began before this engine came up: it was cut off with the previous one
+      waiting: 869,
+      failures: [],
+      hasRuns: true,
+    });
+    expect(queries.some((q) => q.includes("runsPage(workflowId: $w, paging: { limit: 20 })") && q.includes("triggerPayload"))).toBe(true);
+    expect(queries.some((q) => q.includes("PipelineQueue { document(idOrSlug: $id) { document { state { global { activeCount } } } } }"))).toBe(true);
+    expect(queries.some((q) => q.includes("tasks"))).toBe(false); // no failed run: the tasks are never read
+  });
+
+  it("a failed run counts while its task is still open: once per task, never after a later run of it, never without a task", async () => {
+    const credit = "The model provider refused to ask openai/gpt-6-luna (402): insufficient credits";
+    const { manager } = setUp({
+      runs: [
+        run("r6", "RUNNING", "t6"),
+        run("s3", "SUCCEEDED", "t3"),
+        run("f1-new", "FAILED", "t1", { error: credit }),
+        run("manual", "FAILED"), // a test run from Workflow Studio carries no task
+        run("f6", "FAILED", "t6"), // t6 is running again now
+        run("f2", "FAILED", "t2"), // t2 is done
+        run("f3", "FAILED", "t3"), // a later run of t3 succeeded
+        run("f1-old", "FAILED", "t1"), // t1 counts once, as its newest failure
+        run("f4", "FAILED", "t4", { startedAt: "2026-10-07T09:40:00.000Z", endedAt: null }),
+      ],
+      activeCount: 4,
+      tasks: [
+        { id: "t1", status: "IN_PROGRESS" },
+        { id: "t2", status: "DONE" },
+        { id: "t3", status: "PENDING" },
+        { id: "t4", status: "BLOCKED" },
+        { id: "t6", status: "IN_PROGRESS" },
+      ],
+    });
+    const status = await manager.status("vault1");
+    expect(status).toMatchObject({ state: "ready", running: 1, waiting: 4, hasRuns: true });
+    expect(status.state === "ready" && status.failures).toEqual([
+      { runId: "f1-new", source: "Source t1", at: "2026-10-07T09:55:00.000Z", error: credit, problem: { kind: "no-funds", message: "Your model provider refused the request: the account is out of credit.", model: "openai/gpt-6-luna" } },
+      { runId: "f4", source: "Source t4", at: "2026-10-07T09:40:00.000Z", error: "boom" },
+    ]);
+  });
+
+  it("keeps the five newest current failures", async () => {
+    const ids = ["t1", "t2", "t3", "t4", "t5", "t6", "t7"];
+    const { manager } = setUp({ runs: ids.map((t) => run(`f-${t}`, "FAILED", t)), activeCount: 7, tasks: ids.map((id) => ({ id, status: "PENDING" })) });
+    const status = await manager.status("vault1");
+    expect(status.state === "ready" && status.failures.map((f) => f.runId)).toEqual(["f-t1", "f-t2", "f-t3", "f-t4", "f-t5"]);
+  });
+
+  it("reads waiting as unknown when the queue cannot be read, and then keeps the failures it cannot check", async () => {
+    const unreadable = setUp({ runs: [run("f1", "FAILED", "t1")], queueUnreadable: true });
+    expect(await unreadable.manager.status("vault1")).toMatchObject({ waiting: null, failures: [{ runId: "f1", source: "Source t1" }] });
+    const none = setUp({ runs: [], noQueue: true });
+    expect(await none.manager.status("vault1")).toMatchObject({ running: 0, waiting: null, failures: [], hasRuns: false });
+  });
+
+  it("finds the vault's queue once and remembers it", async () => {
+    const { manager, queries } = setUp({ runs: [], activeCount: 0 });
+    expect(await manager.status("vault1")).toMatchObject({ waiting: 0, hasRuns: false });
+    await manager.status("vault1");
+    expect(queries.filter((q) => q.includes("document { state }")).length).toBe(1);
   });
 });
 
