@@ -1,4 +1,4 @@
-import { createDocument, deleteDocument, execute, toActions } from "./reactor-gql.js";
+import { createDocument, deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
 
 /**
  * The pipeline template (spec §4.5, §7.5): the vault package ships the
@@ -56,17 +56,17 @@ export type InstantiateOptions = {
   fetchImpl?: typeof fetch;
 };
 
+/** What fillPipeline needs: everything instantiatePipeline takes except where the documents go and how to reach the engine. */
+export type PipelineFillOptions = Omit<InstantiateOptions, "workflowsDriveId" | "fetchImpl">;
+
 /**
- * Create the connection, then the workflow, in the Workflows drive, replaying
- * each document's operations with the placeholders filled. Validated against
- * the template first — an unknown placeholder aborts before anything is
- * created — and rolled back (both documents deleted) when the reactor rejects
- * an operation.
+ * The template's connection and workflow operations, filled for this vault and one connection. The connection carries
+ * the model (llm_default_model). The steps leave theirs empty so the piece falls back to it (runner.ts), which makes a
+ * model change in Settings one config write, not a new workflow. Throws on a placeholder it does not know.
  */
-export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ workflowId: string; connectionId: string }> {
-  const f = opts.fetchImpl ?? fetch;
+export function fillPipeline(opts: PipelineFillOptions, connectionId: string): { connection: TemplateOp[]; workflow: TemplateOp[] } {
   const now = opts.now ?? (() => new Date().toISOString());
-  const valuesWith = (connectionId: string): PlaceholderValues => ({
+  const values: PlaceholderValues = {
     "{{DRIVE_ID}}": opts.driveId,
     "{{CONNECTION_ID}}": connectionId,
     "{{SWITCHBOARD_ORIGIN}}": opts.origin,
@@ -78,27 +78,49 @@ export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ w
     "{{WORKFLOW_NAME}}": `${opts.vaultName} — Vault pipeline`,
     "{{CONNECTION_NAME}}": `${opts.vaultName} — Knowledge Vault`,
     "{{NOW}}": now(),
-  });
-  // Every placeholder the template uses must be one we fill — checked before the reactor is touched.
-  const probe = valuesWith("probe");
-  for (const op of [...opts.template.connection.operations, ...opts.template.workflow.operations]) fillPlaceholders(op.input, probe);
+  };
+  const stepValues: PlaceholderValues = { ...values, "{{LLM_MODEL}}": "" };
+  const fill = (ops: TemplateOp[], v: PlaceholderValues) => ops.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, v) }));
+  return { connection: fill(opts.template.connection.operations, values), workflow: fill(opts.template.workflow.operations, stepValues) };
+}
 
-  const created: string[] = [];
+/**
+ * Create the pipeline's connection in the Workflows drive and replay its operations. Used at setup, and by an Update
+ * whose connection was deleted in Studio. Every placeholder is checked before the reactor is touched; a rejected
+ * operation deletes the connection again.
+ */
+export async function createPipelineConnection(opts: InstantiateOptions): Promise<string> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => new Date().toISOString());
+  fillPipeline(opts, "probe");
+  const connectionId = await createDocument(opts.origin, opts.template.connection.documentType, `${opts.vaultName} — Knowledge Vault`, opts.workflowsDriveId, f);
   try {
-    const connectionId = await createDocument(opts.origin, opts.template.connection.documentType, `${opts.vaultName} — Knowledge Vault`, opts.workflowsDriveId, f);
-    created.push(connectionId);
-    const values = valuesWith(connectionId);
-    // The connection carries the model (llm_default_model); the steps leave theirs empty so the piece
-    // falls back to it (runner.ts) — a model change in Settings is then one config write, not a new workflow.
-    const stepValues: PlaceholderValues = { ...values, "{{LLM_MODEL}}": "" };
-    const fill = (ops: TemplateOp[], v: PlaceholderValues) => toActions(ops.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, v) })), now);
-    await execute(opts.origin, connectionId, fill(opts.template.connection.operations, values), f);
-    const workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, `${opts.vaultName} — Vault pipeline`, opts.workflowsDriveId, f);
-    created.push(workflowId);
-    await execute(opts.origin, workflowId, fill(opts.template.workflow.operations, stepValues), f);
+    await execute(opts.origin, connectionId, toActions(fillPipeline(opts, connectionId).connection, now), f);
+    return connectionId;
+  } catch (error) {
+    await deleteDocument(opts.origin, connectionId, f).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Create the connection, then the workflow, in the Workflows drive, replaying each document's operations with the
+ * placeholders filled. The template is validated first: an unknown placeholder aborts before anything is created.
+ * When the reactor rejects an operation, both documents are deleted.
+ */
+export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ workflowId: string; connectionId: string }> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => new Date().toISOString());
+  // Every placeholder the template uses must be one we fill — checked before the reactor is touched.
+  fillPipeline(opts, "probe");
+  const connectionId = await createPipelineConnection(opts);
+  let workflowId: string | undefined;
+  try {
+    workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, `${opts.vaultName} — Vault pipeline`, opts.workflowsDriveId, f);
+    await execute(opts.origin, workflowId, toActions(fillPipeline(opts, connectionId).workflow, now), f);
     return { workflowId, connectionId };
   } catch (error) {
-    for (const id of created) await deleteDocument(opts.origin, id, f).catch(() => undefined);
+    for (const id of [connectionId, ...(workflowId ? [workflowId] : [])]) await deleteDocument(opts.origin, id, f).catch(() => undefined);
     throw error;
   }
 }
@@ -127,13 +149,11 @@ export type InstantiateWorkflowOptions = {
   fetchImpl?: typeof fetch;
 };
 
-/**
- * Create one workflow in the Workflows drive and replay its operations on an existing connection. Its steps
- * leave the model empty, so the connection's applies. A placeholder this cannot fill (a secret, a base URL)
- * aborts before anything is created; a rejected operation deletes the workflow again.
- */
-export async function instantiateWorkflow(opts: InstantiateWorkflowOptions): Promise<{ workflowId: string }> {
-  const f = opts.fetchImpl ?? fetch;
+/** What fillWorkflow needs: everything instantiateWorkflow takes except the engine and the Workflows drive. */
+export type WorkflowFillOptions = Omit<InstantiateWorkflowOptions, "origin" | "workflowsDriveId" | "fetchImpl">;
+
+/** A workflow template's operations, filled for one vault and connection. The steps leave the model to the connection. */
+export function fillWorkflow(opts: WorkflowFillOptions): TemplateOp[] {
   const now = opts.now ?? (() => new Date().toISOString());
   const values: Partial<PlaceholderValues> = {
     "{{DRIVE_ID}}": opts.driveId,
@@ -143,13 +163,76 @@ export async function instantiateWorkflow(opts: InstantiateWorkflowOptions): Pro
     "{{WORKFLOW_NAME}}": opts.name,
     "{{NOW}}": now(),
   };
-  const actions = toActions(opts.template.workflow.operations.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, values) })), now);
+  return opts.template.workflow.operations.map((o) => ({ type: o.type, input: fillPlaceholders(o.input, values) }));
+}
+
+/**
+ * Create one workflow in the Workflows drive and replay its operations on an existing connection. Its steps leave the
+ * model empty, so the connection's model applies. A placeholder this cannot fill (a secret, a base URL) aborts before
+ * anything is created; a rejected operation deletes the workflow again.
+ */
+export async function instantiateWorkflow(opts: InstantiateWorkflowOptions): Promise<{ workflowId: string }> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => new Date().toISOString());
+  const actions = toActions(fillWorkflow(opts), now);
   const workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, opts.name, opts.workflowsDriveId, f);
   try {
     await execute(opts.origin, workflowId, actions, f);
     return { workflowId };
   } catch (error) {
     await deleteDocument(opts.origin, workflowId, f).catch(() => undefined);
+    throw error;
+  }
+}
+
+export type ReplaceWorkflowOptions = {
+  origin: string;
+  workflowId: string;
+  /** The template's operations, already filled (fillPipeline / fillWorkflow). */
+  operations: TemplateOp[];
+  /** What the workflow is switched to once published. */
+  status: "ENABLED" | "DISABLED";
+  now?: () => string;
+  fetchImpl?: typeof fetch;
+};
+
+/** Template operations that publish or switch a workflow. Update sends them once, after every edit was accepted. */
+const PUBLISHING = new Set(["PUBLISH_WORKFLOW", "SET_WORKFLOW_STATUS"]);
+
+/**
+ * Bring an existing workflow to a template in place (spec §2, Update). The workflow keeps its id, its runs and its
+ * place in the Workflows drive.
+ *
+ * Every current edge is removed, then every step. Edges go first because REMOVE_STEP drops a step's edges and
+ * REMOVE_EDGE refuses an edge that is gone. The template's edits are then replayed. Its step and edge ids are fixed,
+ * so the same ids come back. Only then is the workflow published and switched to `status`.
+ *
+ * The reactor applies a batch past a rejected operation, so publishing waits for a batch in which every edit was
+ * accepted. A rejection, or any failure before the publish lands, sends REVERT_TO_PUBLISHED. That puts the trigger,
+ * steps, edges, variables and policy back as last published. The runtime runs the published workflow, so processing
+ * never sees a half-made one.
+ */
+export async function replaceWorkflowInPlace(opts: ReplaceWorkflowOptions): Promise<void> {
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? (() => new Date().toISOString());
+  const data = await gql<{ document: { document: { state: { global: { steps?: Array<{ id: string }>; edges?: Array<{ id: string }> } } } | null } | null }>(
+    opts.origin,
+    `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+    { id: opts.workflowId },
+    f,
+  );
+  const global = data.document?.document?.state.global;
+  if (!global) throw new Error(`Workflow ${opts.workflowId} no longer exists`);
+  const edits: TemplateOp[] = [
+    ...(global.edges ?? []).map((e) => ({ type: "REMOVE_EDGE", input: { id: e.id } })),
+    ...(global.steps ?? []).map((s) => ({ type: "REMOVE_STEP", input: { id: s.id } })),
+    ...opts.operations.filter((o) => !PUBLISHING.has(o.type)),
+  ];
+  try {
+    await execute(opts.origin, opts.workflowId, toActions(edits, now), f);
+    await execute(opts.origin, opts.workflowId, toActions([{ type: "PUBLISH_WORKFLOW", input: { publishedAt: now() } }, { type: "SET_WORKFLOW_STATUS", input: { status: opts.status } }], now), f);
+  } catch (error) {
+    await execute(opts.origin, opts.workflowId, toActions([{ type: "REVERT_TO_PUBLISHED", input: {} }], now), f).catch(() => undefined);
     throw error;
   }
 }
