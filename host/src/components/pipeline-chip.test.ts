@@ -13,6 +13,7 @@ describe("describePipeline — the user's word is processing", () => {
     expect(describePipeline({ state: "stale", reason: "the model settings changed", workflowId: "wf", connectionId: "c" })).toEqual({ label: "Processing needs an update", tone: "action", action: "setup", actionLabel: "Update" });
     expect(describePipeline(ready())).toEqual({ label: "Processing ready", tone: "ok" });
     expect(describePipeline(ready({ lastRun: { id: "r", status: "RUNNING", startedAt: null, endedAt: null, error: null } }))).toEqual({ label: "Processing…", tone: "busy" });
+    expect(describePipeline(ready({ lastRun: { id: "r", status: "PENDING", startedAt: null, endedAt: null, error: null } }))).toEqual({ label: "Processing: waiting its turn…", tone: "busy" });
     expect(describePipeline(ready({ lastRun: { id: "r", status: "SUCCEEDED", startedAt: null, endedAt: null, error: null } }))).toEqual({ label: "Processing up to date", tone: "ok" });
     expect(describePipeline(ready({ lastRun: { id: "r", status: "FAILED", startedAt: null, endedAt: null, error: "no model" } }))).toEqual({ label: "Last processing run failed", tone: "warn", action: "runs", actionLabel: "See runs" });
     expect(describePipeline(ready({ trigger: { status: "DISABLED", lastPollAt: null, lastError: null } }))).toEqual({ label: "Processing paused", tone: "quiet", action: "runs", actionLabel: "See runs" });

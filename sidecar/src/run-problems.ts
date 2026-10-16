@@ -18,6 +18,10 @@ export function classifyRunError(error: string | null | undefined): RunProblem |
   if (/reactor stopped before the run finished/i.test(error)) return { kind: "interrupted", message: "The app was closed while this source was being processed; it is processed again on its own." };
   // The engine stopping mid-step (the app closed or restarted) kills the piece's worker; the watchdog queues the source again.
   if (/piece worker exited unexpectedly \(code=null, signal=SIGKILL\)/i.test(error)) return { kind: "interrupted", message: "Processing was cut off before it finished (the app closed or restarted); the source is processed again on its own." };
+  // Powerhouse 6.2.3-dev.56 on: a queued run the engine stopped before at three boots, or one whose payload the
+  // journal could not keep across a restart. Its task is still waiting, and the trigger picks it up again.
+  if (/was admitted at \d+ boots and the reactor stopped each time/i.test(error) || /trigger payload was .{1,40} by the journal and cannot be run after a restart/i.test(error))
+    return { kind: "interrupted", message: "The app was closed before this source could be processed; it is processed again on its own." };
   if (/reactor stopped before the matched trigger started its run/i.test(error)) return { kind: "interrupted", message: "The app was closed just as this source was about to be processed; it is processed again on its own." };
   // The workflow's own time limit (its policy's runTimeoutSeconds), not the model's: checked before the timeouts below.
   if (/exceeded its runTimeoutSeconds/i.test(error)) return { kind: "deadline", message: "The run took longer than the pipeline's time limit (set in Workflow Studio) and was stopped." };

@@ -32,3 +32,10 @@ describe("classifyRunError", () => {
     expect(classifyRunError("Run exceeded its runTimeoutSeconds and was cancelled")?.kind).toBe("deadline");
   });
 });
+
+describe("run errors from the queued-run journal (Powerhouse 6.2.3-dev.56 on)", () => {
+  it("reads a run abandoned at boot, or one whose payload could not survive a restart, as interrupted", () => {
+    expect(classifyRunError("This run was admitted at 3 boots and the reactor stopped each time before it started, so it is no longer admitted on boot. Fix the cause, then rerun it to fire the workflow again")?.kind).toBe("interrupted");
+    expect(classifyRunError("The trigger payload was redacted by the journal and cannot be run after a restart; fire the workflow again")?.kind).toBe("interrupted");
+  });
+});

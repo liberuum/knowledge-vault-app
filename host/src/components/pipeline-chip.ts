@@ -21,6 +21,8 @@ export function describePipeline(status: PipelineStatus): ChipDescription {
   if (status.trigger && status.trigger.status !== "ENABLED") return { label: "Processing paused", tone: "quiet", action: "runs", actionLabel: "See runs" };
   const run = status.lastRun;
   if (run?.status === "RUNNING") return { label: "Processing…", tone: "busy" };
+  // Queued in the runtime (since Powerhouse 6.2.3-dev.56 it holds runs while the engine is busy, and keeps them across a restart).
+  if (run?.status === "PENDING") return { label: "Processing: waiting its turn…", tone: "busy" };
   if (run?.status === "FAILED" && run.problem?.kind === "interrupted") return { label: "Processing was interrupted when the app closed — it resumes on its own", tone: "quiet", action: "runs", actionLabel: "See runs" };
   if (run?.status === "FAILED") {
     // The error in plain words when the engine can tell what it means; the action stays the runs.
