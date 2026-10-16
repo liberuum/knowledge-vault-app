@@ -4,7 +4,7 @@ import { fillConnection, KNOWLEDGE_VAULT_CONNECTOR, type FillDeps } from "./conn
 type State = { name?: string; connectorId: string | null; config: Record<string, unknown> | null; secretRefs: { id: string; ref: string; name: string }[] };
 
 function engine(state: State) {
-  const executed: { type: string; input: Record<string, unknown> }[] = [];
+  const executed: { id: string; type: string; input: Record<string, unknown> }[] = [];
   const created: string[] = [];
   const deleted: string[] = [];
   const fetchImpl = (async (_url: string, init: { body: string }) => {
@@ -17,10 +17,10 @@ function engine(state: State) {
       deleted.push(String(variables.ref));
       data = { workflowRuntime: { deleteSecret: true } };
     } else if (query.includes("execute(")) {
-      executed.push(...(variables.a as { type: string; input: Record<string, unknown> }[]));
+      executed.push(...(variables.a as { id: string; type: string; input: Record<string, unknown> }[]));
       data = { execute: { id: "c1" } };
     } else if (query.includes("operations(")) {
-      data = { document: { document: { operations: { items: executed.map((a, index) => ({ index, error: null, action: { type: a.type } })), hasNextPage: false } } } };
+      data = { document: { document: { operations: { items: executed.map((a, index) => ({ index, error: null, action: { id: a.id, type: a.type } })), hasNextPage: false } } } };
     } else if (query.includes("document(")) {
       data = { document: { document: { name: state.name ?? "Connection 1", state: { global: state } } } };
     }

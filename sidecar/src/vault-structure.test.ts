@@ -6,7 +6,7 @@ type Node = { id: string; kind: string; name: string; parentFolder?: string | nu
 /** A drive on a fake reactor: execute applies ADD_FOLDER, createDocument adds a file at the root, moveNode moves it. */
 function fakeReactor(initial: Node[] = []) {
   const nodes: Node[] = [...initial];
-  const ops: Array<{ index: number; error: null; action: { type: string } }> = [];
+  const ops: Array<{ index: number; error: null; action: { id: string; type: string } }> = [];
   const calls: string[] = [];
   const fetchImpl = (async (_url: string, init: RequestInit) => {
     const { query, variables } = JSON.parse(String(init.body)) as { query: string; variables: Record<string, any> };
@@ -15,7 +15,7 @@ function fakeReactor(initial: Node[] = []) {
       for (const a of variables.a) {
         calls.push(`${a.type} ${a.input.name}`);
         nodes.push({ id: a.input.id, kind: "folder", name: a.input.name, parentFolder: a.input.parentFolder });
-        ops.push({ index: ops.length, error: null, action: { type: a.type } });
+        ops.push({ index: ops.length, error: null, action: { id: a.id, type: a.type } });
       }
       return reply({ execute: { id: "drive" } });
     }

@@ -42,29 +42,38 @@ export function toActions(ops: ReadonlyArray<{ type: string; input: unknown }>, 
   return ops.map((o) => ({ id: randomUUID(), type: o.type, timestampUtcMs: now(), input: o.input, scope: "global" }));
 }
 
-type OperationItem = { index: number; error: string | null; action: { type: string } };
+type OperationItem = { index: number; error: string | null; action: { id: string; type: string } };
 
 /**
- * Replay a batch. `execute` answers with the document, not with per-operation
- * results, and a reducer that rejects an action still records the operation —
- * with its `error` — so the new global operations are read back and checked:
- * the batch is the tail of the document's global history.
+ * Replay a batch. `execute` answers with the document, not with per-operation results. A reducer that rejects an
+ * action still records the operation, with its `error`, and the rest of the batch still applies. So the document's
+ * global revision is read first; only the operations written from it on are read back, and each is matched to the
+ * batch by action id. Two things can then never hide a rejection: a long history (a workflow updated in place many
+ * times) pushing the batch past the page, and an operation another writer adds meanwhile (the runtime records each
+ * run on its workflow) being taken for one of ours.
  */
 export async function execute(origin: string, documentId: string, actions: ActionInput[], fetchImpl: typeof fetch = fetch): Promise<void> {
   if (actions.length === 0) return;
-  await gql(origin, `mutation($id: String!, $a: [ActionInput!]!) { execute(documentIdOrSlug: $id, actions: $a) { id } }`, { id: documentId, a: actions }, fetchImpl);
-  const data = await gql<{ document: { document: { operations: { items: OperationItem[] } } } }>(
+  const head = await gql<{ document: { document: { revisionsList?: Array<{ scope: string; revision: number }> } | null } | null }>(
     origin,
-    // The global scope only: a fresh document also holds CREATE_DOCUMENT / UPGRADE_DOCUMENT in the
-    // `document` scope with their own indexes, which would otherwise interleave with the batch.
-    `query($id: String!) { document(idOrSlug: $id) { document { operations(filter: { scopes: ["global"] }, paging: { limit: 500 }) { items { index error action { type } } hasNextPage cursor } } } }`,
+    `query($id: String!) { document(idOrSlug: $id) { document { revisionsList { scope revision } } } }`,
     { id: documentId },
     fetchImpl,
   );
-  const items = [...data.document.document.operations.items].sort((a, b) => a.index - b.index);
-  const tail = items.slice(-actions.length);
-  if (tail.length !== actions.length) throw new Error(`Expected ${actions.length} new operations on ${documentId}, found ${tail.length}`);
-  const rejected = tail.map((op, i) => ({ op, action: actions[i]! })).find(({ op }) => op.error);
+  const since = head.document?.document?.revisionsList?.find((r) => r.scope === "global")?.revision ?? 0;
+  await gql(origin, `mutation($id: String!, $a: [ActionInput!]!) { execute(documentIdOrSlug: $id, actions: $a) { id } }`, { id: documentId, a: actions }, fetchImpl);
+  const data = await gql<{ document: { document: { operations: { items: OperationItem[] } } } }>(
+    origin,
+    // The global scope only: a fresh document also holds CREATE_DOCUMENT / UPGRADE_DOCUMENT in the `document` scope,
+    // with their own indexes.
+    `query($id: String!, $since: Int!) { document(idOrSlug: $id) { document { operations(filter: { scopes: ["global"], sinceRevision: $since }, paging: { limit: 500 }) { items { index error action { id type } } } } } }`,
+    { id: documentId, since },
+    fetchImpl,
+  );
+  const byId = new Map(data.document.document.operations.items.map((op) => [op.action.id, op]));
+  const found = actions.filter((a) => byId.has(a.id)).length;
+  if (found !== actions.length) throw new Error(`Expected ${actions.length} new operations on ${documentId}, found ${found}`);
+  const rejected = actions.map((action) => ({ action, op: byId.get(action.id)! })).find(({ op }) => op.error);
   if (rejected) throw new Error(`Operation ${rejected.action.type} was rejected: ${rejected.op.error}`);
 }
 

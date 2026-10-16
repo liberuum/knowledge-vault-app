@@ -87,11 +87,12 @@ describe("repairQueue", () => {
       if (body.query.includes("document { state }") && body.variables.id === "q1") return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { tasks } } } } } }) };
       if (body.query.includes("document { name state }") && body.variables.id === "src1") return { ok: true, json: async () => ({ data: { document: { document: { name: "Foreword", state: { global: { status: sourceStatus, extractedClaims: [], ...sourceExtra } } } } } }) };
       if (body.query.includes("execute(")) return { ok: true, json: async () => ({ data: { execute: { id: "q1" } } }) };
+      if (body.query.includes("revisionsList")) return { ok: true, json: async () => ({ data: { document: { document: { revisionsList: [] } } } }) };
       if (body.query.includes("operations(")) {
-        // as many applied operations as the last execute sent, none rejected
+        // the operations the last execute sent, none rejected
         const last = [...calls].reverse().find((c) => c.query.includes("execute("));
-        const sent = (last?.variables.a as Array<{ type: string }>) ?? [];
-        return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: sent.map((a, index) => ({ index, error: null, action: { type: a.type } })), hash: "" } } } } }) };
+        const sent = (last?.variables.a as Array<{ id: string; type: string }>) ?? [];
+        return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: sent.map((a, index) => ({ index, error: null, action: { id: a.id, type: a.type } })), hash: "" } } } } }) };
       }
       throw new Error(`unexpected query: ${body.query}`);
     }) as unknown as typeof fetch;

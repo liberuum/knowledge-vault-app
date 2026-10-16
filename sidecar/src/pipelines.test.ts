@@ -8,33 +8,53 @@ import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
 type Call = { query: string; variables: Record<string, unknown> };
 
-/** The engine's GraphQL as the manager sees it: secrets, trigger states, runs, deletes. */
+/** The engine's GraphQL as the manager sees it: secrets, documents and their operations, trigger states, runs. */
 function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []) {
   const calls: Call[] = [];
   let secrets = 0;
   const connectionConfig: Record<string, unknown> = { base_url: "http://127.0.0.1:4201", llm_base_url: "https://openrouter.ai/api/v1", llm_default_model: "openai/gpt-6-luna", llm_api_key: "secret://v1:2" };
-  /** Documents whose writes (`execute`) the engine refuses, the way it answers a rejected write: a GraphQL `errors` array. */
+  /** Documents whose writes (`execute`) the engine refuses, the way it answers a refused request: a GraphQL `errors` array. */
   const failExecuteFor = new Set<string>();
+  /** Operation types a reducer rejects: the operation is recorded with its error and the rest of the batch still applies, as in the reactor. */
+  const rejectTypes = new Set<string>();
+  /** A document's global state by id; any other answers as a connection holding `connectionConfig`. */
+  const states: Record<string, Record<string, unknown>> = {};
+  /** Documents deleted in Studio: reading one gets the reactor's "not found". */
+  const gone = new Set<string>();
+  /** Documents the engine cannot read just now. */
+  const unreadable = new Set<string>();
+  const ops = new Map<string, Array<{ index: number; error: string | null; action: { id: string; type: string } }>>();
+  const reply = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
+  const refuse = (message: string) => ({ ok: true, json: async () => ({ errors: [{ message }] }) });
   const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
     const body = JSON.parse(String(init?.body)) as Call;
     calls.push(body);
     const q = body.query;
-    if (q.includes("createSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { createSecret: { ref: `secret://v1:${++secrets}` } } } }) };
-    if (q.includes("deleteSecret")) return { ok: true, json: async () => ({ data: { workflowRuntime: { deleteSecret: true } } }) };
-    if (q.includes("deleteDocument")) return { ok: true, json: async () => ({ data: { deleteDocument: true } }) };
+    const id = String(body.variables.id);
+    if (q.includes("createSecret")) return reply({ workflowRuntime: { createSecret: { ref: `secret://v1:${++secrets}` } } });
+    if (q.includes("deleteSecret")) return reply({ workflowRuntime: { deleteSecret: true } });
+    if (q.includes("deleteDocument")) return reply({ deleteDocument: true });
+    if (q.includes("createDocument")) return reply({ Connection: { createDocument: { id: "conn-new" } } });
     if (q.includes("execute(")) {
-      const id = String(body.variables.id);
-      if (failExecuteFor.has(id)) return { ok: true, json: async () => ({ errors: [{ message: `the engine refused the write to ${id}` }] }) };
-      return { ok: true, json: async () => ({ data: { execute: { id } } }) };
+      if (failExecuteFor.has(id)) return refuse(`the engine refused the write to ${id}`);
+      const list = ops.get(id) ?? [];
+      for (const a of body.variables.a as Array<{ id: string; type: string }>) list.push({ index: list.length, error: rejectTypes.has(a.type) ? `${a.type} refused` : null, action: { id: a.id, type: a.type } });
+      ops.set(id, list);
+      return reply({ execute: { id } });
     }
-    if (q.includes("document { state }")) return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { config: connectionConfig } } } } } }) };
-    if (q.includes("operations(")) return { ok: true, json: async () => ({ data: { document: { document: { operations: { items: [{ index: 0, error: null, action: { type: "SET_WORKFLOW_STATUS" } }], hasNextPage: false, cursor: null } } } } }) };
+    if (q.includes("revisionsList")) return reply({ document: { document: { revisionsList: [{ scope: "global", revision: (ops.get(id) ?? []).length }] } } });
+    if (q.includes("operations(")) return reply({ document: { document: { operations: { items: (ops.get(id) ?? []).filter((o) => o.index >= Number(body.variables.since ?? 0)), hasNextPage: false, cursor: null } } } });
+    if (q.includes("document { state }")) {
+      if (gone.has(id)) return refuse(`Failed to fetch document: Document ${id} not found`);
+      if (unreadable.has(id)) return refuse("connect ECONNREFUSED 127.0.0.1:4201");
+      return reply({ document: { document: { state: { global: states[id] ?? { config: connectionConfig } } } } });
+    }
     if (q.includes("triggerStates")) {
-      return { ok: true, json: async () => ({ data: { workflowRuntime: { triggerStates: triggers.map((t) => ({ ...t, lastPollAt: "2026-10-07T10:00:00.000Z", lastError: null })), runsPage: { items: [{ id: `run-${body.variables.w}`, status: "FAILED", startedAt: "2026-10-07T09:59:00.000Z", endedAt: "2026-10-07T09:59:30.000Z", error: "no model here" }] } } } }) };
+      return reply({ workflowRuntime: { triggerStates: triggers.map((t) => ({ ...t, lastPollAt: "2026-10-07T10:00:00.000Z", lastError: null })), runsPage: { items: [{ id: `run-${body.variables.w}`, status: "FAILED", startedAt: "2026-10-07T09:59:00.000Z", endedAt: "2026-10-07T09:59:30.000Z", error: "no model here" }] } } });
     }
     throw new Error(`unexpected query: ${q}`);
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls, connectionConfig, failExecuteFor };
+  return { fetchImpl, calls, connectionConfig, failExecuteFor, rejectTypes, states, gone, unreadable };
 }
 function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; endpoint?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "kv-pipelines-"));
@@ -390,16 +410,17 @@ describe("pipeline manager — the template's run policy and queue check, kept c
       "wf-edited": wf(5, 4, defaults, { drive: "d" }), // unpublished edits in Studio
     };
     const executed: Array<{ id: string; types: string[]; inputs: unknown[] }> = [];
-    let lastWrite = 0;
+    let lastWrite: Array<{ id: string; type: string }> = [];
     const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
-      const body = JSON.parse(String(init?.body)) as { query: string; variables: { id: string; a?: Array<{ type: string; input: unknown }> } };
+      const body = JSON.parse(String(init?.body)) as { query: string; variables: { id: string; a?: Array<{ id: string; type: string; input: unknown }> } };
       const reply = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
       if (body.query.includes("execute(")) {
-        lastWrite = body.variables.a!.length;
+        lastWrite = body.variables.a!;
         executed.push({ id: body.variables.id, types: body.variables.a!.map((a) => a.type), inputs: body.variables.a!.map((a) => a.input) });
         return reply({ execute: { id: body.variables.id } });
       }
-      if (body.query.includes("operations(")) return reply({ document: { document: { operations: { items: Array.from({ length: lastWrite }, (_, i) => ({ index: 10 + i, error: null, action: { type: "X" } })) } } } });
+      if (body.query.includes("revisionsList")) return reply({ document: { document: { revisionsList: [{ scope: "global", revision: 10 }] } } });
+      if (body.query.includes("operations(")) return reply({ document: { document: { operations: { items: lastWrite.map((a, i) => ({ index: 10 + i, error: null, action: { id: a.id, type: a.type } })) } } } });
       if (body.query.includes("document { state }")) return reply({ document: { document: { state: { global: workflows[body.variables.id] } } } });
       throw new Error(`unexpected query: ${body.query}`);
     }) as unknown as typeof fetch;

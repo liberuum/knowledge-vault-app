@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKFILL_ITEMS, createStarterManager, feedAddress, papersAddress, planStarter, readStarters, StarterError, topicOf } from "./starters.js";
 
 type Call = { query: string; variables: Record<string, unknown> };
-type Op = { index: number; error: string | null; action: { type: string; input?: unknown } };
+type Op = { index: number; error: string | null; action: { id?: string; type: string; input?: unknown } };
 
 /**
  * The engine as starters.ts sees it: documents with their global operations, the runtime's secrets, a connection
@@ -45,7 +45,7 @@ function fakeEngine(opts: { checkOk?: boolean; testError?: string; items?: unkno
     }
     if (q.includes("operations(")) {
       const doc = docs.get(v.id as string)!;
-      return ok({ document: { document: { operations: { items: doc.ops.map(({ index, error, action }) => ({ index, error, action: { type: action.type } })), hasNextPage: false, cursor: null } } } });
+      return ok({ document: { document: { operations: { items: doc.ops.map(({ index, error, action }) => ({ index, error, action: { id: action.id, type: action.type } })), hasNextPage: false, cursor: null } } } });
     }
     if (q.includes("deleteDocument")) {
       docs.delete(v.id as string);
