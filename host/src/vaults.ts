@@ -131,8 +131,6 @@ export type PipelineStatus =
       waiting?: number | null;
       failures?: PipelineFailure[];
       hasRuns?: boolean;
-      /** @deprecated No longer sent by the engine; read only by the landing page until it moves to `running`. */
-      lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; problem?: RunProblem };
     };
 export async function fetchPipeline(info: SidecarInfo, vaultId: string, fetchImpl: typeof fetch = fetch): Promise<PipelineStatus> {
   return (await control<{ pipeline: PipelineStatus }>(info, `/vaults/${encodeURIComponent(vaultId)}/pipeline`, { method: "GET" }, fetchImpl)).pipeline;

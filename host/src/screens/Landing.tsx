@@ -225,7 +225,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
     const poll = async () => {
       try {
         const p = await ask(info, leadLocalId);
-        if (alive) setWriting(p.state === "ready" && p.lastRun?.status === "RUNNING");
+        if (alive) setWriting(p.state === "ready" && (p.running ?? 0) > 0);
       } catch {
         if (alive) setWriting(false);
       }

@@ -229,7 +229,7 @@ describe("Landing — what changed since the last visit", () => {
     const onOpenView = vi.fn();
     const a = api({
       fetchVaults: vi.fn(async () => [{ id: "v1", slug: "a", name: "Alpha", noteCount: 3 }, { id: "v2", slug: "b", name: "Team wiki", noteCount: 300 }]),
-      fetchPipeline: vi.fn(async () => ({ state: "ready" as const, workflowId: "w", connectionId: "c", lastRun: { id: "r", status: "RUNNING", startedAt: null, endedAt: null, error: null } })),
+      fetchPipeline: vi.fn(async () => ({ state: "ready" as const, workflowId: "w", connectionId: "c", running: 1, waiting: 868, failures: [], hasRuns: true })),
     });
     render(<Landing engine={{ state: "ready" }} info={info} api={a} storage={storage} onOpenView={onOpenView} />);
     const lead = (await screen.findByRole("button", { name: "Open vault Team wiki" })).closest(".kv-hero") as HTMLElement;
