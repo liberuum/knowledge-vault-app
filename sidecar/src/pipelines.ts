@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
 import { SettingsError, type AppSettings } from "./settings.js";
-import { instantiatePipeline, instantiateWorkflow, type PipelineTemplate, type WorkflowTemplate } from "./templates.js";
+import { createPipelineConnection, fillPipeline, fillWorkflow, instantiatePipeline, instantiateWorkflow, replaceWorkflowInPlace, type PipelineTemplate, type TemplateOp, type WorkflowTemplate } from "./templates.js";
 import { classifyRunError, type RunProblem } from "./run-problems.js";
 
 /**
@@ -216,47 +216,71 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     writePipelines(deps.dataDir, records);
   }
 
+  /** The engine's answer for a document that is gone (deleted in Studio), as opposed to one it could not read just now. */
+  const documentGone = (error: unknown) => /not found|has been deleted|was deleted at/i.test(error instanceof Error ? error.message : String(error));
+
+  /**
+   * A document's global state, or null when it no longer exists (deleted in Studio). Any other failure to read it
+   * throws, so an engine that did not answer never reads as a deleted document. Update decides between "in place" and
+   * "make it again" on this answer, and a wrong "gone" would throw the runs away.
+   */
+  async function globalState(id: string): Promise<{ status?: string } | null> {
+    try {
+      const data = await gql<{ document: { document: { state: { global: { status?: string } } } | null } | null }>(
+        deps.origin,
+        `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+        { id },
+        f,
+      );
+      return data.document?.document?.state.global ?? null;
+    } catch (error) {
+      if (documentGone(error)) return null;
+      throw error;
+    }
+  }
+
   /** A workflow's status, or null when it no longer exists (deleted in Studio). */
   async function workflowStatus(workflowId: string): Promise<string | null> {
-    const data = await gql<{ document: { document: { state: { global: { status?: string } } } | null } | null }>(
-      deps.origin,
-      `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
-      { id: workflowId },
-      f,
-    ).catch(() => null);
-    const doc = data?.document?.document;
-    return doc ? (doc.state.global.status ?? "UNKNOWN") : null;
+    const global = await globalState(workflowId);
+    return global ? (global.status ?? "UNKNOWN") : null;
   }
 
   /**
-   * The vault's Reweave notes workflow, on its pipeline's connection: made when the record has none (a
-   * vault set up before it existed, or an earlier try failed) and made again from a newer template —
-   * switched off again when it had been switched off. One deleted in Studio stays deleted until the
-   * pipeline is set up again. Never throws: the pipeline works without it.
+   * The vault's Reweave notes workflow, on its pipeline's connection. It is made when the record has none (a vault set
+   * up before it existed, or an earlier try failed). From a newer template it is brought up to date in place, keeping
+   * its id and its runs.
+   *
+   * `force` (an Update) brings it to the template even when its digest is current, because the connection may be new,
+   * and makes it again when it was deleted in Studio. Without `force`, one deleted in Studio stays deleted. One switched
+   * off in Studio stays off, unless `enable`: the app had switched it off. Never throws, because the pipeline works
+   * without it.
    */
-  async function ensureReweave(vaultId: string): Promise<"created" | "current" | "skipped" | "failed"> {
+  async function ensureReweave(vaultId: string, opts: { force?: boolean; enable?: boolean } = {}): Promise<"created" | "updated" | "current" | "skipped" | "failed"> {
     const template = deps.reweaveTemplate;
     const record = readPipelines(deps.dataDir)[vaultId];
     if (!template || !record || record.disabled) return "skipped";
     const digest = workflowDigest(template);
+    const name = async () => `${await deps.vaultName(vaultId)} — Reweave notes`;
     try {
-      let wasDisabled = false;
       if (record.reweave) {
-        if (record.reweave.digest === digest) return "current";
-        const old = record.reweave.workflowId;
-        const status = await workflowStatus(old);
-        if (status === null) {
-          save(vaultId, (r) => ({ ...r, reweave: { workflowId: old, digest } }));
+        if (record.reweave.digest === digest && !opts.force) return "current";
+        const workflowId = record.reweave.workflowId;
+        const status = await workflowStatus(workflowId);
+        if (status !== null) {
+          const operations = fillWorkflow({ template, name: await name(), driveId: vaultId, connectionId: record.connectionId, pieceVersion: deps.pieceVersion, now });
+          const off = status === "DISABLED" && !opts.enable;
+          await replaceWorkflowInPlace({ origin: deps.origin, workflowId, operations, status: off ? "DISABLED" : "ENABLED", now, fetchImpl: f });
+          save(vaultId, (r) => ({ ...r, reweave: { workflowId, digest } }));
+          return "updated";
+        }
+        if (!opts.force) {
+          save(vaultId, (r) => ({ ...r, reweave: { workflowId, digest } }));
           return "skipped";
         }
-        wasDisabled = status === "DISABLED";
-        await deleteDocument(deps.origin, old, f).catch(() => undefined);
         save(vaultId, ({ reweave: _gone, ...r }) => r);
       }
       const { id: workflowsDriveId } = await deps.workflowsDrive();
-      const name = `${await deps.vaultName(vaultId)} — Reweave notes`;
-      const { workflowId } = await instantiateReweave({ origin: deps.origin, template, name, driveId: vaultId, connectionId: record.connectionId, workflowsDriveId, pieceVersion: deps.pieceVersion, now, fetchImpl: f });
-      if (wasDisabled) await execute(deps.origin, workflowId, toActions([{ type: "SET_WORKFLOW_STATUS", input: { status: "DISABLED" } }], now), f).catch(() => undefined);
+      const { workflowId } = await instantiateReweave({ origin: deps.origin, template, name: await name(), driveId: vaultId, connectionId: record.connectionId, workflowsDriveId, pieceVersion: deps.pieceVersion, now, fetchImpl: f });
       if (readPipelines(deps.dataDir)[vaultId]?.connectionId !== record.connectionId) {
         // The pipeline was set up again, or removed, meanwhile: this workflow belongs to nothing.
         await deleteDocument(deps.origin, workflowId, f).catch(() => undefined);
@@ -470,12 +494,13 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       return out;
     },
 
-    /** At start: every vault's pipeline gets its Reweave notes workflow, or one from a newer template (ensureReweave). */
-    async followReweave(): Promise<{ created: string[]; failed: string[] }> {
-      const out = { created: [] as string[], failed: [] as string[] };
+    /** At start: every vault's pipeline gets its Reweave notes workflow, or has it brought to a newer template in place (ensureReweave). */
+    async followReweave(): Promise<{ created: string[]; updated: string[]; failed: string[] }> {
+      const out = { created: [] as string[], updated: [] as string[], failed: [] as string[] };
       for (const vaultId of Object.keys(readPipelines(deps.dataDir))) {
         const result = await ensureReweave(vaultId);
         if (result === "created") out.created.push(vaultId);
+        if (result === "updated") out.updated.push(vaultId);
         if (result === "failed") out.failed.push(vaultId);
       }
       return out;

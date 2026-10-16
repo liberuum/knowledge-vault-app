@@ -6,6 +6,9 @@ import { createPipelineManager, readPipelines, templateDigest, templatePolicy, t
 import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
+const reweaveTemplate = { version: 1, exportedAt: "x", placeholders: [], workflow: { documentType: "powerhouse/workflow", operations: [{ type: "SET_WORKFLOW_NAME", input: { name: "{{WORKFLOW_NAME}}" } }] } } as unknown as WorkflowTemplate;
+/** The batches written to one document, in order. */
+const batches = (calls: Call[], id: string) => calls.filter((c) => c.query.includes("execute(") && c.variables.id === id).map((c) => c.variables.a as Array<{ type: string; input: unknown }>);
 type Call = { query: string; variables: Record<string, unknown> };
 
 /** The engine's GraphQL as the manager sees it: secrets, documents and their operations, trigger states, runs. */
@@ -449,42 +452,50 @@ describe("pipeline manager — a workflow runtime that is not up yet", () => {
 });
 
 describe("pipeline manager — the Reweave notes workflow", () => {
-  const reweaveTemplate = { version: 1, exportedAt: "x", placeholders: [], workflow: { documentType: "powerhouse/workflow", operations: [{ type: "SET_WORKFLOW_NAME", input: { name: "{{WORKFLOW_NAME}}" } }] } } as unknown as WorkflowTemplate;
-
-  it("is made with the pipeline on its connection, added to vaults set up before it, remade from a newer template (still off if it was off) and removed with the vault", async () => {
+  it("is made with the pipeline on its connection, added to vaults set up before it, brought to a newer template in place (still off if it was off) and removed with the vault", async () => {
     let made = 0;
     const instantiateReweave = vi.fn(async () => ({ workflowId: `rw-${++made}` }));
-    const { manager, dataDir, engine, d } = deps({ reweaveTemplate, instantiateReweave });
-    // The old workflow of vault2 reads as switched off in Studio.
-    const engineFetch = d.fetchImpl;
-    d.fetchImpl = (async (u: unknown, init?: { body?: unknown }) => {
-      const body = JSON.parse(String(init?.body)) as Call;
-      if (body.query.includes("document { state }") && body.variables.id === "rw-old") return { ok: true, json: async () => ({ data: { document: { document: { state: { global: { status: "DISABLED" } } } } } }) };
-      return engineFetch(u as string, init as RequestInit);
-    }) as unknown as typeof fetch;
-    const managerWithStatus = createPipelineManager(d);
+    const { manager, dataDir, engine } = deps({ reweaveTemplate, instantiateReweave });
+    // vault2's Reweave notes workflow, switched off in Studio, with a step and an edge of an older template
+    engine.states["rw-old"] = { status: "DISABLED", steps: [{ id: "rw-step" }], edges: [{ id: "rw-edge" }], published: { version: 2 } };
 
     // A new pipeline gets its Reweave notes workflow on the same connection.
     expect((await manager.ensure("vault1")).state).toBe("ready");
     expect(instantiateReweave).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Research — Reweave notes", driveId: "vault1", connectionId: "conn-1", workflowsDriveId: "wfdrive", pieceVersion: "1.0.54-dev.23" }));
     expect(readPipelines(dataDir).vault1?.reweave).toEqual({ workflowId: "rw-1", digest: workflowDigest(reweaveTemplate) });
 
-    // At start: current ones are left alone, a vault set up before it gets one, an older one is remade and switched off again.
+    // At start: a current one is left alone, a vault set up before it gets one, an older one is brought to the template in place.
     const base: PipelineRecord = { workflowId: "wf-2", connectionId: "conn-2", secretRefs: { token: "secret://v1:8", llm: "secret://v1:9" }, createdAt: "2026-10-01T00:00:00.000Z" };
     writePipelines(dataDir, { ...readPipelines(dataDir), vault2: { ...base, reweave: { workflowId: "rw-old", digest: "older" } }, vault3: { ...base, connectionId: "conn-3", workflowId: "wf-3" }, vault4: { ...base, disabled: "the model key was removed" } });
-    expect(await managerWithStatus.followReweave()).toEqual({ created: ["vault2", "vault3"], failed: [] });
+    expect(await manager.followReweave()).toEqual({ created: ["vault3"], updated: ["vault2"], failed: [] });
     const records = readPipelines(dataDir);
     expect(records.vault1?.reweave?.workflowId).toBe("rw-1");
-    expect(records.vault2?.reweave?.workflowId).toBe("rw-2");
-    expect(records.vault3?.reweave).toEqual({ workflowId: "rw-3", digest: workflowDigest(reweaveTemplate) });
+    expect(records.vault2?.reweave).toEqual({ workflowId: "rw-old", digest: workflowDigest(reweaveTemplate) }); // same workflow, same runs
+    expect(records.vault3?.reweave).toEqual({ workflowId: "rw-2", digest: workflowDigest(reweaveTemplate) });
     expect(records.vault4?.reweave).toBeUndefined();
-    const deleted = engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id);
-    expect(deleted).toContain("rw-old");
-    const offAgain = engine.calls.filter((c) => c.query.includes("execute(") && c.variables.id === "rw-2");
-    expect(JSON.stringify(offAgain)).toContain("DISABLED");
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument"))).toEqual([]);
+    const old = batches(engine.calls, "rw-old");
+    expect(old.map((b) => b.map((a) => a.type))).toEqual([["REMOVE_EDGE", "REMOVE_STEP", "SET_WORKFLOW_NAME"], ["PUBLISH_WORKFLOW", "SET_WORKFLOW_STATUS"]]);
+    expect(old[0]![2]!.input).toEqual({ name: "Team wiki — Reweave notes" });
+    expect(old[1]![1]!.input).toEqual({ status: "DISABLED" }); // switched off in Studio: stays off
 
     // Removing the vault removes its Reweave notes workflow too.
     await manager.remove("vault1");
     expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id)).toContain("rw-1");
+  });
+
+  it("at start, one deleted in Studio stays deleted; one the engine cannot read is tried again later, never taken for deleted", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const instantiateReweave = vi.fn(async () => ({ workflowId: "rw-new" }));
+    const { manager, dataDir, engine } = deps({ reweaveTemplate, instantiateReweave });
+    const base: PipelineRecord = { workflowId: "wf-2", connectionId: "conn-2", secretRefs: { token: "t", llm: "l" }, createdAt: "2026-10-01T00:00:00.000Z" };
+    writePipelines(dataDir, { vault2: { ...base, reweave: { workflowId: "rw-gone", digest: "older" } }, vault3: { ...base, reweave: { workflowId: "rw-down", digest: "older" } } });
+    engine.gone.add("rw-gone");
+    engine.unreadable.add("rw-down");
+    expect(await manager.followReweave()).toEqual({ created: [], updated: [], failed: ["vault3"] });
+    expect(readPipelines(dataDir).vault2?.reweave).toEqual({ workflowId: "rw-gone", digest: workflowDigest(reweaveTemplate) });
+    expect(readPipelines(dataDir).vault3?.reweave).toEqual({ workflowId: "rw-down", digest: "older" });
+    expect(instantiateReweave).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
