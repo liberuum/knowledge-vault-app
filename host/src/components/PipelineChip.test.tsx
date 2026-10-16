@@ -70,4 +70,16 @@ describe("PipelineChip", () => {
     finish({ state: "missing" });
     expect(await screen.findByRole("button", { name: "Set up" })).toBeTruthy();
   });
+  it("after Update the chip shows the fetched status at once, not the setup answer's bare ready", async () => {
+    const stale: PipelineStatus = { state: "stale", reason: "a newer version of the pipeline is available", workflowId: "wf", connectionId: "c" };
+    const trigger = { status: "ENABLED", lastPollAt: null, lastError: null };
+    const busy: PipelineStatus = { state: "ready", workflowId: "wf", connectionId: "c", trigger, running: 2, waiting: 0, failures: [], hasRuns: true };
+    let updated = false;
+    const fetchPipeline = vi.fn(async (): Promise<PipelineStatus> => (updated ? busy : stale));
+    const setupPipeline = vi.fn(async (): Promise<PipelineStatus> => { updated = true; return { state: "ready", workflowId: "wf", connectionId: "c", trigger }; });
+    render(<PipelineChip info={info} vaultId="v1" api={{ fetchPipeline, setupPipeline }} onModels={() => {}} onRuns={() => {}} pollMs={60_000} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+    expect(await screen.findByText("Processing…")).toBeTruthy();
+    expect(screen.queryByText("Processing ready")).toBeNull();
+  });
 });

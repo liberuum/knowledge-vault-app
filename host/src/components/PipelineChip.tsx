@@ -42,7 +42,8 @@ export function PipelineChip({ info, vaultId, api = realApi, onModels, onRuns, p
     setBusy(true);
     setError(null);
     try {
-      setStatus(await api.setupPipeline(info, vaultId));
+      setStatus(await api.setupPipeline(info, vaultId)); // interim: the answer lacks running/failures
+      await refresh(); // the real status at once, not at the next poll
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
