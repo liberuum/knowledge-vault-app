@@ -52,7 +52,8 @@ export function PipelineChip({ info, vaultId, api = realApi, onModels, onRuns, p
 
   if (!status) return error ? <span className="kv-pipeline-chip" data-tone="warn" title={error}><span className="kv-identity-dot" aria-hidden="true" />Processing: unknown</span> : null;
   const d = describePipeline(status);
-  const tooltip = status.state === "ready" ? (status.lastRun?.problem?.message ?? status.lastRun?.error ?? status.trigger?.lastError ?? undefined) : status.state === "stale" ? status.reason : undefined;
+  // A failure row names its source and what went wrong; otherwise the trigger's error, or why the pipeline is stale.
+  const tooltip = d.tooltip ?? (status.state === "ready" ? (status.trigger?.lastError ?? undefined) : status.state === "stale" ? status.reason : undefined);
   // Once the pipeline exists, its workflow is one click away: the live run view in Workflow Studio.
   const workflowId = status.state === "ready" || status.state === "stale" ? status.workflowId : undefined;
   const act = d.action === "models" ? onModels : d.action === "runs" ? () => onRuns(workflowId) : () => void setup();

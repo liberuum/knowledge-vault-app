@@ -110,6 +110,8 @@ export async function removeConverterComponent(info: SidecarInfo, component: Con
 
 /** Spec §4.5: a vault's pipeline as the engine reports it (sidecar/src/pipelines.ts). */
 export type RunProblem = { kind: "no-funds" | "bad-key" | "rate-limited" | "slow-model" | "model-missing" | "model-refused" | "interrupted" | "deadline"; message: string; model?: string };
+/** A failed run whose work still waits: which source, when, and what went wrong. */
+export type PipelineFailure = { runId: string; source: string; at: string | null; error: string | null; problem?: RunProblem };
 export type PipelineStatus =
   | { state: "unconfigured" }
   | { state: "missing" }
@@ -121,6 +123,15 @@ export type PipelineStatus =
       workflowId: string;
       connectionId: string;
       trigger?: { status: string; lastPollAt: string | null; lastError: string | null };
+      /**
+       * The work (spec §1). The status read always carries these fields. The answer to setting the pipeline up
+       * (POST) names only the pipeline, so readers treat a missing field as nothing going on.
+       */
+      running?: number;
+      waiting?: number | null;
+      failures?: PipelineFailure[];
+      hasRuns?: boolean;
+      /** @deprecated No longer sent by the engine; read only by the landing page until it moves to `running`. */
       lastRun?: { id: string; status: string; startedAt: string | null; endedAt: string | null; error: string | null; problem?: RunProblem };
     };
 export async function fetchPipeline(info: SidecarInfo, vaultId: string, fetchImpl: typeof fetch = fetch): Promise<PipelineStatus> {
