@@ -163,6 +163,12 @@ export async function mintEngineToken(
   return { value: "open", kind: "open", expiresAt: null };
 }
 
+/** The engine's answer for a document that is gone (deleted in Studio), as opposed to one it could not read just now. Only its own document messages count: "Document model not found" is an engine still loading models. */
+const GONE = /\bDocument not found(?::| with slug:)|\bDocument (?!model\b)\S+ (?:not found|was deleted at|has been deleted)\b/i;
+export function documentGone(error: unknown): boolean {
+  return GONE.test(error instanceof Error ? error.message : String(error));
+}
+
 export function createPipelineManager(deps: PipelineManagerDeps) {
   const f = deps.fetchImpl;
   const now = () => (deps.now ?? (() => new Date().toISOString()))(); // read each time: tests move the clock
@@ -215,9 +221,6 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     records[vaultId] = change(current);
     writePipelines(deps.dataDir, records);
   }
-
-  /** The engine's answer for a document that is gone (deleted in Studio), as opposed to one it could not read just now. */
-  const documentGone = (error: unknown) => /not found|has been deleted|was deleted at/i.test(error instanceof Error ? error.message : String(error));
 
   /**
    * A document's global state, or null when it no longer exists (deleted in Studio). Any other failure to read it

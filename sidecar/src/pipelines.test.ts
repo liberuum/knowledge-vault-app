@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPipelineManager, readPipelines, templateDigest, templatePolicy, templatePollSeconds, workflowDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
+import { createPipelineManager, documentGone, readPipelines, templateDigest, templatePolicy, templatePollSeconds, workflowDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
 import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
@@ -497,5 +497,26 @@ describe("pipeline manager — the Reweave notes workflow", () => {
     expect(readPipelines(dataDir).vault3?.reweave).toEqual({ workflowId: "rw-down", digest: "older" });
     expect(instantiateReweave).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("documentGone — only the engine's own document messages", () => {
+  it.each([
+    "Document not found: abc-1",
+    "Document not found with slug: my-flow",
+    "Document abc-1 not found",
+    "Document abc-1 was deleted at 2026-10-16T10:00:00.000Z",
+    "Document abc-1 has been deleted",
+  ])("reads %j as gone", (message) => {
+    expect(documentGone(new Error(message))).toBe(true);
+  });
+
+  it.each([
+    "Document model not found for type bai/x",
+    "Document model module not found for type: bai/x",
+    "ECONNREFUSED",
+    "The engine answered without data",
+  ])("does not read %j as gone", (message) => {
+    expect(documentGone(new Error(message))).toBe(false);
   });
 });
