@@ -38,17 +38,19 @@ Maps of your topics keep a growing vault navigable. Each map gathers the notes o
 
 A source is processed in four steps: extract its ideas as notes, connect them to the notes already in the vault, place them in the maps of your topics, and verify the result. Because each step stands on its own, a step that fails can be run again without redoing the steps before it.
 
-Adding a source should take seconds even though reading it takes minutes: a vault fills only while collecting stays effortless, so processing runs in the background, one source after another, while you keep working.
+Adding a source should take seconds even though reading it takes minutes: a vault fills only while collecting stays effortless, so processing runs in the background while you keep working: one source at a time with a model on this computer, a few at once with a hosted one.
 
 The AI model you choose decides how fast processing is and where your text goes. A model on this computer keeps everything on the machine and costs nothing to run, but it is slower. A hosted model is faster, and the text being processed is sent to that provider. Switching models changes how new sources are processed; notes already written stay as they are.
 
-A new note is a draft until it has been checked. The verify step reports which drafts are ready to approve and which need a closer look, and approving a note makes it the vault's settled view.
+A new note waits in review until you approve it. The verify step reports which notes are ready to approve and which need a closer look, and approving a note makes it the vault's settled view.
 
 Knowledge is better retired than deleted. When a newer note replaces an older one, linking it as the replacement and archiving the older note keeps the history: the archived note leaves search, but you can still see what was believed before and why it changed.
 
 ## Asking your vault
 
-An answer that cites the notes it used can be checked by opening them; an answer from a model's general knowledge cannot be. That is why the vault's chat answers from your notes and names them. A chat that only reads the vault can be trusted with it: it can get an answer wrong, but it cannot damage a note.
+An answer that cites the notes it used can be checked by opening them; an answer from a model's general knowledge cannot be. That is why the vault's chat answers from your notes and names them.
+
+A chat that cannot change anything on its own can be trusted with the vault. It can offer to save an answer as a note or to change the work in your projects, but it shows each change first, and nothing is written until you apply it.
 
 Search finds notes by meaning, not only by matching words. A question phrased differently from the note, such as "why do my links feel vague" for the note about one idea per note, still finds it, because the vault compares meanings that are computed on this computer.
 
