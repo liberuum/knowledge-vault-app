@@ -88,6 +88,13 @@ The app brings everything it needs. You do not need to install anything else.
 From 0.2.2 on it also tells you about new releases and installs them for you: a notice drops from the top of the
 window, and **Update** does the rest.
 
+#### Checking a download
+
+Each release lists the SHA-256 of every file in `SHA256SUMS`, signed as `SHA256SUMS.asc` with the project's
+release key; the AppImage carries the same signature inside it, and the Linux files have GitHub build
+provenance. [docs/release-signing.md](docs/release-signing.md) shows how to check a file, with the key's
+fingerprint.
+
 #### Opening it on macOS
 
 The app is not notarised by Apple yet, so the first time you open it macOS stops it. You allow it once:

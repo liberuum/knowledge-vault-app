@@ -51,6 +51,12 @@ jobs:
     needs: [preflight, checks]
     permissions:
       contents: write
+      id-token: write # build provenance for the Linux files (actions/attest-build-provenance)
+      attestations: write
+    env:
+      # Linux signing is on once the repository has a release key (docs/release-signing.md); until then a
+      # release builds unsigned, as before. Only whether the secret is set — the key is read where it is used.
+      RELEASE_SIGNING: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,12 +117,26 @@ jobs:
             node scripts/release-notes.mjs
             echo "NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: The release key, so the AppImage is signed (Linux, when the repository has one)
+        if: runner.os == 'Linux' && env.RELEASE_SIGNING == 'true'
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          printf '%s\n' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
+          fpr=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ -z "$fpr" ]; then echo "RELEASE_GPG_PRIVATE_KEY holds no secret key"; exit 1; fi
+          echo "the AppImage is signed with $fpr"
+          # linuxdeploy's AppImage plugin signs whenever LDAI_SIGN is set, whatever its value (even empty), and a
+          # failed signature aborts the bundle: so it is set here, with a key, never in the job's env.
+          { echo "LDAI_SIGN=1"; echo "LDAI_SIGN_KEY=$fpr"; } >> "$GITHUB_ENV"
       - id: bundle
         # macOS: hdiutil fails now and then on GitHub's runners (Resource busy); one retry below
         continue-on-error: ${{ runner.os == 'macOS' }}
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The release key's passphrase, read by linuxdeploy only when LDAI_SIGN is set (empty for a key without one)
+          APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         with:
           tauriScript: bun run tauri
           tagName: ${{ needs.preflight.outputs.tag }}
@@ -145,6 +165,24 @@ jobs:
       - name: Smoke the AppImage (engine ready, page served, page reached the shell)
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/smoke-app.mjs
+      - name: The AppImage is signed, by the release key (Linux, when signed)
+        if: runner.os == 'Linux' && env.RELEASE_SIGNING == 'true'
+        # Verifies the embedded signature against the file and requires the signer to be the imported key
+        run: node scripts/verify-appimage.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" "$LDAI_SIGN_KEY"
+      - name: The Linux files under the names the release gives them, for their provenance
+        if: runner.os == 'Linux'
+        run: |
+          v="${{ needs.preflight.outputs.tag }}"; v="${v#v}"; b=src-tauri/target/release/bundle
+          {
+            printf '%s  %s\n' "$(sha256sum $b/appimage/*.AppImage | cut -d' ' -f1)" "Knowledge-Vault_${v}_Linux_x86-64.AppImage"
+            printf '%s  %s\n' "$(sha256sum $b/deb/*.deb | cut -d' ' -f1)" "Knowledge-Vault_${v}_Linux_x86-64.deb"
+          } > linux-files.sha256
+          cat linux-files.sha256
+      - name: Build provenance for the Linux files (gh attestation verify <file> --repo liberuum/knowledge-vault-app)
+        if: runner.os == 'Linux'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: linux-files.sha256
       - name: Smoke the macOS app
         if: runner.os == 'macOS'
         run: node scripts/smoke-app.mjs
@@ -174,14 +212,41 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      RELEASE_SIGNING: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Installer sizes in the notes, then publish
+      - name: Installer sizes in the notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+        run: node scripts/release-sizes.mjs "${{ needs.preflight.outputs.tag }}"
+      - name: SHA256SUMS of every file, signed with the release key when the repository has one (SHA256SUMS.asc)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: |
-          node scripts/release-sizes.mjs "${{ needs.preflight.outputs.tag }}"
-          gh release edit "${{ needs.preflight.outputs.tag }}" --draft=false
+          tag="${{ needs.preflight.outputs.tag }}"
+          mkdir release-files && cd release-files
+          gh release download "$tag" --pattern 'Knowledge-Vault_*'
+          sha256sum Knowledge-Vault_* > SHA256SUMS
+          cat SHA256SUMS
+          files=(SHA256SUMS)
+          if [ "$RELEASE_SIGNING" = true ]; then
+            printf '%s\n' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
+            fpr=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+            printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --local-user "$fpr" --armor --detach-sign SHA256SUMS
+            gpg --batch --verify SHA256SUMS.asc SHA256SUMS
+            files+=(SHA256SUMS.asc)
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "${{ needs.preflight.outputs.tag }}" --draft=false
