@@ -18,7 +18,7 @@
         "@fontsource-variable/inter": "5.3.0",
         "@fontsource-variable/source-serif-4": "5.3.0",
         "@powerhousedao/design-system": "6.2.3-dev.66",
-        "@powerhousedao/knowledge-note": "1.0.54-dev.41",
+        "@powerhousedao/knowledge-note": "1.0.54-dev.42",
         "@powerhousedao/reactor-browser": "6.2.3-dev.66",
         "@powerhousedao/workflow": "6.2.3-dev.66",
         "@tauri-apps/api": "^2.9.0",
@@ -42,7 +42,7 @@
       "name": "@knowledge-vault-app/sidecar",
       "dependencies": {
         "@electric-sql/pglite": "0.3.15",
-        "@powerhousedao/knowledge-note": "1.0.54-dev.41",
+        "@powerhousedao/knowledge-note": "1.0.54-dev.42",
         "@powerhousedao/switchboard": "6.2.3-dev.66",
         "@powerhousedao/workflow": "6.2.3-dev.66",
         "@renown/sdk": "6.2.3-dev.66",
@@ -656,7 +656,7 @@
 
     "@powerhousedao/host-core": ["@powerhousedao/host-core@6.2.3-dev.66", "https://registry.vetra.io/@powerhousedao/host-core/-/host-core-6.2.3-dev.66.tgz", { "dependencies": { "@powerhousedao/shared": "6.2.3-dev.66", "zod": "^4.5.4" } }, "sha512-isPmu76+zTwtFxLAjRm7vnyiT0KvlwPO9fd93VdTaX81bSs1F5RWe4jg83qIMtjclbRPANJiVYYOe4FZP+/Dyw=="],
 
-    "@powerhousedao/knowledge-note": ["@powerhousedao/knowledge-note@1.0.54-dev.41", "https://registry.vetra.io/@powerhousedao/knowledge-note/-/knowledge-note-1.0.54-dev.41.tgz", { "dependencies": { "@huggingface/transformers": "^4.0.1", "@noble/hashes": "^2.4.0", "@powerhousedao/reactor-attachments": "6.2.3-dev.66", "pdfjs-dist": "^6.3.289", "sharp": "^0.35.4" }, "peerDependencies": { "@powerhousedao/reactor": "6.2.3-dev.66", "@powerhousedao/reactor-browser": "6.2.3-dev.66", "docling.rs-wasm": "2.46.3", "document-model": "6.2.3-dev.66", "graphql": "^16", "graphql-tag": "^2", "react": "^19", "react-dom": "^19", "zod": "^4" }, "optionalPeers": ["docling.rs-wasm"] }, "sha512-uDF5+podsUtFhq8J5YR69t+ubQVsO+xHK9OHnl90a8EuWPD5Tb7lQB6k2I7/8rHZibS5zXiKj8CZ+kUN24epuw=="],
+    "@powerhousedao/knowledge-note": ["@powerhousedao/knowledge-note@1.0.54-dev.42", "https://registry.vetra.io/@powerhousedao/knowledge-note/-/knowledge-note-1.0.54-dev.42.tgz", { "dependencies": { "@huggingface/transformers": "^4.0.1", "@noble/hashes": "^2.4.0", "@powerhousedao/reactor-attachments": "6.2.3-dev.66", "pdfjs-dist": "^6.3.289", "sharp": "^0.35.4" }, "peerDependencies": { "@powerhousedao/reactor": "6.2.3-dev.66", "@powerhousedao/reactor-browser": "6.2.3-dev.66", "docling.rs-wasm": "2.46.3", "document-model": "6.2.3-dev.66", "graphql": "^16", "graphql-tag": "^2", "react": "^19", "react-dom": "^19", "zod": "^4" }, "optionalPeers": ["docling.rs-wasm"] }, "sha512-/jEC0huKLwIA0UXQJ9kNnfCNHEsk2SjiheHKnPwfxdzhvIAqUW1nJPP8hyXQHUksh1m0usGajTSo7rfWjDk6SQ=="],
 
     "@powerhousedao/opentelemetry-instrumentation-reactor": ["@powerhousedao/opentelemetry-instrumentation-reactor@6.2.3-dev.66", "https://registry.vetra.io/@powerhousedao/opentelemetry-instrumentation-reactor/-/opentelemetry-instrumentation-reactor-6.2.3-dev.66.tgz", { "dependencies": { "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "@powerhousedao/reactor": "6.2.3-dev.66" } }, "sha512-+fw0E5XI/ESHlz52O+26KMxefZFggBUmASRNxDVl+tIRgYoepGiYJA0Y0SOuyJf6scRJMI5HKURKIAgnCknfmg=="],
 
