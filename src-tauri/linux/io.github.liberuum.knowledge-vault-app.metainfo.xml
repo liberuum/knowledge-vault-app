@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what software centres and AppImage managers show for the app (name, author,
+     license, description). Installed by the AppImage and the .deb (src-tauri/tauri.conf.json,
+     bundle.linux). The first <release> is the app's version, checked by `bun run versions:check`. -->
+<component type="desktop-application">
+  <id>io.github.liberuum.knowledge-vault-app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+
+  <name>Knowledge Vault</name>
+  <summary>Your Powerhouse Knowledge Vault, on your own computer</summary>
+  <developer id="io.github.liberuum">
+    <name>liberuum</name>
+  </developer>
+  <!-- The same, for readers older than AppStream 1.0 -->
+  <developer_name>liberuum</developer_name>
+
+  <description>
+    <p>
+      Knowledge Vault turns what you read into a knowledge base you can search, explore and talk to,
+      privately, on your own computer.
+    </p>
+    <p>
+      It breaks each document you collect (articles, reports, PDFs, meeting notes, web pages) into atomic
+      notes, one clear claim per note. Notes are linked to the notes they build on, support or contradict,
+      and gathered into maps by theme, so the vault grows into a connected web of ideas you can browse as a
+      graph, search by meaning and ask questions in plain language.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">Knowledge Vault.desktop</launchable>
+  <provides>
+    <binary>knowledge-vault-app</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/liberuum/knowledge-vault-app</url>
+  <url type="bugtracker">https://github.com/liberuum/knowledge-vault-app/issues</url>
+  <url type="vcs-browser">https://github.com/liberuum/knowledge-vault-app</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>A vault's landing view: its map of notes and links, and shortcuts to Chat and Graph</caption>
+      <image>https://raw.githubusercontent.com/liberuum/knowledge-vault-app/main/assets/screenshot-landing.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.2.4" date="2026-10-16">
+      <url type="details">https://github.com/liberuum/knowledge-vault-app/releases/tag/v0.2.4</url>
+    </release>
+  </releases>
+</component>

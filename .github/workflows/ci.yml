@@ -18,6 +18,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  metainfo:
+    # What software centres and AppImage managers read for the app's name, author and license. Validated on a
+    # current AppStream (Ubuntu 24.04 ships 1.0); the checks job's 22.04 predates the <developer> element.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y appstream
+      - run: appstreamcli validate --no-net --pedantic --explain src-tauri/linux/io.github.liberuum.knowledge-vault-app.metainfo.xml
+
   checks:
     runs-on: ubuntu-22.04
     timeout-minutes: 45

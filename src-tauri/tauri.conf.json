@@ -24,6 +24,10 @@
     ],
     "category": "Productivity",
     "shortDescription": "Your Powerhouse Knowledge Vault, on your own computer",
+    "longDescription": "Turn what you read into a knowledge base you can search, explore and talk to, privately, on your own computer. Knowledge Vault breaks each document into atomic notes, links them to the notes they build on, support or contradict, and gathers them into maps by theme.",
+    "copyright": "Copyright © 2026 liberuum",
+    "license": "AGPL-3.0-only",
+    "homepage": "https://github.com/liberuum/knowledge-vault-app",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,8 +42,16 @@
       "../.stage/sidecar/": "sidecar/"
     },
     "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/metainfo/io.github.liberuum.knowledge-vault-app.metainfo.xml": "linux/io.github.liberuum.knowledge-vault-app.metainfo.xml"
+        }
+      },
       "deb": {
-        "depends": []
+        "depends": [],
+        "files": {
+          "/usr/share/metainfo/io.github.liberuum.knowledge-vault-app.metainfo.xml": "linux/io.github.liberuum.knowledge-vault-app.metainfo.xml"
+        }
       }
     },
     "macOS": {
