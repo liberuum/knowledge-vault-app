@@ -7,7 +7,7 @@ index 3201c84bc9747823d95ab08960c978a8e5c73d74..43b251234dfbe3d0af6bc8ef53cbc045
  	if (!existing.spec && entry.spec) existing.spec = entry.spec;
  }
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.60.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.66.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
@@ -34,7 +34,7 @@ index 913cef73a286096c6611f079783936b045f599ec..5b905d076eae4b8613c8629b22790b85
  //#region src/executor/worker/load-spec.ts
  /** Imports `spec.module` and calls the export with `spec.initArgs`, or returns it if not a function. */
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.60.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.66.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
