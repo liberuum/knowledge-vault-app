@@ -12,13 +12,14 @@
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
     "@fontsource-variable/source-serif-4": "5.3.0",
-    "@powerhousedao/design-system": "6.2.3-dev.66",
+    "@powerhousedao/connect": "6.2.3-dev.73",
+    "@powerhousedao/design-system": "6.2.3-dev.73",
     "@powerhousedao/knowledge-note": "1.0.54-dev.42",
-    "@powerhousedao/reactor-browser": "6.2.3-dev.66",
-    "@powerhousedao/workflow": "6.2.3-dev.66",
+    "@powerhousedao/reactor-browser": "6.2.3-dev.73",
+    "@powerhousedao/workflow": "6.2.3-dev.73",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-opener": "^2",
-    "document-model": "6.2.3-dev.66",
+    "document-model": "6.2.3-dev.73",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

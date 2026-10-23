@@ -2,12 +2,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ visible: false, setVisible: vi.fn(), operations: vi.fn() }));
+const state = vi.hoisted(() => ({ visible: false, setVisible: vi.fn(), operations: vi.fn(), dispatch: vi.fn() }));
 vi.mock("@powerhousedao/reactor-browser", () => ({
   useSelectedDocument: () => [{ header: { id: "doc-1", name: "a-note", documentType: "bai/knowledge-note", revision: { global: 7, local: 0 }, meta: {} }, state: { global: { title: "t" } } }],
   useDocumentById: () => [undefined],
+  useDispatch: (document: unknown) => [document, state.dispatch],
   useEditorModuleById: () => undefined,
-  useEditorModulesForDocumentType: () => [{ config: { id: "note-editor" }, Component: ({ document }: { document: { header: { id: string } } }) => <p>Editor for {document.header.id}</p> }],
+  useEditorModulesForDocumentType: () => [{ config: { id: "note-editor" }, Component: ({ document, dispatch }: { document: { header: { id: string } }; dispatch: unknown }) => <p>Editor for {document.header.id}{dispatch === state.dispatch ? ", with its dispatch" : ""}</p> }],
   useRevisionHistoryVisible: () => state.visible,
   setRevisionHistoryVisible: state.setVisible,
   useDocumentOperations: state.operations,
@@ -29,7 +30,8 @@ describe("DocumentEditorContainer", () => {
     state.visible = false;
     state.operations.mockReturnValue({ operations: [], isLoading: false, hasNextPage: false, fetchNextPage: vi.fn(), error: undefined });
     const { container } = render(<DocumentEditorContainer />);
-    expect(screen.getByText("Editor for doc-1")).toBeTruthy();
+    // Hosts pass editors their document and its dispatch as props (Powerhouse 6.2.3-dev.70+).
+    expect(screen.getByText("Editor for doc-1, with its dispatch")).toBeTruthy();
     const ctx = container.querySelector("#document-editor-context")!;
     expect(ctx.getAttribute("data-document-type")).toBe("bai/knowledge-note");
     expect(ctx.getAttribute("data-editor")).toBe("note-editor");

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { checkPgliteVersion, checkStackVersions } from "./lib/stack-versions.mjs";
-const EXPECTED = "6.2.3-dev.66";
+const EXPECTED = "6.2.3-dev.73";
 const manifests = ["host", "sidecar"].map((dir) => {
   const p = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), "utf8"));
   return { name: dir, deps: { ...p.dependencies, ...p.devDependencies } };

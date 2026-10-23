@@ -1,6 +1,7 @@
 import { RevisionHistory } from "@powerhousedao/design-system/connect";
 import {
   setRevisionHistoryVisible,
+  useDispatch,
   useDocumentById,
   useDocumentOperations,
   useEditorModuleById,
@@ -33,6 +34,8 @@ export function DocumentEditorContainer({ fillConnection }: { /** Studio's conne
   const preferred = useEditorModuleById(document.header.meta?.preferredEditor);
   const byType = useEditorModulesForDocumentType(documentType);
   const editor = preferred ?? byType?.[0];
+  // Hosts hand editors their document and its dispatch as props (Powerhouse 6.2.3-dev.70+).
+  const [, dispatch] = useDispatch(document);
 
   const visible = useRevisionHistoryVisible();
   const scopes = useMemo(() => {
@@ -67,7 +70,7 @@ export function DocumentEditorContainer({ fillConnection }: { /** Studio's conne
         <>
           {fillConnection && documentType === "powerhouse/connection" && <ConnectionAssist key={documentId} document={document} fill={fillConnection} />}
           <Suspense fallback={<VaultLoader label="Opening document…" />}>
-            <Editor key={documentId} document={document} />
+            <Editor key={documentId} document={document} dispatch={dispatch} />
           </Suspense>
         </>
       )}

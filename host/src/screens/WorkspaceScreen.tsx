@@ -182,7 +182,7 @@ export function WorkspaceScreen(props: {
 
 /** Connect's AppContainer, reduced: the drive app renders, with the selected document's editor as its children. */
 function AppContainer({ engine, opening }: { engine?: SidecarInfo; opening: Parameters<typeof VaultLoader>[0] }) {
-  const [selectedDrive] = useSelectedDriveSafe();
+  const [selectedDrive, dispatch] = useSelectedDriveSafe();
   const selectedDocumentId = useSelectedDocumentId();
   const app = useAppModuleById(selectedDrive?.header.meta?.preferredEditor);
   if (!selectedDrive) return <VaultLoader {...opening} />;
@@ -191,7 +191,7 @@ function AppContainer({ engine, opening }: { engine?: SidecarInfo; opening: Para
   return (
     <Suspense fallback={<VaultLoader {...opening} />}>
       <div className="kv-app">
-        <AppComponent>{selectedDocumentId ? <DocumentEditorContainer {...(engine ? { fillConnection: (id: string, token: boolean) => fillConnection(engine, id, token) } : {})} /> : null}</AppComponent>
+        <AppComponent document={selectedDrive} dispatch={dispatch}>{selectedDocumentId ? <DocumentEditorContainer {...(engine ? { fillConnection: (id: string, token: boolean) => fillConnection(engine, id, token) } : {})} /> : null}</AppComponent>
       </div>
     </Suspense>
   );

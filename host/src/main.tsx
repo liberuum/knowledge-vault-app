@@ -6,6 +6,11 @@ import { createRoot } from "react-dom/client";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/source-serif-4";
 import "@powerhousedao/design-system/style.css";
+// Connect's classes, which the design system's components (the document toolbar, revision
+// history, toasts) are styled with. Until Powerhouse 6.2.3-dev.70 the vault package's
+// stylesheet carried a copy; since then a package's stylesheet holds only its own classes,
+// so the host loads Connect's, as Connect does. Before the vault's: its layer order comes first.
+import "@powerhousedao/connect/style.css";
 import "@powerhousedao/knowledge-note/style.css";
 import "@powerhousedao/workflow/style.css";
 import "./host.css";
