@@ -20,7 +20,7 @@ A release made before the release key existed has `SHA256SUMS` and the build pro
    gpg --fingerprint "Knowledge Vault releases (liberuum)"
    ```
 
-   **Release key fingerprint:** _not published yet_
+   **Release key fingerprint:** `BAA4 8806 5EB9 6200 00A9  928A FC4E 7814 1AF5 271C`
 
 2. Download `SHA256SUMS` and `SHA256SUMS.asc` from the same release, next to the file you downloaded.
 3. `gpg --verify SHA256SUMS.asc SHA256SUMS` must say **Good signature from "Knowledge Vault releases

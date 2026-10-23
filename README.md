@@ -92,8 +92,8 @@ window, and **Update** does the rest.
 
 Each release lists the SHA-256 of every file in `SHA256SUMS`, signed as `SHA256SUMS.asc` with the project's
 release key; the AppImage carries the same signature inside it, and the Linux files have GitHub build
-provenance. [docs/release-signing.md](docs/release-signing.md) shows how to check a file, with the key's
-fingerprint.
+provenance. The release key's fingerprint is `BAA4 8806 5EB9 6200 00A9  928A FC4E 7814 1AF5 271C`;
+[docs/release-signing.md](docs/release-signing.md) shows how to check a file.
 
 #### Opening it on macOS
 
