@@ -103,6 +103,8 @@ type Props = {
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
   onBack: () => void;
+  /** What Back says (the setup guide, on a trip from it). */
+  backLabel?: string;
   onOpenWorkflows: () => void;
   api?: SettingsApi;
   identity: IdentityController;
@@ -113,10 +115,10 @@ type Props = {
 };
 
 /** Settings as a full page: the sections list is where a sidebar belongs — here the sections are peers. */
-export function Settings({ info, section, onSection, onBack, onOpenWorkflows, api = realSettingsApi, identity, onOpenView, onNewVault, onGuide }: Props) {
+export function Settings({ info, section, onSection, onBack, backLabel, onOpenWorkflows, api = realSettingsApi, identity, onOpenView, onNewVault, onGuide }: Props) {
   return (
     <div className="kv-vault-screen">
-      <AppBar title="Settings" onBack={onBack} />
+      <AppBar title="Settings" onBack={onBack} {...(backLabel ? { backLabel } : {})} />
       <div className="kv-settings">
         <nav className="kv-settings-nav" aria-label="Settings sections">
           {SETTINGS_SECTIONS.map((s) => (

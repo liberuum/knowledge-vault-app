@@ -51,6 +51,8 @@ export function WorkspaceScreen(props: {
   appId: WorkspaceApp;
   fallbackTitle?: string;
   onBack: () => void;
+  /** What Back says: "Vaults", or "Setup guide" when the guide sent the person here. */
+  backLabel?: string;
   onSettings?: () => void;
   /** The setup guide is still open for this vault: a way back to it. */
   onGuide?: () => void;
@@ -157,7 +159,7 @@ export function WorkspaceScreen(props: {
   const status = retrying ? "Trying again…" : props.auth?.signingIn ? "Finish signing in in your browser; this opens by itself when you're done." : undefined;
   return (
     <div className="kv-vault-screen">
-      <AppBar title={title} onBack={props.onBack} onSettings={props.onSettings} onGuide={props.onGuide}>
+      <AppBar title={title} onBack={props.onBack} {...(props.backLabel ? { backLabel: props.backLabel } : {})} onSettings={props.onSettings} onGuide={props.onGuide}>
         {props.pipeline && props.appId === "knowledge-vault" && <PipelineChip info={props.pipeline.info} vaultId={props.driveId} onModels={props.pipeline.onModels} onRuns={props.pipeline.onRuns} />}
       </AppBar>
       {problem ? (

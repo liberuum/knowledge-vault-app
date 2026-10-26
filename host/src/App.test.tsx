@@ -14,13 +14,38 @@ vi.mock("./components/HostToasts.js", () => ({ HostToasts: () => null }));
 vi.mock("./components/DownloadNotice.js", () => ({ DownloadNotice: () => null }));
 vi.mock("./screens/Landing.js", () => ({ Landing: () => null }));
 vi.mock("./screens/RemoteWorkspaceScreen.js", () => ({ RemoteWorkspaceScreen: () => null }));
+// The screens App frames record their props, so a case can press their Back and read its label.
+type ScreenProps = { onBack: () => void; backLabel?: string; onGuide?: () => void; onSettings?: () => void };
+type GuideProps = { onVisit: (vault: string, view: string) => void; onRuns: (workflow?: string) => void; onFinish: (vault: string) => void; onLeave: () => void };
+const screens = vi.hoisted(() => ({ workspace: null as ScreenProps | null, workflows: null as ScreenProps | null, settings: null as ScreenProps | null, guide: null as GuideProps | null }));
 // Settings says which section is open, so a case can tell where the app was taken.
 vi.mock("./screens/Settings.js", async () => {
   const { createElement } = await import("react");
-  return { Settings: ({ section }: { section: string }) => createElement("p", null, `Settings: ${section}`) };
+  return {
+    Settings: (p: ScreenProps & { section: string }) => {
+      screens.settings = p;
+      return createElement("p", null, `Settings: ${p.section}`);
+    },
+  };
 });
-vi.mock("./screens/WorkflowsScreen.js", () => ({ WorkflowsScreen: () => null }));
-vi.mock("./screens/WorkspaceScreen.js", () => ({ WorkspaceScreen: () => null }));
+vi.mock("./screens/WorkflowsScreen.js", () => ({
+  WorkflowsScreen: (p: ScreenProps) => {
+    screens.workflows = p;
+    return null;
+  },
+}));
+vi.mock("./screens/WorkspaceScreen.js", () => ({
+  WorkspaceScreen: (p: ScreenProps) => {
+    screens.workspace = p;
+    return null;
+  },
+}));
+vi.mock("./onboarding/Onboarding.js", () => ({
+  Onboarding: (p: GuideProps) => {
+    screens.guide = p;
+    return null;
+  },
+}));
 const identity = vi.hoisted(() => ({ status: null as { authenticated: boolean; address?: string; did?: string } | null, error: null, refresh: async () => {} }));
 vi.mock("./state/use-identity.js", () => ({ useIdentity: () => identity }));
 // The real declaration and store, watched: the cases read the slot the vault package reads, and what App asked for.
@@ -58,6 +83,7 @@ afterEach(() => {
   identity.status = null;
   vi.clearAllMocks();
   window.location.hash = "";
+  screens.workspace = screens.workflows = screens.settings = screens.guide = null;
 });
 
 describe("App declares the app's model to the vault", () => {
@@ -189,5 +215,97 @@ describe("App declares the app's model to the vault", () => {
     await new Promise((resolve) => setTimeout(resolve, 25)); // the late answer settles
     expect(slot().bearer).toBe(second);
     expect(slot().model?.model).toBe("openai/gpt-6-luna");
+  });
+});
+
+describe("The setup guide's excursions come back to it (spec 2026-10-15)", () => {
+  // Where the guide got to, as the guide keeps it: its vault, on the overview.
+  const PROGRESS = "kv-onboarding-progress";
+  const kept = new Map<string, string>();
+  beforeEach(() => {
+    kept.clear();
+    kept.set(PROGRESS, JSON.stringify({ vault: "v-1", step: "notes" }));
+    vi.stubGlobal("localStorage", { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) });
+  });
+  const hash = () => window.location.hash;
+  /** The guide's Finish and Skip forget its progress before they hand over (Onboarding.tsx). */
+  const forgetGuide = () => kept.delete(PROGRESS);
+
+  async function tripFromOverview() {
+    window.location.hash = "#/welcome/notes/v-1";
+    mount();
+    await waitFor(() => expect(screens.guide).not.toBeNull());
+    act(() => screens.guide!.onVisit("v-1", "sources"));
+    await waitFor(() => expect(hash()).toBe("#/vault/v-1"));
+    await waitFor(() => expect(screens.workspace).not.toBeNull());
+  }
+
+  it("a card on the overview opens the vault, whose Back says Setup guide and returns to the overview", async () => {
+    await tripFromOverview();
+    expect(screens.workspace!.backLabel).toBe("Setup guide");
+    expect(screens.workspace!.onGuide).toBeUndefined(); // Back already says it
+    act(() => screens.workspace!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/welcome/notes/v-1"));
+  });
+
+  it("a trip to Workflow Studio comes back to the guide's step it left from", async () => {
+    window.location.hash = "#/welcome/workflows/v-1";
+    mount();
+    await waitFor(() => expect(screens.guide).not.toBeNull());
+    act(() => screens.guide!.onRuns());
+    await waitFor(() => expect(hash()).toBe("#/workflows"));
+    await waitFor(() => expect(screens.workflows?.backLabel).toBe("Setup guide"));
+    expect(screens.workflows!.onGuide).toBeUndefined();
+    act(() => screens.workflows!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/welcome/workflows/v-1"));
+  });
+
+  it("Settings opened from the vault on the trip comes back to the guide too", async () => {
+    await tripFromOverview();
+    act(() => screens.workspace!.onSettings!());
+    await waitFor(() => expect(screens.settings?.backLabel).toBe("Setup guide"));
+    act(() => screens.settings!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/welcome/notes/v-1"));
+  });
+
+  it("once the guide is finished, the vault's Back goes to the vaults again", async () => {
+    window.location.hash = "#/welcome/notes/v-1";
+    mount();
+    await waitFor(() => expect(screens.guide).not.toBeNull());
+    act(() => {
+      forgetGuide();
+      screens.guide!.onFinish("v-1");
+    });
+    await waitFor(() => expect(hash()).toBe("#/vault/v-1"));
+    await waitFor(() => expect(screens.workspace).not.toBeNull());
+    expect(screens.workspace!.backLabel).toBeUndefined();
+    act(() => screens.workspace!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/"));
+  });
+
+  it("once the guide is skipped, Back goes to the vaults as before", async () => {
+    await tripFromOverview();
+    act(() => screens.workspace!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/welcome/notes/v-1"));
+    await waitFor(() => expect(screens.guide).not.toBeNull());
+    act(() => {
+      forgetGuide();
+      screens.guide!.onLeave();
+    });
+    await waitFor(() => expect(hash()).toBe("#/"));
+    window.location.hash = "#/vault/v-1";
+    await waitFor(() => expect(screens.workspace?.backLabel).toBeUndefined());
+    act(() => screens.workspace!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/"));
+  });
+
+  it("a vault the guide did not send the person to keeps Back to the vaults, and offers the guide beside it", async () => {
+    window.location.hash = "#/vault/v-1";
+    mount();
+    await waitFor(() => expect(screens.workspace).not.toBeNull());
+    expect(screens.workspace!.backLabel).toBeUndefined();
+    expect(screens.workspace!.onGuide).toBeTypeOf("function");
+    act(() => screens.workspace!.onBack());
+    await waitFor(() => expect(hash()).toBe("#/"));
   });
 });

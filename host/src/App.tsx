@@ -49,8 +49,17 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
   const inWorkspace = route.name === "vault" || route.name === "workflows" || route.name === "remote";
   const toIdentity = useCallback(() => navigate({ name: "settings", section: "identity" }), [navigate]);
   const toGuide = useCallback((step: OnboardingStep = "welcome", vault?: string) => navigate({ name: "welcome", step, ...(vault ? { vault } : {}) }), [navigate]);
-  // The guide screen that last sent the person into Workflow Studio: Studio's "Setup guide" goes back to it.
+  // The guide screen that sent the person into the app: a card on the overview, or Workflow Studio. Until the guide
+  // is finished or skipped, Back from the vault, Studio or Settings returns there instead of to the vaults: the
+  // guide's excursions always come back (spec 2026-10-15). Kept for this start; a restart reopens the guide anyway.
   const guideReturn = useRef<OnboardingStep | null>(null);
+  /** Back from a screen the shell frames: to the guide on a trip from it, else to the vaults. Read when clicked. */
+  const goBack = useCallback(() => {
+    const guide = guideProgress();
+    const from = guide ? guideReturn.current : null;
+    if (from && guide) toGuide(from, guide.vault);
+    else toVaults();
+  }, [toGuide, toVaults]);
   // A new install (or one stopped half-way) opens the setup guide from the landing, once per start.
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const gateDecided = useOnboardingGate(info, route.name === "vaults", appSettings, toGuide);
@@ -79,8 +88,8 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
     }),
     [identity.status?.authenticated, identity.status?.address, identity.status?.authenticatedAt, identity.status?.pending, signIn, signOut],
   );
-  // A sign-in completed on Settings › Identity: back to the landing.
-  useReturnHomeAfterSignIn(identity.status?.authenticated, route.name === "settings" && route.section === "identity", toVaults);
+  // A sign-in completed on Settings › Identity: back to the landing (to the setup guide, on a trip from it).
+  useReturnHomeAfterSignIn(identity.status?.authenticated, route.name === "settings" && route.section === "identity", goBack);
   // Coming back to a shell screen re-reads the sign-in state (a flow may have completed meanwhile).
   useEffect(() => {
     if (!inWorkspace) void identity.refresh();
@@ -138,16 +147,19 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
     return () => window.removeEventListener("keydown", onKey);
   }, [inWorkspace, navigate, toSettings]);
 
+  // On a trip from the setup guide, Back says where it goes; its own "Setup guide" button would say it twice.
+  const guide = guideProgress();
+  const onTrip = Boolean(guide && guideReturn.current);
+  const back = { onBack: goBack, ...(onTrip ? { backLabel: "Setup guide" } : {}) };
+
   let screen;
   switch (route.name) {
     case "vault":
-      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} onGuide={guideProgress()?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
+      screen = <WorkspaceScreen client={client} driveId={route.id} appId="knowledge-vault" auth={workspaceAuth} {...back} onSettings={toSettings} onGuide={!onTrip && guide?.vault === route.id ? () => toGuide("notes", route.id) : undefined} pipeline={{ info, onModels: () => navigate({ name: "settings", section: "models" }), onRuns: (workflow?: string) => navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" }) }} />;
       break;
-    case "workflows": {
-      const guide = guideProgress();
-      screen = <WorkflowsScreen info={info} client={client} onBack={toVaults} onSettings={toSettings} onGuide={guide ? () => toGuide(guideReturn.current ?? guide.step, guide.vault) : undefined} />;
+    case "workflows":
+      screen = <WorkflowsScreen info={info} client={client} {...back} onSettings={toSettings} onGuide={!onTrip && guide ? () => toGuide(guide.step, guide.vault) : undefined} />;
       break;
-    }
     case "remote":
       screen = <RemoteRoute info={info} id={route.id} identity={hostIdentity} auth={workspaceAuth} onBack={toVaults} onSettings={toSettings} />;
       break;
@@ -159,10 +171,12 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           vaultId={route.vault}
           onStep={toGuide}
           onFinish={(id, view) => {
+            guideReturn.current = null; // finished: Back from the vault goes to the vaults again
             if (view) setOpenView(id, view);
             navigate({ name: "vault", id });
           }}
           onVisit={(id, view) => {
+            guideReturn.current = route.step ?? "notes";
             setOpenView(id, view);
             navigate({ name: "vault", id });
           }}
@@ -170,7 +184,10 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
             guideReturn.current = route.step ?? "notes";
             navigate(workflow ? { name: "workflows", workflow } : { name: "workflows" });
           }}
-          onLeave={toVaults}
+          onLeave={() => {
+            guideReturn.current = null; // skipped: everything goes back to the vaults, as before
+            toVaults();
+          }}
         />
       );
       break;
@@ -180,7 +197,7 @@ export function App({ info, client, bearer }: { info: SidecarInfo; client: Graph
           info={info}
           section={route.section}
           onSection={(section) => navigate({ name: "settings", section })}
-          onBack={toVaults}
+          {...back}
           onOpenWorkflows={toWorkflows}
           identity={identity}
           onOpenView={(v, view) => {

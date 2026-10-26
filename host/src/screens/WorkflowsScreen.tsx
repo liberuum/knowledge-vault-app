@@ -9,7 +9,7 @@ import { describeProblem } from "../problem.js";
 import { WorkspaceScreen } from "./WorkspaceScreen.js";
 
 /** Workflow Studio, full view, on the Workflows drive the engine keeps (created on first use). */
-export function WorkflowsScreen({ info, client, onBack, onSettings, onGuide }: { info: SidecarInfo; client: GraphQLReactorClient; onBack: () => void; onSettings?: () => void; /** The setup guide is still open: the way back to where it sent you from. */ onGuide?: () => void }) {
+export function WorkflowsScreen({ info, client, onBack, backLabel, onSettings, onGuide }: { info: SidecarInfo; client: GraphQLReactorClient; onBack: () => void; /** What Back says (the setup guide, on a trip from it). */ backLabel?: string; onSettings?: () => void; /** The setup guide is still open: the way back to where it sent you from. */ onGuide?: () => void }) {
   const [drive, setDrive] = useState<DriveRef | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
@@ -29,7 +29,7 @@ export function WorkflowsScreen({ info, client, onBack, onSettings, onGuide }: {
   if (!drive) {
     return (
       <div className="kv-vault-screen">
-        <AppBar title="Workflows" onBack={onBack} onSettings={onSettings} onGuide={onGuide} />
+        <AppBar title="Workflows" onBack={onBack} {...(backLabel ? { backLabel } : {})} onSettings={onSettings} onGuide={onGuide} />
         {error !== null ? (
           <ProblemCard problem={describeProblem(error, { what: "Workflow Studio" })} handlers={{ retry: () => setAttempt((n) => n + 1), back: onBack }} />
         ) : (
@@ -38,5 +38,5 @@ export function WorkflowsScreen({ info, client, onBack, onSettings, onGuide }: {
       </div>
     );
   }
-  return <WorkspaceScreen client={client} driveId={drive.id} appId="workflow-studio" fallbackTitle="Workflows" engine={info} onBack={onBack} onSettings={onSettings} onGuide={onGuide} />;
+  return <WorkspaceScreen client={client} driveId={drive.id} appId="workflow-studio" fallbackTitle="Workflows" engine={info} onBack={onBack} {...(backLabel ? { backLabel } : {})} onSettings={onSettings} onGuide={onGuide} />;
 }
