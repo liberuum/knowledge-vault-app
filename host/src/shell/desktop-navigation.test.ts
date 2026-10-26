@@ -55,6 +55,17 @@ describe("desktop navigation (reactor-browser 6.2.3-dev.70+)", () => {
     expect(desktopNavigation.location().pathname).toBe("/d/my-vault");
   });
 
+  it("says the open document is open, so closing it (the vault alone) is not taken for where it already is", () => {
+    rb.store.drives = [VAULT];
+    desktopNavigation.open({ driveSlug: "my-vault", nodeSlug: "config-9" });
+    expect(desktopNavigation.location().pathname).toBe("/d/my-vault/9");
+    // reactor-browser opens a target only when its path differs from this one (openTargetWith).
+    expect(desktopNavigation.location().pathname).not.toBe("/d/my-vault");
+    desktopNavigation.open({ driveSlug: "my-vault" });
+    expect(rb.store.selectedNodeId).toBeUndefined();
+    expect(desktopNavigation.location().pathname).toBe("/d/my-vault");
+  });
+
   it("opening a document keeps its vault selected", () => {
     rb.store.drives = [VAULT];
     desktopNavigation.open({ driveSlug: "my-vault", nodeSlug: "a-note-node-7" });

@@ -24,11 +24,17 @@ import {
  * Query params (the revision history, routed modals) stay in the URL, kept by the history guard, as before.
  */
 export const desktopNavigation: PHNavigation = {
-  /** What is open, as Connect's path for it: reactor-browser compares targets with it. */
+  /**
+   * What is open, as Connect's path for it, the open document included: reactor-browser skips opening a target
+   * whose path is this one. Without the document, "close it" (the vault itself) read as already open, so a
+   * document stayed on screen while the vault switched to Who has access, the processing queue or any other view.
+   */
   location: () => {
     const store = getPHStore();
     const drive = store?.drives?.find((d) => d.header.id === store.selectedDriveId);
-    return { pathname: drive ? targetPathname({ driveSlug: makeDriveSlug(drive) }) : targetPathname(undefined), search: window.location.search };
+    if (!drive) return { pathname: targetPathname(undefined), search: window.location.search };
+    const nodeSlug = store?.selectedNodeId ?? undefined;
+    return { pathname: targetPathname({ driveSlug: makeDriveSlug(drive), ...(nodeSlug ? { nodeSlug } : {}) }), search: window.location.search };
   },
   open(target, options) {
     // Connect's settings page: the shell has its own Settings screen, reached from its app bar.
