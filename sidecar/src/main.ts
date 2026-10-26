@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { ensureStoreId } from "./store-id.js";
-import { initVaultStructure } from "./vault-structure.js";
+import { initVaultStructure, nameVaultConfig, readNodes, vaultConfigId } from "./vault-structure.js";
 import { addVaultSource, findSourceByTitle } from "./vault-sources.js";
 import { checkModel } from "./model-check.js";
 import { homedir } from "node:os";
@@ -393,7 +393,17 @@ async function main(): Promise<void> {
       return addVaultSource(origin, vaultId, source, engineFetch);
     },
     checkModel: () => checkModel({ gatewayUrl: `http://127.0.0.1:${boundControlPort}${GATEWAY_PATH}`, gatewayKey, provider: readSettings(cfg.dataDir).models.provider }),
-    renameVault: (id, name) => renameVaultDrive(origin, id, name, engineFetch),
+    renameVault: async (id, name) => {
+      const vault = await renameVaultDrive(origin, id, name, engineFetch);
+      // The vault app shows its config's name before the drive's: renamed there too (vault-structure.ts).
+      await readNodes(origin, id, engineFetch)
+        .then((nodes) => {
+          const configId = vaultConfigId(nodes);
+          return configId ? nameVaultConfig(origin, configId, name, engineFetch) : false;
+        })
+        .catch((e: unknown) => console.warn(`[sidecar] vault ${id}: renamed, but its config keeps the old name (${e instanceof Error ? e.message : String(e)})`));
+      return vault;
+    },
     deleteVault: (id) => deleteVaultDrive(origin, id, engineFetch),
     workflowsDrive,
     pipelines,

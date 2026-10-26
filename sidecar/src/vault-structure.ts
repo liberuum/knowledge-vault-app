@@ -30,15 +30,47 @@ export const VAULT_SINGLETONS: ReadonlyArray<{ name: string; documentType: strin
 
 type DriveNode = { id: string; kind: string; name: string; parentFolder?: string | null; documentType?: string };
 
-export async function readNodes(origin: string, driveId: string, f: typeof fetch): Promise<DriveNode[]> {
-  const data = await gql<{ document: { document: { state: { global?: { nodes?: DriveNode[] }; nodes?: DriveNode[] } | null } } }>(
+/** The vault's name (the drive's) and its nodes, in one read. */
+export async function readVaultDrive(origin: string, driveId: string, f: typeof fetch): Promise<{ name: string; nodes: DriveNode[] }> {
+  const data = await gql<{ document: { document: { name?: string | null; state: { global?: { name?: string | null; nodes?: DriveNode[] }; nodes?: DriveNode[] } | null } } }>(
     origin,
-    `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+    `query($id: String!) { document(idOrSlug: $id) { document { name state } } }`,
     { id: driveId },
     f,
   );
-  const state = data.document.document.state;
-  return state?.global?.nodes ?? state?.nodes ?? [];
+  const doc = data.document.document;
+  return { name: (doc.state?.global?.name || doc.name || "").trim(), nodes: doc.state?.global?.nodes ?? doc.state?.nodes ?? [] };
+}
+
+export async function readNodes(origin: string, driveId: string, f: typeof fetch): Promise<DriveNode[]> {
+  return (await readVaultDrive(origin, driveId, f)).nodes;
+}
+
+/**
+ * Names the vault in its own config (`bai/vault-config`), which the vault app shows before the drive's name
+ * (use-vault-name.ts in the vault package): set when the vault is made, kept in step when it is renamed.
+ * INITIALIZE_CONFIG is the model's only way to set the name, and it sets the domain too, so the domain the
+ * config has is kept. `onlyIfUnnamed`: leave a config that has a name as it is. Says whether it wrote.
+ */
+export async function nameVaultConfig(origin: string, configId: string, name: string, f: typeof fetch, options: { onlyIfUnnamed?: boolean } = {}): Promise<boolean> {
+  const wanted = name.trim();
+  if (!wanted) return false;
+  const data = await gql<{ document: { document: { state: { global?: { name?: string | null; domain?: string | null } } | null } } }>(
+    origin,
+    `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+    { id: configId },
+    f,
+  );
+  const config = data.document.document.state?.global ?? {};
+  const current = config.name?.trim() ?? "";
+  if (current === wanted || (options.onlyIfUnnamed && current)) return false;
+  await execute(origin, configId, toActions([{ type: "INITIALIZE_CONFIG", input: { name: wanted, domain: config.domain ?? "", updatedAt: new Date().toISOString() } }]), f);
+  return true;
+}
+
+/** The vault's config document, when it has one. */
+export function vaultConfigId(nodes: readonly DriveNode[]): string | undefined {
+  return nodes.find((n) => n.kind === "file" && n.documentType === "bai/vault-config")?.id;
 }
 
 /** Path ("ops/queue") → folder id, for the folders already in the drive. */
@@ -60,7 +92,7 @@ function folderPaths(nodes: readonly DriveNode[]): Map<string, string> {
 
 /** Adds what is missing — folders parents first, in one checked batch — then the standing documents, each moved into its folder. */
 export async function initVaultStructure(origin: string, driveId: string, fetchImpl: typeof fetch = fetch): Promise<{ folders: number; documents: number }> {
-  const nodes = await readNodes(origin, driveId, fetchImpl);
+  const { name: vaultName, nodes } = await readVaultDrive(origin, driveId, fetchImpl);
   const folderIds = folderPaths(nodes);
   const adds: Array<{ type: string; input: { id: string; name: string; parentFolder: string | null } }> = [];
   for (const folder of VAULT_FOLDERS) {
@@ -74,6 +106,7 @@ export async function initVaultStructure(origin: string, driveId: string, fetchI
 
   const present = new Set(nodes.filter((n) => n.kind === "file").map((n) => n.documentType));
   let documents = 0;
+  let configId: string | undefined;
   for (const s of VAULT_SINGLETONS) {
     if (present.has(s.documentType)) continue;
     const created = await gql<Record<string, { createDocument: { id: string } }>>(
@@ -94,6 +127,15 @@ export async function initVaultStructure(origin: string, driveId: string, fetchI
       );
     }
     documents += 1;
+    if (s.documentType === "bai/vault-config") configId = id;
+  }
+  // The vault's name in its config too, the one the vault app shows; a vault made before this, unnamed there, gets
+  // it now. Never in the way of the rest: a vault without it still opens, with its drive's name.
+  configId ??= vaultConfigId(nodes);
+  if (configId) {
+    await nameVaultConfig(origin, configId, vaultName, fetchImpl, { onlyIfUnnamed: true }).catch((e: unknown) =>
+      console.warn(`[sidecar] vault ${driveId}: its config keeps no name for now (${e instanceof Error ? e.message : String(e)})`),
+    );
   }
   return { folders: adds.length, documents };
 }
