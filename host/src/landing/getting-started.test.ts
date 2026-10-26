@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askedAQuestion, gettingStartedSteps, nextStep, readRemembered, remember } from "./getting-started.js";
+import { askedAQuestion, gettingStartedSteps, guideCardDone, guideCardVisit, nextStep, readRemembered, remember } from "./getting-started.js";
 
 function storage(entries: Record<string, string> = {}): Storage {
   const m = new Map(Object.entries(entries));
@@ -38,5 +38,26 @@ describe("getting started", () => {
     remember(s, { explored: { graph: true } });
     remember(s, { explored: { search: true }, hidden: true });
     expect(readRemembered(s)).toEqual({ explored: { graph: true, search: true }, hidden: true });
+  });
+});
+
+describe("the setup guide's overview cards", () => {
+  it("record what the front page's buttons record, so a view explored from the guide is ticked on both", () => {
+    const s = storage();
+    for (const card of ["notes", "graph", "search", "runs", "sources"] as const) remember(s, guideCardVisit(card));
+    const saved = readRemembered(s);
+    expect(saved).toEqual({ readNotes: true, explored: { graph: true, search: true, processing: true, sources: true } });
+    const steps = gettingStartedSteps({ ...facts, readNotes: saved.readNotes === true, explored: saved.explored ?? {} });
+    expect(steps.filter((x) => x.done).map((x) => x.id)).toEqual(["notes", "graph", "search", "processing"]);
+  });
+
+  it("tick from that record; the chat card once a question was asked, not when the chat was only opened", () => {
+    expect(guideCardVisit("chat")).toEqual({});
+    expect(guideCardDone("chat", {}, false)).toBe(false);
+    expect(guideCardDone("chat", {}, true)).toBe(true);
+    expect(guideCardDone("notes", { readNotes: true }, false)).toBe(true);
+    expect(guideCardDone("runs", { explored: { processing: true } }, false)).toBe(true);
+    expect(guideCardDone("graph", { explored: { search: true } }, false)).toBe(false);
+    expect(guideCardDone("sources", { explored: { sources: true } }, false)).toBe(true);
   });
 });

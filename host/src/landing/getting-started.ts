@@ -3,7 +3,9 @@ import type { VaultSummary } from "../vaults.js";
 export type StepId = "model" | "vault" | "source" | "notes" | "chat" | "graph" | "search" | "processing" | "tools";
 export type StepGroup = "setup" | "explore" | "optional";
 export type Step = { id: StepId; done: boolean; group: StepGroup };
-export type Explored = Partial<Record<"graph" | "search" | "processing", true>>;
+/** Views opened from a step's button or a setup-guide card. `sources` is the guide's "Add more sources" card only:
+ * the setup step "source" ticks from the sources a vault holds. */
+export type Explored = Partial<Record<"graph" | "search" | "processing" | "sources", true>>;
 export type Facts = {
   modelReady: boolean;
   vaults: readonly VaultSummary[];
@@ -88,4 +90,43 @@ export function askedAQuestion(storage?: Storage): boolean {
     }
   }
   return false;
+}
+
+/** The cards on the setup guide's overview (onboarding/OverviewStep.tsx). */
+export type GuideCard = "chat" | "notes" | "graph" | "search" | "sources" | "runs";
+
+/**
+ * Whether a card on the guide's overview is done: the Getting started step it stands for, read from the same record
+ * the front page reads, so opening a view from either counts on both. The chat card is done once a question was
+ * asked (its step is "Ask your vault a question"), not when the chat was only opened.
+ */
+export function guideCardDone(card: GuideCard, saved: Remembered, asked: boolean): boolean {
+  switch (card) {
+    case "chat":
+      return asked;
+    case "notes":
+      return saved.readNotes === true;
+    case "runs":
+      return saved.explored?.processing === true;
+    default:
+      return saved.explored?.[card] === true;
+  }
+}
+
+/** What opening a card records: what the front page's button for that step records. */
+export function guideCardVisit(card: GuideCard): Remembered {
+  switch (card) {
+    case "chat":
+      return {};
+    case "notes":
+      return { readNotes: true };
+    case "runs":
+      return { explored: { processing: true } };
+    case "graph":
+      return { explored: { graph: true } };
+    case "search":
+      return { explored: { search: true } };
+    case "sources":
+      return { explored: { sources: true } };
+  }
 }

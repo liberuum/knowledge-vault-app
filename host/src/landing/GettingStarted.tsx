@@ -52,8 +52,9 @@ type Props = {
  * Getting started (design §5): the steps that make the app useful, each ticked from what was actually done.
  *
  * On the front page it stays out of the vaults' way: where you are (a track of the steps, by stage), the one
- * thing to do next with the only highlighted button, and the whole list a click away — until it is hidden or,
- * every step done, folds to a line. Settings shows the whole list, always, and the front-page switch.
+ * thing to do next with the only highlighted button, and the whole list a click away — until it is hidden, or
+ * every required step is done: then it leaves the front page, and comes back only if one is left to do. Settings
+ * shows the whole list, always (the optional step with it), and the front-page switch.
  */
 export function GettingStarted({ info, vaults, modelReady, storage, onModels, onNewVault, vaultFormOpen = false, onOpenView, onWorkflows, onGuide, onOpenSettings, variant = "panel" }: Props) {
   const [saved, setSaved] = useState<Remembered>(() => readRemembered(storage));
@@ -111,6 +112,8 @@ export function GettingStarted({ info, vaults, modelReady, storage, onModels, on
   const withNotes = vaults.find((v) => v.noteCount > 0) ?? latest;
   const mcp = `${info.origin}/mcp`;
   const count = allDone ? "Every step done" : `${doneCount} of ${required.length} steps done`;
+  // Done: nothing is left to point at on the front page. Settings › Getting started keeps the list.
+  if (variant === "panel" && allDone) return null;
 
   const button = (id: StepId, label: string, onClick: () => void) => (
     <button type="button" className={id === next ? "kv-button kv-button-primary" : "kv-button kv-gs-do"} onClick={onClick}>
@@ -232,42 +235,12 @@ export function GettingStarted({ info, vaults, modelReady, storage, onModels, on
     </div>
   );
 
-  const toolsLeft = !steps.find((s) => s.id === "tools")?.done;
-  const doneCard = (
-    <div className="kv-gs-done">
-      <span className="kv-gs-done-mark" aria-hidden="true">
-        <CheckIcon />
-      </span>
-      <span className="kv-gs-done-text">
-        <strong>You've set it up and seen what it does.</strong>
-        <span>{toolsLeft ? "One optional step is left: using your vault from Claude Code, Codex or Gemini CLI." : "The optional step too — nothing is left on this list."}</span>
-      </span>
-      <span className="kv-gs-done-actions">
-        {toolsLeft && (
-          <button
-            type="button"
-            className="kv-button kv-gs-do"
-            onClick={() => {
-              setListOpen(true);
-              setShowTools(true);
-            }}
-          >
-            Show the commands
-          </button>
-        )}
-        <button type="button" className="kv-button kv-button-primary" onClick={hide}>
-          Hide this list
-        </button>
-      </span>
-    </div>
-  );
-
   return (
     <section className="kv-gs" aria-labelledby={headingId} data-variant={variant} data-all-done={allDone}>
       <div className="kv-gs-head">
         <div className="kv-gs-headline">
           <h3 id={headingId} className={variant === "panel" ? "kv-gs-title" : "kv-visually-hidden"}>
-            {variant === "panel" && allDone ? "You're all set" : "Getting started"}
+            Getting started
           </h3>
           <span className="kv-gs-count">{count}</span>
         </div>
@@ -304,7 +277,7 @@ export function GettingStarted({ info, vaults, modelReady, storage, onModels, on
 
       {variant === "panel" ? (
         <>
-          {!listOpen && (allDone ? doneCard : nextCard)}
+          {!listOpen && nextCard}
           {listOpen && list}
         </>
       ) : (

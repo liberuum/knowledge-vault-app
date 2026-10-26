@@ -104,27 +104,21 @@ describe("Getting started", () => {
     expect(remembered(storage)).toMatchObject({ hidden: false });
   });
 
-  it("every step done: a line, not a list — Hide this list, and the optional commands inside their own step", () => {
-    const writeText = vi.fn(async () => {});
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  it("every required step done: the front page shows nothing; Settings keeps the list, the optional step with it", () => {
     const storage = everyStep();
-    render(<GettingStarted info={info} vaults={[research]} modelReady storage={storage} onNewVault={vi.fn()} />);
-    const card = screen.getByRole("region", { name: "You're all set" });
-    expect(within(card).getByText("Every step done")).toBeTruthy();
-    expect(within(card).getByText(/One optional step is left/)).toBeTruthy();
-    expect(within(card).getByRole("button", { name: "Hide this list" }).className).toMatch(/kv-button-primary/);
+    const { container } = render(<GettingStarted info={info} vaults={[research]} modelReady storage={storage} onNewVault={vi.fn()} />);
+    expect(container.innerHTML).toBe("");
+    cleanup();
+    render(<GettingStarted info={info} vaults={[research]} modelReady storage={storage} onNewVault={vi.fn()} variant="settings" />);
+    expect(screen.getByText("Every step done")).toBeTruthy();
+    expect(screen.getByText("Use your vault from Claude Code, Codex or Gemini CLI")).toBeTruthy();
+  });
 
-    fireEvent.click(within(card).getByRole("button", { name: "Show the commands" }));
-    const tools = within(card).getByText("Use your vault from Claude Code, Codex or Gemini CLI").closest("li")!;
-    expect(within(tools).getByText("Claude Code")).toBeTruthy();
-    expect(within(tools).getByText(/claude mcp add --transport http knowledge-vault http:\/\/127\.0\.0\.1:4201\/mcp/)).toBeTruthy();
-
-    // With the list open, the header's close still hides it; folded back, the line's own button does.
-    expect(within(card).getByRole("button", { name: "Hide Getting started" })).toBeTruthy();
-    fireEvent.click(within(card).getByRole("button", { name: "Show less" }));
-    fireEvent.click(within(card).getByRole("button", { name: "Hide this list" }));
-    expect(screen.queryByRole("region")).toBeNull();
-    expect(remembered(storage)).toMatchObject({ hidden: true });
+  it("one step left (the chat never asked): the front page shows it again, with that step next", () => {
+    const storage = memoryStorage({ "kv-getting-started:v1": JSON.stringify({ readNotes: true, explored: { graph: true, search: true, processing: true } }) });
+    render(<GettingStarted info={info} vaults={[research]} modelReady storage={storage} onNewVault={vi.fn()} onOpenView={vi.fn()} />);
+    expect(screen.getByText("7 of 8 steps done")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ask a question" }).className).toMatch(/kv-button-primary/);
   });
 
   it("on a first run, the model comes first; and once the vault form is on screen, the step points to it instead of a second button", () => {
