@@ -13,6 +13,7 @@ import {
   StaticPackageManager,
 } from "@powerhousedao/reactor-browser";
 import type { DocumentModelLib } from "document-model";
+import { installDesktopNavigation } from "./shell/desktop-navigation.js";
 import { setHistoryEditorRestorer } from "./shell/history-guard.js";
 import { hostToasts } from "./components/HostToasts.js";
 import { remoteClientModule } from "./remote-client-module.js";
@@ -92,6 +93,8 @@ export function activateAfterCleanup(target: Target): void {
  */
 export function installReactor(info: SidecarInfo, packages: readonly DocumentModelLib[], tokenProvider?: Target["tokenProvider"]): GraphQLReactorClient {
   ensurePHEventHandlers();
+  // Opening a drive or a document writes the selection into the store, not Connect's path (shell/desktop-navigation.ts).
+  installDesktopNavigation();
   // Back and forward reopen the editor each history entry had open (shell/history-guard.ts).
   setHistoryEditorRestorer((nodeId) => setSelectedNode(nodeId));
   libs = packages;
