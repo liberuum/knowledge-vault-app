@@ -3,6 +3,7 @@ import { PROVIDER_LABELS, type AppSettings } from "../settings.js";
 import { anthropicJson as defaultAnthropicJson } from "./anthropic.js";
 import type { ChatGptBridge } from "./chatgpt.js";
 import { openAiError, providerMessage } from "./errors.js";
+import { patientFetch } from "./patient-fetch.js";
 import { createQueue } from "./queue.js";
 import { modelsUrl, providerHeaders } from "../provider-auth.js";
 import { adaptPayload, withoutRefusedParameter } from "./compat.js";
@@ -21,6 +22,9 @@ export type GatewayDeps = {
   readSettings: () => AppSettings;
   readModelKey: () => string | undefined;
   fetchImpl?: typeof fetch;
+  /** How a call reaches a model server on this computer or the local network: without fetch's five-minute limits
+   * (patient-fetch.ts) unless a test passes its own. */
+  localFetch?: typeof fetch;
   anthropicJson?: AnthropicJson;
   /** Provider "chatgpt": the user's ChatGPT plan, through the Responses API (gateway/chatgpt.ts). */
   chatgpt?: ChatGptBridge;
@@ -39,6 +43,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown, cors: Reco
 
 export function createGateway(deps: GatewayDeps) {
   const f = deps.fetchImpl ?? fetch;
+  // A local model may take longer than fetch's own limits allow; a test that brings its fetch keeps it for both.
+  const local = deps.localFetch ?? (deps.fetchImpl ? f : (patientFetch as typeof fetch));
   const contextFor = deps.contextFor ?? localContextProbe(f);
   const catalogContext = deps.catalogContext ?? catalogContextOf;
   const queue = createQueue();
@@ -126,7 +132,7 @@ export function createGateway(deps: GatewayDeps) {
       let overloaded = 0;
       for (let retries = 0; ; retries++) {
         try {
-          upstream = await f(isChat ? `${endpoint}/chat/completions` : modelsUrl(endpoint), {
+          upstream = await (settings.models.local ? local : f)(isChat ? `${endpoint}/chat/completions` : modelsUrl(endpoint), {
             method: isChat ? "POST" : "GET",
             headers,
             ...(isChat ? { body: JSON.stringify(payload) } : {}),
