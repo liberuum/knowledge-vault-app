@@ -551,6 +551,14 @@ async function main(): Promise<void> {
       if (r.skipped.length) console.warn(`[sidecar] ${r.skipped.length} pipeline(s) have unpublished edits in Workflow Studio and were left as they are: ${r.skipped.join(", ")}`);
     })
     .catch((e: unknown) => console.warn(`[sidecar] could not bring the pipelines up to the template: ${e instanceof Error ? e.message : String(e)}`))
+    // A pipeline set up from an older template than the vault package ships gets the new one (its new steps) in place, as Update would.
+    .then(() => pipelines.followTemplateUpgrades())
+    .then((r) => {
+      if (r.updated.length) console.log(`[sidecar] ${r.updated.length} pipeline(s) brought to the vault package's template`);
+      if (r.skipped.length) console.warn(`[sidecar] ${r.skipped.length} pipeline(s) left as they are (unpublished edits in Workflow Studio, or no model set up); Update stays on offer: ${r.skipped.join(", ")}`);
+      if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} pipeline(s) could not be brought to the template; Update stays on offer: ${r.failed.join(", ")}`);
+    })
+    .catch((e: unknown) => console.warn(`[sidecar] could not bring the pipelines to the vault package's template: ${e instanceof Error ? e.message : String(e)}`))
     // Each vault's Reweave notes workflow: vaults set up before it existed get one; a newer template replaces it.
     .then(() => pipelines.followReweave())
     .then((r) => {

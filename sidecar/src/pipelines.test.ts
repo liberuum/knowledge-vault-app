@@ -228,6 +228,32 @@ describe("pipeline manager — Update in place", () => {
     });
   });
 
+  it("at start, brings each pipeline set up from an older template to the installed one, as Update would; leaves one switched off, one with unpublished Studio edits, and one already current", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    const record = readPipelines(h.dataDir).vault1!;
+    writePipelines(h.dataDir, {
+      vault1: { ...record, templateDigest: "an-older-template" },
+      edited: { ...record, workflowId: "wf-edited", templateDigest: "an-older-template" },
+      off: { ...record, workflowId: "wf-off", templateDigest: "an-older-template", disabled: "switched off in the app" },
+      current: { ...record, workflowId: "wf-current" },
+    });
+    h.engine.states["wf-1"] = { ...running, version: 3 };
+    h.engine.states["wf-edited"] = { ...running, version: 4 }; // edited in Studio since its last publish
+    const before = h.engine.calls.length;
+
+    expect(await h.manager.followTemplateUpgrades()).toEqual({ updated: ["vault1"], skipped: ["edited"], failed: [] });
+    expect(readPipelines(h.dataDir).vault1!.templateDigest).toBe(templateDigest(inPlace));
+    expect(readPipelines(h.dataDir).edited!.templateDigest).toBe("an-older-template");
+    expect(readPipelines(h.dataDir).off!.templateDigest).toBe("an-older-template");
+    // The upgrade is Update's: the same workflow edited to the template, then published.
+    const written = h.engine.calls.slice(before).filter((c) => c.query.includes("execute(")).map((c) => String(c.variables.id));
+    expect(new Set(written)).toEqual(new Set(["wf-1", "conn-1"]));
+    expect(h.instantiate).toHaveBeenCalledTimes(1); // the first setup only: nothing is made anew
+
+    expect(await h.manager.followTemplateUpgrades()).toEqual({ updated: [], skipped: ["edited"], failed: [] });
+  });
+
   it("a rejected workflow edit puts the workflow back as last published, never publishes, and leaves the record and the old secrets", async () => {
     const h = deps({ template: inPlace });
     await h.manager.ensure("vault1");

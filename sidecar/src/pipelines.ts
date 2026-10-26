@@ -711,6 +711,43 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       return out;
     },
 
+    /**
+     * At start: a pipeline set up from an older template than the installed vault package ships (its digest differs)
+     * is brought to it as Update would (updateInPlace: the workflow, its id and its runs stay), so a new step, such
+     * as Check vault health, reaches every vault without anyone clicking Update. Left as they are: a switched-off
+     * pipeline (set up from the template when it is switched on again), one with unpublished edits from Workflow
+     * Studio (Update would publish over them; its Update stays on offer), and every vault while no model is set up.
+     */
+    async followTemplateUpgrades(): Promise<{ updated: string[]; skipped: string[]; failed: string[] }> {
+      const out = { updated: [] as string[], skipped: [] as string[], failed: [] as string[] };
+      const digest = templateDigest(deps.template);
+      if (!digest) return out;
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId];
+        if (!record || record.disabled || record.templateDigest === digest) return;
+        try {
+          const workflow = await gql<{ document: { document: { state: { global: { version?: number; published?: { version?: number } | null } } } } }>(
+            deps.origin,
+            `query($id: String!) { document(idOrSlug: $id) { document { state } } }`,
+            { id: record.workflowId },
+            f,
+          ).catch(() => null);
+          const global = workflow?.document.document.state.global;
+          if (global?.published && global.version !== global.published.version) {
+            out.skipped.push(vaultId);
+            return;
+          }
+          const result = await ensurePipeline(vaultId);
+          if (result.state === "ready") out.updated.push(vaultId);
+          else out.skipped.push(vaultId);
+        } catch (error) {
+          console.warn(`[pipelines] could not bring vault ${vaultId}'s pipeline to the installed template; Update stays on offer: ${error instanceof Error ? error.message : String(error)}`);
+          out.failed.push(vaultId);
+        }
+      });
+      return out;
+    },
+
     /** At start: every vault's pipeline gets its Reweave notes workflow, or has it brought to a newer template in place (ensureReweave). */
     async followReweave(): Promise<{ created: string[]; updated: string[]; failed: string[] }> {
       const out = { created: [] as string[], updated: [] as string[], failed: [] as string[] };
