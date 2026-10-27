@@ -129,6 +129,15 @@ jobs:
           # linuxdeploy's AppImage plugin signs whenever LDAI_SIGN is set, whatever its value (even empty), and a
           # failed signature aborts the bundle: so it is set here, with a key, never in the job's env.
           { echo "LDAI_SIGN=1"; echo "LDAI_SIGN_KEY=$fpr"; } >> "$GITHUB_ENV"
+      - name: Quiet Spotlight and XProtect, so the disk image detaches (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Both scan a freshly mounted disk image file by file, and the engine is ~175,000 files: they kept the
+          # image busy past hdiutil's detach timeout ("timeout for DiskArbitration expired", 0.2.5's first run).
+          # A build machine needs neither.
+          sudo mdutil -a -i off || true
+          sudo pkill -9 XProtect >/dev/null 2>&1 || true
+          for i in $(seq 1 20); do pgrep XProtect >/dev/null || break; sleep 3; done
       - id: bundle
         # macOS: hdiutil fails now and then on GitHub's runners (Resource busy); one retry below
         continue-on-error: ${{ runner.os == 'macOS' }}
@@ -145,6 +154,13 @@ jobs:
           releaseDraft: true # public only after every target passed (publish job)
           prerelease: true # until the builds are signed
           assetNamePattern: ${{ matrix.assets }}
+      - name: Clear what the first attempt left mounted (macOS)
+        if: runner.os == 'macOS' && steps.bundle.outcome == 'failure'
+        run: |
+          # A detach that timed out leaves the scratch image attached, and the retry would meet it busy.
+          for v in /Volumes/dmg.*; do [ -d "$v" ] && { hdiutil detach "$v" -force || true; }; done
+          rm -f src-tauri/target/release/bundle/macos/rw.*.dmg
+          sudo pkill -9 XProtect >/dev/null 2>&1 || true
       - name: Retry the macOS bundle once (verbose, so a second failure says why)
         if: runner.os == 'macOS' && steps.bundle.outcome == 'failure'
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
