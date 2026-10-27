@@ -114,8 +114,10 @@ export function orphans(nodeModules, rootManifest) {
  * Packages trimmed to the files the engine loads. onnxruntime-web ships every flavour (all, webgl, jsep, jspi, …,
  * ~118 MB); transformers.web.js imports `onnxruntime-web/webgpu` → ort.webgpu.bundle.min.mjs, which loads the
  * asyncify wasm. Applied only when every kept file is there: a renamed file in a new version leaves the package
- * whole rather than breaking search. `alsoDrop` goes only with it — knowledge-note's own copy of the wasm is the
- * embedder's fallback for when onnxruntime-web/dist is missing (and for its CDN mode, unused here).
+ * whole rather than breaking search. `alsoDrop` goes only with it: the vault's assets package carries its own
+ * copy of the wasm and a self-contained transformers bundle, the embedder's fallbacks for when onnxruntime-web/dist
+ * is missing and for its registry-CDN mode, neither used here. Its model stays: it is what the engine embeds with,
+ * offline.
  */
 export const TRIMS = [
   {
@@ -123,7 +125,10 @@ export const TRIMS = [
     dir: "dist",
     keep: ["ort.webgpu.bundle.min.mjs", "ort-wasm-simd-threaded.asyncify.mjs", "ort-wasm-simd-threaded.asyncify.wasm", "ort.node.min.mjs", "ort.node.min.js"],
     dropDirs: ["lib", "docs"],
-    alsoDrop: ["@powerhousedao/knowledge-note/dist/node/wasm"],
+    alsoDrop: [
+      "@powerhousedao/knowledge-vault-assets/dist/wasm",
+      "@powerhousedao/knowledge-vault-assets/dist/transformers.web.bundle.mjs",
+    ],
   },
 ];
 /** Build folders only a bundler reads (the `module` / `esnext` conditions); Node resolves build/src. */

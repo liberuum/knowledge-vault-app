@@ -143,20 +143,21 @@ describe("prune", () => {
       const nm = tree();
       const put = (f) => { mkdirSync(dirname(join(nm, f)), { recursive: true }); writeFileSync(join(nm, f), "x"); };
       for (const f of [...keep, ...DROP]) put(`onnxruntime-web/dist/${f}`);
-      for (const f of ["onnxruntime-web/package.json", "onnxruntime-web/lib/index.ts", "onnxruntime-web/docs/a.md", "onnxruntime-web/node_modules/onnxruntime-common/index.js", "@powerhousedao/knowledge-note/dist/node/wasm/ort-wasm-simd-threaded.asyncify.wasm", "@powerhousedao/knowledge-note/dist/node/models/m.onnx"]) put(f);
+      for (const f of ["onnxruntime-web/package.json", "onnxruntime-web/lib/index.ts", "onnxruntime-web/docs/a.md", "onnxruntime-web/node_modules/onnxruntime-common/index.js", "@powerhousedao/knowledge-vault-assets/dist/wasm/ort-wasm-simd-threaded.asyncify.wasm", "@powerhousedao/knowledge-vault-assets/dist/transformers.web.bundle.mjs", "@powerhousedao/knowledge-vault-assets/dist/models/m.onnx"]) put(f);
       prune(nm, "x86_64-unknown-linux-gnu");
       return nm;
     };
     const nm = build(KEEP);
     for (const f of KEEP) expect(has(nm, `onnxruntime-web/dist/${f}`), f).toBe(true);
     for (const f of DROP) expect(has(nm, `onnxruntime-web/dist/${f}`), f).toBe(false);
-    for (const f of ["onnxruntime-web/lib", "onnxruntime-web/docs", "@powerhousedao/knowledge-note/dist/node/wasm"]) expect(has(nm, f), f).toBe(false);
-    for (const f of ["onnxruntime-web/package.json", "onnxruntime-web/node_modules/onnxruntime-common/index.js", "@powerhousedao/knowledge-note/dist/node/models/m.onnx"]) expect(has(nm, f), f).toBe(true);
+    for (const f of ["onnxruntime-web/lib", "onnxruntime-web/docs", "@powerhousedao/knowledge-vault-assets/dist/wasm", "@powerhousedao/knowledge-vault-assets/dist/transformers.web.bundle.mjs"]) expect(has(nm, f), f).toBe(false);
+    // the model is what the engine embeds with
+    for (const f of ["onnxruntime-web/package.json", "onnxruntime-web/node_modules/onnxruntime-common/index.js", "@powerhousedao/knowledge-vault-assets/dist/models/m.onnx"]) expect(has(nm, f), f).toBe(true);
     // a version whose files are named differently: nothing goes, the fallback wasm included
     const renamed = build(KEEP.slice(1));
     for (const f of DROP) expect(has(renamed, `onnxruntime-web/dist/${f}`), f).toBe(true);
     expect(has(renamed, "onnxruntime-web/lib/index.ts")).toBe(true);
-    expect(has(renamed, "@powerhousedao/knowledge-note/dist/node/wasm/ort-wasm-simd-threaded.asyncify.wasm")).toBe(true);
+    expect(has(renamed, "@powerhousedao/knowledge-vault-assets/dist/wasm/ort-wasm-simd-threaded.asyncify.wasm")).toBe(true);
   });
   it("sweeps packages nothing declares any more, transitively, keeping the app's dependencies and undeclared imports", () => {
     const nm = tree();

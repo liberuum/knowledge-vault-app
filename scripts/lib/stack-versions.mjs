@@ -1,5 +1,5 @@
 // Every @powerhousedao/* package and document-model must share one stack version.
-const EXEMPT = new Set(["@powerhousedao/knowledge-note", "@powerhousedao/document-engineering"]);
+const EXEMPT = new Set(["@powerhousedao/knowledge-note", "@powerhousedao/knowledge-vault-assets", "@powerhousedao/document-engineering"]);
 export function isStackPackage(name) {
   return (name.startsWith("@powerhousedao/") || name === "document-model") && !EXEMPT.has(name);
 }
@@ -21,5 +21,19 @@ export function checkStackVersions(manifests, expected) {
 export function checkPgliteVersion(sidecarPin, switchboardPin) {
   if (!switchboardPin) return "switchboard: no @electric-sql/pglite dependency found — cannot verify the sidecar's pin";
   if (sidecarPin !== switchboardPin) return `sidecar: @electric-sql/pglite is ${sidecarPin}, the Switchboard pins ${switchboardPin}`;
+  return null;
+}
+
+/**
+ * The vault's embedding model and runtime are their own package, which the vault package names as an
+ * optional peer at one exact version. The engine embeds offline only if it installs exactly that version:
+ * without it, the embedder downloads the model from the registry on first use, and offline it falls back
+ * to keyword search, with nothing on screen to say so.
+ */
+export function checkVaultAssets(sidecarPin, vaultPeerPin) {
+  if (!vaultPeerPin) return "knowledge-note: no @powerhousedao/knowledge-vault-assets peer found — cannot verify the sidecar's pin";
+  if (sidecarPin !== vaultPeerPin) {
+    return `sidecar: @powerhousedao/knowledge-vault-assets is ${sidecarPin ?? "missing"}, the vault package needs ${vaultPeerPin}`;
+  }
   return null;
 }
