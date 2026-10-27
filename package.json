@@ -11,7 +11,7 @@
     "url": "https://github.com/liberuum/knowledge-vault-app/issues"
   },
   "private": true,
-  "version": "0.2.4",
+  "version": "0.2.5",
   "workspaces": [
     "host",
     "sidecar"
