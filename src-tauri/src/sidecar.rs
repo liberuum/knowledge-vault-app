@@ -416,7 +416,7 @@ pub fn spawn_sidecar(
         .lock()
         .unwrap()
         .location_accepted;
-    let (_, location) = crate::app_location::current();
+    let (bundle, location) = crate::app_location::current();
     if let Some(value) = crate::app_location::engine_hint(
         location,
         &paths.data_dir,
@@ -471,6 +471,11 @@ pub fn spawn_sidecar(
         });
     }
     emit_status(app);
+    if location == crate::app_location::Location::Installed
+        && let Some(bundle) = bundle
+    {
+        clear_after_move(app, bundle);
+    }
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -684,6 +689,39 @@ pub fn accept_location(app: &AppHandle) {
         .lock()
         .unwrap()
         .location_accepted = true;
+}
+
+/// macOS, from Applications: what a move into Applications left beside this copy (app_location.rs)
+/// is deleted once per run of the app, in the background (some 200,000 files take seconds), and the
+/// outcome goes to the engine's log, which is open by now, so a copy that stays is never silent.
+fn clear_after_move(app: &AppHandle, bundle: std::path::PathBuf) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let removed =
+                crate::app_location::remove_leftovers(&bundle, std::time::SystemTime::now());
+            let state = app.state::<Mutex<SidecarState>>();
+            for (path, result) in removed {
+                let line = match result {
+                    Ok(passes) => format!(
+                        "[shell] removed {}, left by a move to Applications{}",
+                        path.display(),
+                        if passes > 1 {
+                            format!(" (in {passes} passes)")
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    Err(e) => format!(
+                        "[shell] could not remove {}, left by a move to Applications: {e}; trying again at the next start",
+                        path.display()
+                    ),
+                };
+                state.lock().unwrap().record_line(&line);
+            }
+        });
+    });
 }
 
 pub fn retry_sidecar(app: &AppHandle) -> Result<(), String> {

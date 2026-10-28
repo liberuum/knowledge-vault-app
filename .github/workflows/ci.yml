@@ -143,5 +143,8 @@ jobs:
       - name: The shell's process-tree cleanup on real processes
         run: cargo test proc_tree
         working-directory: src-tauri
+      - name: Moving the app into Applications, on APFS
+        run: cargo test app_location
+        working-directory: src-tauri
       - name: The engine's child reaper on real processes
         run: bunx vitest run sidecar/src/child-reaper.test.ts

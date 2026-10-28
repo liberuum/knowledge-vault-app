@@ -146,29 +146,68 @@ pub fn engine_hint(
     location.env_value()
 }
 
-/// Removes a file, a symlink or a folder.
-fn remove_any(path: &Path) -> io::Result<()> {
+/// How many times a folder is deleted before its "Directory not empty" is reported.
+const REMOVE_PASSES: usize = 25;
+
+/// Deletes a folder, again while what is left says "Directory not empty". `remove_dir_all` lists a
+/// folder while it deletes from it, and on macOS that listing now and then ends after its first
+/// 2 KB batch with the rest of the folder still there: seen deleting a 200,000-file copy of the app
+/// in /Applications, at one of the 446 folders that take more than one batch, a different one each
+/// time. Each pass deletes what the last one missed; returns how many passes it took.
+fn remove_dir_again(dir: &Path, remove: &dyn Fn(&Path) -> io::Result<()>) -> io::Result<usize> {
+    let mut pass = 1;
+    loop {
+        match remove(dir) {
+            Ok(()) => return Ok(pass),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(pass),
+            Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty && pass < REMOVE_PASSES => {
+                pass += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Removes a file, a symlink or a folder; for a folder, the passes it took (`remove_dir_again`).
+fn remove_counting(path: &Path) -> io::Result<usize> {
     match std::fs::symlink_metadata(path) {
-        Ok(m) if m.is_dir() => std::fs::remove_dir_all(path),
-        Ok(_) => std::fs::remove_file(path),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(m) if m.is_dir() => remove_dir_again(path, &|dir| std::fs::remove_dir_all(dir)),
+        Ok(_) => std::fs::remove_file(path).map(|()| 1),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
         Err(e) => Err(e),
     }
 }
 
+/// Removes a file, a symlink or a folder.
+fn remove_any(path: &Path) -> io::Result<()> {
+    remove_counting(path).map(|_| ())
+}
+
+/// Where a move makes the new copy (`.<name>.moving`) and where it sets the replaced one aside
+/// (`.<name>.old`): beside the copy in Applications, hidden, and not named `.app`, so neither Finder
+/// nor Launchpad shows them as apps.
+fn beside(target: &Path) -> (PathBuf, PathBuf) {
+    let dir = target.parent().unwrap_or(Path::new(""));
+    let label = target.file_name().unwrap_or_default().to_string_lossy();
+    (
+        dir.join(format!(".{label}.moving")),
+        dir.join(format!(".{label}.old")),
+    )
+}
+
 /// Puts `bundle` into `dir` under its own name, replacing a copy already there. The new copy is made
 /// beside it under a hidden name first, so a failed copy leaves the installed app untouched; the old
-/// copy is moved aside and deleted only once the new one is in place, and put back if that fails.
+/// copy is then moved aside (and put back if the new one cannot take its place) and left for the new
+/// copy to delete once it runs (`remove_leftovers`). Deleting it here kept "Moving…" up for seconds
+/// longer, and a quit in that time left half of it behind for good.
 pub fn install_bundle(
     bundle: &Path,
     dir: &Path,
     copy: &dyn Fn(&Path, &Path) -> io::Result<()>,
 ) -> Result<PathBuf, String> {
     let name = bundle.file_name().ok_or("the app has no name")?;
-    let label = name.to_string_lossy();
     let target = dir.join(name);
-    let staging = dir.join(format!(".{label}.moving"));
-    let aside = dir.join(format!(".{label}.old"));
+    let (staging, aside) = beside(&target);
     let _ = remove_any(&staging);
     if let Err(e) = copy(bundle, &staging) {
         let _ = remove_any(&staging);
@@ -176,7 +215,14 @@ pub fn install_bundle(
     }
     let replacing = std::fs::symlink_metadata(&target).is_ok();
     if replacing {
-        let _ = remove_any(&aside);
+        // A copy an earlier move set aside, should its cleanup never have run.
+        if let Err(e) = remove_any(&aside) {
+            let _ = remove_any(&staging);
+            return Err(format!(
+                "could not delete {}, left by an earlier move: {e}",
+                aside.display()
+            ));
+        }
         if let Err(e) = std::fs::rename(&target, &aside) {
             let _ = remove_any(&staging);
             return Err(format!("could not replace {}: {e}", target.display()));
@@ -189,10 +235,52 @@ pub fn install_bundle(
         let _ = remove_any(&staging);
         return Err(format!("could not put it in {}: {e}", dir.display()));
     }
-    if replacing && let Err(e) = remove_any(&aside) {
-        eprintln!("[shell] the old copy stays at {}: {e}", aside.display());
-    }
     Ok(target)
+}
+
+/// A half-made copy younger than this may still be being written by a move elsewhere: in another
+/// account, or in this one while another account's copy holds the single-instance socket in /tmp (a
+/// move takes a minute or two). Older, it is what a move cut short left behind.
+const STALE_STAGING: Duration = Duration::from_secs(60 * 60);
+
+/// When a folder last changed: its status-change time on Unix, which nothing can set back (ditto
+/// dates a finished copy like its source, hours before on a release), else its modification time.
+fn changed(m: &std::fs::Metadata) -> Option<SystemTime> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let secs = u64::try_from(m.ctime()).ok()?;
+        let nanos = u32::try_from(m.ctime_nsec()).ok()?;
+        Some(SystemTime::UNIX_EPOCH + Duration::new(secs, nanos))
+    }
+    #[cfg(not(unix))]
+    {
+        m.modified().ok()
+    }
+}
+
+/// What a move left beside `bundle`, deleted by the copy that now runs there: the old copy it set
+/// aside, and a half-made copy from a move cut short (a quit during "Moving…"). Called at every start
+/// from Applications, so a cleanup that fails or is cut short is tried again at the next one; a copy
+/// macOS still translocates never calls it, and the next move clears what is left (`install_bundle`).
+/// Returns what was there and how it went, in how many passes; nothing when there was nothing.
+pub fn remove_leftovers(bundle: &Path, now: SystemTime) -> Vec<(PathBuf, io::Result<usize>)> {
+    let (staging, aside) = beside(bundle);
+    let mut removed = Vec::new();
+    if std::fs::symlink_metadata(&aside).is_ok() {
+        let result = remove_counting(&aside);
+        removed.push((aside, result));
+    }
+    let stale = std::fs::symlink_metadata(&staging)
+        .ok()
+        .and_then(|m| changed(&m))
+        .and_then(|at| now.duration_since(at).ok())
+        .is_some_and(|age| age >= STALE_STAGING);
+    if stale {
+        let result = remove_counting(&staging);
+        removed.push((staging, result));
+    }
+    removed
 }
 
 /// Moves the app into Applications. The copy the Dock opens is the one to replace, so an existing
@@ -401,6 +489,9 @@ mod tests {
         );
         assert_eq!(engine_hint(Location::DiskImage, &data, true, now), None);
         note_moved(&data).unwrap();
+        // the next start reads the clock after the move wrote the marker; read before, an APFS
+        // timestamp (nanoseconds) is later than `now` and the marker would look like the future
+        let now = SystemTime::now();
         assert_eq!(
             engine_hint(Location::Translocated, &data, false, now),
             None,
@@ -418,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn replaces_the_copy_the_dock_opens_and_leaves_nothing_behind() {
+    fn replaces_the_copy_the_dock_opens_and_its_first_start_clears_the_old_one() {
         let root = scratch("replace");
         let image = root.join("image");
         let new = bundle(&image, "new");
@@ -427,16 +518,168 @@ mod tests {
         let at = install_into_applications(&new, &system, None, &copy_tree).unwrap();
         assert_eq!(at, old);
         assert_eq!(content(&at), "new");
-        let left: Vec<_> = std::fs::read_dir(&system)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
-        assert_eq!(
-            left,
-            vec![std::ffi::OsString::from("Knowledge Vault.app")],
-            "no staging or old copy left"
-        );
         assert_eq!(content(&new), "new", "the source is untouched");
+        let names = || {
+            let mut names: Vec<_> = std::fs::read_dir(&system)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        // the old copy waits beside the new one, hidden, for the new one to start
+        assert_eq!(names(), [".Knowledge Vault.app.old", "Knowledge Vault.app"]);
+        assert_eq!(content(&system.join(".Knowledge Vault.app.old")), "old");
+
+        let removed = remove_leftovers(&at, SystemTime::now());
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0, system.join(".Knowledge Vault.app.old"));
+        assert!(removed[0].1.is_ok());
+        assert_eq!(names(), ["Knowledge Vault.app"], "nothing left behind");
+        assert!(
+            remove_leftovers(&at, SystemTime::now()).is_empty(),
+            "the next start finds nothing to do"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_copy_cut_short_is_cleared_once_no_move_can_still_be_writing_it() {
+        let root = scratch("cut-short");
+        let system = root.join("Applications");
+        let app = bundle(&system, "new");
+        let staging = system.join(".Knowledge Vault.app.moving");
+        std::fs::create_dir_all(staging.join("Contents")).unwrap();
+        let now = SystemTime::now();
+        assert!(
+            remove_leftovers(&app, now).is_empty(),
+            "a move may still be writing it"
+        );
+        assert!(staging.exists());
+        let later = now + STALE_STAGING + Duration::from_secs(1);
+        let removed = remove_leftovers(&app, later);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0, staging);
+        assert!(removed[0].1.is_ok());
+        assert!(!staging.exists());
+        assert_eq!(content(&app), "new", "the app itself is never touched");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cleanup_that_fails_says_why_and_is_tried_again_at_the_next_start() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root deletes whatever the permissions say
+        }
+        let root = scratch("cleanup-fails");
+        let system = root.join("Applications");
+        let app = bundle(&system, "new");
+        let aside = system.join(".Knowledge Vault.app.old");
+        let locked = aside.join("Contents/Resources");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("main.js"), "old").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let removed = remove_leftovers(&app, SystemTime::now());
+        assert_eq!(removed.len(), 1);
+        assert!(
+            removed[0].1.is_err(),
+            "the failure is reported, not swallowed"
+        );
+        assert!(aside.exists());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let removed = remove_leftovers(&app, SystemTime::now());
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].1.is_ok(), "the next start finishes the job");
+        assert!(!aside.exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_folder_whose_listing_ends_early_is_deleted_in_more_passes() {
+        let root = scratch("passes");
+        let dir = root.join(".Knowledge Vault.app.old");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["a.js", "b.js", "c.js"] {
+            std::fs::write(dir.join(name), "old").unwrap();
+        }
+        // a delete whose listing ends after one entry, as macOS's now and then does after 2 KB
+        let one_per_pass = |d: &Path| -> io::Result<()> {
+            match std::fs::read_dir(d)?.next() {
+                Some(entry) => {
+                    std::fs::remove_file(entry?.path())?;
+                    Err(io::Error::from(io::ErrorKind::DirectoryNotEmpty))
+                }
+                None => std::fs::remove_dir(d),
+            }
+        };
+        assert_eq!(remove_dir_again(&dir, &one_per_pass).unwrap(), 4);
+        assert!(!dir.exists());
+
+        // a folder that never empties is reported after the last pass; any other failure at once
+        let calls = std::cell::Cell::new(0);
+        let never_empties = |_: &Path| -> io::Result<()> {
+            calls.set(calls.get() + 1);
+            Err(io::Error::from(io::ErrorKind::DirectoryNotEmpty))
+        };
+        let err = remove_dir_again(&root, &never_empties).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::DirectoryNotEmpty);
+        assert_eq!(calls.get(), REMOVE_PASSES);
+        calls.set(0);
+        let denied = |_: &Path| -> io::Result<()> {
+            calls.set(calls.get() + 1);
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        };
+        let err = remove_dir_again(&root, &denied).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(calls.get(), 1);
+        let gone = |_: &Path| -> io::Result<()> { Err(io::Error::from(io::ErrorKind::NotFound)) };
+        assert_eq!(
+            remove_dir_again(&root, &gone).unwrap(),
+            1,
+            "already gone is done"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_finished_copy_dated_like_its_source_is_still_a_move_under_way() {
+        let root = scratch("dated");
+        let system = root.join("Applications");
+        let app = bundle(&system, "new");
+        let staging = system.join(".Knowledge Vault.app.moving");
+        std::fs::create_dir_all(staging.join("Contents")).unwrap();
+        // what ditto does once the copy is complete: the source's dates, here a release two days old
+        let built = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        std::fs::File::open(&staging)
+            .unwrap()
+            .set_modified(built)
+            .unwrap();
+        let removed = remove_leftovers(&app, SystemTime::now());
+        assert!(
+            removed.is_empty(),
+            "a move may still be lifting the quarantine or swapping it in"
+        );
+        assert!(staging.exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_beside_the_app_is_removed_not_followed() {
+        let root = scratch("link");
+        let system = root.join("Applications");
+        let app = bundle(&system, "new");
+        let elsewhere = bundle(&root.join("elsewhere"), "keep");
+        let aside = system.join(".Knowledge Vault.app.old");
+        std::os::unix::fs::symlink(&elsewhere, &aside).unwrap();
+        let removed = remove_leftovers(&app, SystemTime::now());
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].1.is_ok());
+        assert!(std::fs::symlink_metadata(&aside).is_err());
+        assert_eq!(content(&elsewhere), "keep", "only the link goes");
         std::fs::remove_dir_all(&root).unwrap();
     }
 
