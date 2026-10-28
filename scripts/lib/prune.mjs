@@ -58,6 +58,18 @@ export const DROP_PACKAGES = [
 ];
 /** Their per-platform builds and helpers, by name: `@rolldown/binding-darwin-arm64`, `esbuild-darwin-arm64`, … */
 const DROP_PACKAGE_NAMED = /^(@rolldown\/|@esbuild\/|esbuild-|lightningcss-|@oxfmt\/|@ts-morph\/|@types\/)/;
+/**
+ * The browser wallet stack: Privy, wagmi, Reown/WalletConnect, RainbowKit and the wallet SDKs they pull in. They
+ * are peers of @renown/sdk for a *web page* that embeds the wallet login; the engine signs in through
+ * `@renown/sdk/node` (sidecar/src/identity.ts), which builds a renown.id link the window opens in the browser —
+ * the wallet runs on Renown's site, never here. A load trace of the packaged engine (start, sign-in, token)
+ * touched none of them; the orphan sweep then removes what only they needed (React UI kits, icon sets, …).
+ * Since 6.2.3-dev.73 they came in with @powerhousedao/connect: 138,000 of the engine's 177,000 files, and the
+ * Windows first start — which unpacks every file past the antivirus — went from under a minute to several.
+ * Top level only; stage-sidecar's load check refuses a build in which a kept package still depends on one.
+ */
+export const BROWSER_WALLET_PACKAGES =
+  /^(@privy-io\/|@wagmi\/|wagmi$|@reown\/|@walletconnect\/|@rainbow-me\/|x402$|porto$|@base-org\/|@coinbase\/|@safe-global\/|@metamask\/|@gemini-wallet\/)/;
 
 /**
  * Packages the orphan sweep keeps although nothing declares them: imported without being a declared dependency
@@ -234,7 +246,7 @@ export function prune(nodeModules, triple) {
   for (const name of DROP_PACKAGES) if (existsSync(join(nodeModules, name))) remove(join(nodeModules, name));
   for (const entry of readdirSync(nodeModules)) {
     const names = entry.startsWith("@") ? readdirSync(join(nodeModules, entry)).map((x) => `${entry}/${x}`) : [entry];
-    for (const name of names) if (DROP_PACKAGE_NAMED.test(name)) remove(join(nodeModules, name));
+    for (const name of names) if (DROP_PACKAGE_NAMED.test(name) || BROWSER_WALLET_PACKAGES.test(name)) remove(join(nodeModules, name));
   }
   // what nothing needs any more — only with the app's manifest beside node_modules (the staged sidecar)
   const manifest = join(nodeModules, "..", "package.json");
@@ -269,5 +281,34 @@ export function prune(nodeModules, triple) {
     }
   };
   walk(nodeModules);
+  // a scope whose every package went (`@privy-io/`, `@types/`): an empty folder the installer and the
+  // Windows unpack would still carry, one per scope
+  for (const entry of readdirSync(nodeModules)) {
+    const p = join(nodeModules, entry);
+    if (entry.startsWith("@") && lstatSync(p).isDirectory() && readdirSync(p).length === 0) rmSync(p, { recursive: true });
+  }
   return freed;
+}
+
+/**
+ * Every top-level package left after the prune that declares a dropped wallet package as a hard dependency: a
+ * future version of the engine's own stack that imported one would otherwise break only at run time, in the
+ * installed app. Run after `prune`, which has already swept away everything only the wallets needed, so what
+ * remains is what the app's own manifest keeps. Peer dependencies are not counted — that is how @renown/sdk
+ * declares them for web pages — and a nested copy of the dependency satisfies it.
+ */
+export function wantsDroppedPackages(nodeModules) {
+  const out = [];
+  for (const name of topLevel(nodeModules)) {
+    let pkg;
+    try {
+      pkg = JSON.parse(readFileSync(join(nodeModules, name, "package.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    const hard = Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies });
+    const missing = hard.filter((d) => BROWSER_WALLET_PACKAGES.test(d) && !existsSync(join(nodeModules, name, "node_modules", d)) && !existsSync(join(nodeModules, d)));
+    if (missing.length) out.push({ name, missing });
+  }
+  return out;
 }

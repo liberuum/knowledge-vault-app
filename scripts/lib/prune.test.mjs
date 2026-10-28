@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { bundlerOnlyBuilds, foreignNative, orphans, prune } from "./prune.mjs";
+import { bundlerOnlyBuilds, foreignNative, orphans, prune, wantsDroppedPackages } from "./prune.mjs";
 
 const FILES = [
   "onnxruntime-node/bin/napi-v6/linux/x64/onnxruntime_binding.node",
@@ -180,5 +180,48 @@ describe("prune", () => {
     prune(nm, "aarch64-apple-darwin");
     expect(has(nm, "codegen-util")).toBe(false);
     expect(has(nm, "hoisted-for-inner/package.json")).toBe(true);
+  });
+});
+
+describe("the browser wallet stack", () => {
+  const WALLET = ["@privy-io/react-auth", "@privy-io/js-sdk-core", "@wagmi/connectors", "@wagmi/core", "wagmi", "@reown/appkit", "@walletconnect/ethereum-provider", "@rainbow-me/rainbowkit", "x402", "porto", "@base-org/account", "@coinbase/cdp-sdk", "@safe-global/safe-apps-sdk", "@metamask/sdk-communication-layer", "@gemini-wallet/core"];
+  // what the engine's sign-in really imports (@renown/sdk/node), plus look-alikes that must stay
+  const KEPT = ["@renown/sdk", "viem", "did-jwt-vc", "did-resolver", "key-did-resolver", "@didtools/key-webcrypto", "uint8arrays", "@powerhousedao/reactor-browser", "wagmi-like", "x402-client", "portofino", "@metamask-ish/thing"];
+  const stage = () => {
+    const nm = tree();
+    const pkg = (name, deps = {}, extra = {}) => { mkdirSync(join(nm, name), { recursive: true }); writeFileSync(join(nm, name, "package.json"), JSON.stringify({ name, dependencies: deps, ...extra })); writeFileSync(join(nm, name, "index.js"), "x"); };
+    writeFileSync(join(nm, "..", "package.json"), JSON.stringify({ name: "sidecar", dependencies: { "@renown/sdk": "1", "@powerhousedao/reactor-browser": "1", "wagmi-like": "1", "x402-client": "1", portofino: "1", "@metamask-ish/thing": "1" } }));
+    pkg("@renown/sdk", { viem: "1", "did-jwt-vc": "1", "did-resolver": "1", "key-did-resolver": "1", "@didtools/key-webcrypto": "1", uint8arrays: "1" }, { peerDependencies: { "@privy-io/react-auth": "^3", "@rainbow-me/rainbowkit": "^2", wagmi: "^2" } });
+    for (const k of ["viem", "did-jwt-vc", "did-resolver", "key-did-resolver", "@didtools/key-webcrypto", "uint8arrays", "@powerhousedao/reactor-browser", "wagmi-like", "x402-client", "portofino", "@metamask-ish/thing"]) pkg(k);
+    for (const w of WALLET) pkg(w, { "only-wallets-need-this": "1" });
+    pkg("only-wallets-need-this");
+    return nm;
+  };
+  it("drops every wallet package and what only they needed, and keeps the sign-in's real dependencies and look-alikes", () => {
+    const nm = stage();
+    prune(nm, "x86_64-pc-windows-msvc");
+    for (const w of WALLET) expect(has(nm, w), w).toBe(false);
+    expect(has(nm, "only-wallets-need-this")).toBe(false);
+    for (const k of KEPT) expect(has(nm, `${k}/index.js`), k).toBe(true);
+    expect(wantsDroppedPackages(nm)).toEqual([]);
+    // the scopes emptied by the drop go too; a scope with a kept package stays
+    for (const scope of ["@privy-io", "@wagmi", "@reown", "@walletconnect", "@rainbow-me", "@base-org", "@coinbase", "@safe-global", "@metamask", "@gemini-wallet"]) expect(has(nm, scope), scope).toBe(false);
+    expect(has(nm, "@renown")).toBe(true);
+    expect(has(nm, "@didtools")).toBe(true);
+  });
+  it("names a kept package that hard-depends on a dropped one (peers do not count: that is how @renown/sdk declares them for web pages)", () => {
+    const nm = stage();
+    // the app's manifest depends on it, so the orphan sweep keeps it — exactly the case that would break the installed app
+    const manifest = JSON.parse(readFileSync(join(nm, "..", "package.json"), "utf8"));
+    manifest.dependencies["future-stack"] = "1";
+    writeFileSync(join(nm, "..", "package.json"), JSON.stringify(manifest));
+    mkdirSync(join(nm, "future-stack"), { recursive: true });
+    writeFileSync(join(nm, "future-stack", "package.json"), JSON.stringify({ name: "future-stack", dependencies: { wagmi: "2" }, optionalDependencies: { "@reown/appkit": "1" } }));
+    prune(nm, "x86_64-pc-windows-msvc");
+    expect(wantsDroppedPackages(nm)).toEqual([{ name: "future-stack", missing: ["wagmi", "@reown/appkit"] }]);
+    // a nested copy of its own satisfies it
+    mkdirSync(join(nm, "future-stack", "node_modules", "wagmi"), { recursive: true });
+    mkdirSync(join(nm, "future-stack", "node_modules", "@reown", "appkit"), { recursive: true });
+    expect(wantsDroppedPackages(nm)).toEqual([]);
   });
 });

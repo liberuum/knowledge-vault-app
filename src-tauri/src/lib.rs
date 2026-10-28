@@ -558,11 +558,33 @@ pub fn run() {
                 sidecar::mark_preparing(&handle);
                 let h = handle.clone();
                 std::thread::spawn(move || {
-                    match engine_archive::unpack(&archive, &base, env!("CARGO_PKG_VERSION")) {
-                        Ok(root) => {
+                    let started = std::time::Instant::now();
+                    // Progress goes out as engine lines: the landing already shows the latest one under
+                    // the stage under way (host/src/landing/startup-stages.ts).
+                    let reporter = h.clone();
+                    let mut progress = move |done: u64, total: u64| {
+                        sidecar::emit_log(
+                            &reporter,
+                            &format!("[shell] unpacking the engine: {done} of {total} files"),
+                        );
+                    };
+                    match engine_archive::unpack(
+                        &archive,
+                        &base,
+                        env!("CARGO_PKG_VERSION"),
+                        &mut progress,
+                    ) {
+                        Ok(engine) => {
+                            if engine.unpacked_now {
+                                println!(
+                                    "[shell] unpacked the engine in {:.1} s",
+                                    started.elapsed().as_secs_f64()
+                                );
+                            }
+                            let root = engine.root.clone();
                             let paths = AppPaths {
                                 data_dir: paths.data_dir,
-                                sidecar: SidecarLaunch::at(root),
+                                sidecar: SidecarLaunch::at(root.clone()),
                             };
                             // The spawn ends the unpack's "preparing" itself (or report_fatal does).
                             if let Err(e) = spawn_sidecar(
@@ -573,7 +595,18 @@ pub fn run() {
                                 env!("CARGO_PKG_VERSION"),
                             ) {
                                 sidecar::report_fatal(&h, "engine-start", e.to_string());
+                                return;
                             }
+                            // The previous version's files go once the engine is up: the first start
+                            // of a version no longer deletes ~40 000 files past the antivirus first.
+                            sidecar::once_ready(&h, move || {
+                                let t = std::time::Instant::now();
+                                engine_archive::remove_other_versions(&base, &root);
+                                println!(
+                                    "[shell] removed other engine versions in {:.1} s",
+                                    t.elapsed().as_secs_f64()
+                                );
+                            });
                         }
                         Err(e) => sidecar::report_fatal(
                             &h,

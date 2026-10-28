@@ -6,8 +6,9 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { engineLoadCheck } from "./lib/engine-load-check.mjs";
 import { packEngine } from "./lib/pack-engine.mjs";
-import { prune } from "./lib/prune.mjs";
+import { prune, wantsDroppedPackages } from "./lib/prune.mjs";
 
 const arg = (name) => {
   const i = process.argv.indexOf(name);
@@ -58,6 +59,12 @@ rmSync(ws, { recursive: true, force: true });
 
 // 3. this target only
 const freed = prune(join(out, "node_modules"), triple);
+// A kept package that depends on the dropped wallet stack would fail inside the installed app, not here.
+const wanting = wantsDroppedPackages(join(out, "node_modules"));
+if (wanting.length) {
+  console.error(`[stage] the engine's packages depend on the browser wallet stack prune.mjs drops — keep it, or drop the dependents:\n  ${wanting.map((w) => `${w.name} → ${w.missing.join(", ")}`).join("\n  ")}`);
+  process.exit(1);
+}
 const links = [];
 const size = (p) => {
   const s = lstatSync(p);
@@ -72,6 +79,19 @@ console.log(`[stage] .stage/sidecar for ${triple}: ${(bytes / 1e6).toFixed(0)} M
 if (links.length) {
   console.error(`[stage] ${links.length} symlink(s) would ship (they break outside this machine): ${links.slice(0, 5).join(", ")}`);
   process.exit(1);
+}
+// 3b. the pruned engine, run: it must start and build a sign-in link without loading anything the prune dropped.
+//     The engine runs on this machine's Node, whatever the target: the pruned JavaScript is the same for every
+//     target, only the natives differ. --no-load-check skips it (a cross-stage on a machine with no Node 24).
+if (!process.argv.includes("--no-load-check")) {
+  const t2 = Date.now();
+  const check = await engineLoadCheck(out);
+  if (!check.ok) {
+    console.error(`[stage] the pruned engine failed its load check (ready: ${check.ready}, sign-in link: ${check.signIn}, dropped packages loaded: ${check.dropped.join(", ") || "none"}, missing modules: ${check.missing.length})`);
+    console.error(check.missing.join("\n") || check.output.split("\n").slice(-30).join("\n"));
+    process.exit(1);
+  }
+  console.log(`[stage] load check: ready, sign-in link built, ${check.loadedModules} modules loaded, none from a dropped package, in ${((Date.now() - t2) / 1000).toFixed(1)} s`);
 }
 // 4. Windows: one archive instead of the deep tree (the installer builder's 260-character path limit);
 //    tauri.windows.conf.json ships .stage/engine.tar and the app unpacks it on first launch.

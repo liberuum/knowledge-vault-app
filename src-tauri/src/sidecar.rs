@@ -244,8 +244,32 @@ pub fn report_fatal(app: &AppHandle, reason: &str, message: String) {
 
 /// One engine output line, for the landing's start-up stages. Only sent while the engine is
 /// not ready: the page derives "what is starting" from it and ignores it afterwards.
-fn emit_log(app: &AppHandle, line: &str) {
+pub fn emit_log(app: &AppHandle, line: &str) {
     let _ = app.emit("sidecar:log", line.trim_end());
+}
+
+/// Runs `job` on its own thread once the engine has reported ready (at once if it already has), or
+/// never, if the engine stops first. For work that must wait for the engine but not hold it up:
+/// removing the previous version's unpacked engine.
+pub fn once_ready(app: &AppHandle, job: impl FnOnce() + Send + 'static) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            let (ready, running) = {
+                let st = app.state::<Mutex<SidecarState>>();
+                let st = st.lock().unwrap();
+                (st.ready.is_some(), st.running)
+            };
+            if ready {
+                break;
+            }
+            if !running {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        job();
+    });
 }
 
 fn emit_status(app: &AppHandle) {

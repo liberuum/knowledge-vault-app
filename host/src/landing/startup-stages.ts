@@ -39,7 +39,7 @@ export function stageOfLine(line: string): StageId | null {
 export type Progress = { reached: number; latest: string | null };
 
 const NOISE = /^\s*$|^\s*["{}\]]|^\s*\}|DeprecationWarning|--trace-deprecation/;
-const PREFIX = /^(\[sidecar\]\s*)?(\[\d\d:\d\d:\d\d(\.\d+)?\]\s*)?/;
+const PREFIX = /^(\[(sidecar|shell)\]\s*)?(\[\d\d:\d\d:\d\d(\.\d+)?\]\s*)?/;
 
 /** The next progress after one engine line: never backwards, with the line kept as the detail unless it is noise. */
 export function advance(progress: Progress, rawLine: string): Progress {

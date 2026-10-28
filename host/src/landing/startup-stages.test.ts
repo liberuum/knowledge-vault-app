@@ -34,6 +34,12 @@ describe("start-up stages", () => {
     expect(advance(p, "").latest).toBe("kept");
   });
 
+  it("shows the shell's unpack progress as the detail, without advancing a stage (it is not a milestone)", () => {
+    const p = advance({ reached: -1, latest: null }, "[shell] unpacking the engine: 12000 of 38746 files\n");
+    expect(p).toEqual({ reached: -1, latest: "unpacking the engine: 12000 of 38746 files" });
+    expect(currentStageLabel(p, true)).toBe("Unpacking the engine");
+  });
+
   it("lists the stages a user can follow, unpacking first and ready last", () => {
     expect(STAGES[0]?.id).toBe("unpack");
     expect(STAGES[STAGES.length - 1]?.id).toBe("ready");
