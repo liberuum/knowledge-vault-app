@@ -137,7 +137,14 @@ export function Boot({
   // The landing's frame — header, "Vaults", status strip — is on screen from the first paint;
   // the engine's state lives in the strip, so nothing jumps when the vaults arrive.
   if (status.state === "exited" || status.state === "failed" || status.state === "restarting" || status.state === "gave_up" || status.state === "stopping") {
-    return <Landing engine={status} onRetry={isTauri() ? () => void invokeIfTauri("retry_engine") : undefined} />;
+    return (
+      <Landing
+        engine={status}
+        onRetry={isTauri() ? () => void invokeIfTauri("retry_engine") : undefined}
+        onMoveToApplications={isTauri() ? () => invokeIfTauri("move_to_applications") : undefined}
+        onOpenFromHere={isTauri() ? () => void invokeIfTauri("open_from_here") : undefined}
+      />
+    );
   }
   if (failure) return <EngineScreen kind="alert" title="The vault app could not load" detail={failure} />;
   if (status.state === "ready" && app) {

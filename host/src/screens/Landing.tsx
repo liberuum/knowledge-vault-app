@@ -79,6 +79,10 @@ type Props = {
   progress?: Progress;
   /** "Try again" after the engine kept stopping or refused to start (the shell's retry_engine). */
   onRetry?: () => void;
+  /** macOS: move the app into Applications before it upgrades the vaults (the shell's move_to_applications). */
+  onMoveToApplications?: () => Promise<unknown>;
+  /** macOS: start the engine from where the app is anyway (the shell's open_from_here). */
+  onOpenFromHere?: () => void;
   /** Present once the engine is ready; the landing lists and creates vaults only then. */
   info?: SidecarInfo;
   identity?: IdentityStatus | null;
@@ -112,7 +116,7 @@ const VAULTS_RETRY_MS = 60_000;
  * recently opened one largest; on first run, the inline create form; the
  * engine's state in a strip at the bottom. Never a workspace.
  */
-export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onGuide, onModels, onOpenView, onStartSettings }: Props) {
+export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote, onIdentity, onWorkflows, onSettings, newVault = false, onNewVaultDone, api = realLandingApi, storage, localBearer, onRetry, onMoveToApplications, onOpenFromHere, onGuide, onModels, onOpenView, onStartSettings }: Props) {
   const store = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
   const [vaults, setVaults] = useState<VaultSummary[] | null>(null);
   const [remotes, setRemotes] = useState<RemoteVault[] | null>(null);
@@ -498,7 +502,7 @@ export function Landing({ engine, progress, info, identity, onOpen, onOpenRemote
           </section>
         )}
       </main>
-      <StatusStrip engine={engine} version={version} onRetry={onRetry} />
+      <StatusStrip engine={engine} version={version} onRetry={onRetry} onMoveToApplications={onMoveToApplications} onOpenFromHere={onOpenFromHere} />
       {renaming && <RenameVaultDialog name={renaming.name} busy={busy} error={dialogError} onSave={(n) => void rename(renaming, n)} onClose={() => setRenaming(null)} />}
       {deleting && <DeleteVaultDialog name={deleting.name} noteCount={samples[deleting.id]?.noteCount ?? deleting.noteCount} busy={busy} error={dialogError} onConfirm={() => void remove(deleting)} onClose={() => setDeleting(null)} />}
       {removing && (

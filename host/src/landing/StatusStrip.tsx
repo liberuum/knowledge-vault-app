@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { redact } from "../redact.js";
 import type { FatalInfo } from "../sidecar.js";
 
@@ -25,7 +26,7 @@ function copy(engine: EngineState): { label: string; detail: string } {
       return { label: "Restarting the engine…", detail: `It stopped unexpectedly. Attempt ${engine.attempt} of 3; back in a moment.` };
     case "gave_up":
       return {
-        label: "The engine keeps stopping",
+        label: engine.fatal ? "The engine refused to start" : "The engine keeps stopping",
         detail: engine.fatal ? engine.fatal.message : "It stopped several times in a row. Its last lines are below. Try again, or quit from the tray and start the app again.",
       };
     case "exited":
@@ -41,10 +42,44 @@ function copy(engine: EngineState): { label: string; detail: string } {
 
 const TROUBLE = new Set<EngineState["state"]>(["exited", "failed", "gave_up"]);
 
+/** macOS: the engine would upgrade the vaults from the disk image or Downloads (sidecar/src/app-location.ts). */
+const NOT_IN_APPLICATIONS = "not-in-applications";
+
+function refusal(engine: EngineState): FatalInfo | undefined {
+  return engine.state === "gave_up" || engine.state === "exited" ? (engine.fatal ?? undefined) : undefined;
+}
+
 /** The landing's bottom landmark: the engine's state, the privacy sentence, the version. */
-export function StatusStrip({ engine, version, onRetry }: { engine: EngineState; version?: string; /** The shell's "start the engine again" (absent in a browser). */ onRetry?: () => void }) {
+export function StatusStrip({
+  engine,
+  version,
+  onRetry,
+  onMoveToApplications,
+  onOpenFromHere,
+}: {
+  engine: EngineState;
+  version?: string;
+  /** The shell's "start the engine again" (absent in a browser). */
+  onRetry?: () => void;
+  /** macOS: copy the app into Applications, then reopen from there (the shell quits on success). */
+  onMoveToApplications?: () => Promise<unknown>;
+  /** macOS: start the engine anyway, as before this check. */
+  onOpenFromHere?: () => void;
+}) {
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | undefined>();
   const trouble = TROUBLE.has(engine.state);
-  const { label, detail } = copy(engine);
+  const refused = refusal(engine);
+  const move = refused?.reason === NOT_IN_APPLICATIONS && onMoveToApplications !== undefined;
+  const { label, detail } = move && refused ? { label: "Move Knowledge Vault to Applications", detail: moveError ?? refused.message } : copy(engine);
+  const moveNow = () => {
+    setMoving(true);
+    setMoveError(undefined);
+    onMoveToApplications!().catch((error: unknown) => {
+      setMoving(false);
+      setMoveError(error instanceof Error ? error.message : String(error));
+    });
+  };
   const tail = engine.state === "gave_up" ? engine.logTail : [];
   return (
     <footer className="kv-strip" data-state={engine.state} role={trouble ? "alert" : "status"}>
@@ -52,8 +87,21 @@ export function StatusStrip({ engine, version, onRetry }: { engine: EngineState;
         <span className="kv-dot" aria-hidden="true" />
         <span className="kv-strip-state">{label}</span>
         {detail && <span className="kv-strip-detail">{detail}</span>}
-        {onRetry && (engine.state === "gave_up" || engine.state === "exited") && (
-          <button type="button" className="kv-button" onClick={onRetry}>Try again</button>
+        {move ? (
+          <>
+            <button type="button" className="kv-button kv-button-primary" onClick={moveNow} disabled={moving}>
+              {moving ? "Moving…" : "Move to Applications"}
+            </button>
+            {onOpenFromHere && (
+              <button type="button" className="kv-button kv-button-quiet" onClick={onOpenFromHere} disabled={moving}>
+                Open from here anyway
+              </button>
+            )}
+          </>
+        ) : (
+          onRetry && (engine.state === "gave_up" || engine.state === "exited") && (
+            <button type="button" className="kv-button" onClick={onRetry}>Try again</button>
+          )
         )}
         {!trouble && (
           <span className="kv-strip-privacy">

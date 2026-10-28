@@ -34,6 +34,7 @@ import { createStoreTransfers } from "./store-transfers.js";
 import { stopOrphanedHelper } from "./orphans.js";
 import { exportVault } from "./export.js";
 import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
+import { MOVE_FIRST_MESSAGE, mustMoveFirst, readAppLocation } from "./app-location.js";
 import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelines.js";
 import { createStarterManager } from "./starters.js";
 import { fillConnection } from "./connections.js";
@@ -184,6 +185,11 @@ async function main(): Promise<void> {
   } else {
     const relation = compareStack(STACK_VERSION, recordedStack);
     if (relation === "downgrade") return fatalExit("store-too-new", TOO_NEW_MESSAGE(recordedStack!, STACK_VERSION));
+    // macOS: an upgrade started from the disk image or Downloads would leave the Dock opening the old
+    // copy, which then refuses the upgraded store. Refused before the backup and the migration, so the
+    // store stays exactly as it was; the window offers to move the app into Applications.
+    const location = readAppLocation(process.env);
+    if (mustMoveFirst(location, relation)) return fatalExit("not-in-applications", MOVE_FIRST_MESSAGE(location!));
     if (relation === "upgrade") {
       // Labelled with the stack that wrote the store, so the restore guard reads it right.
       const result = runPendingAction(cfg.dataDir, { action: "backup", reason: "upgrade" }, recordedStack!);

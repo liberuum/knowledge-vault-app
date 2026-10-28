@@ -46,7 +46,7 @@ function megabytes(bytes: number): string {
 function onceOpen(kind: InstallerKind): string {
   switch (kind) {
     case "dmg":
-      return "In the window that opens, drag Knowledge Vault onto Applications.";
+      return "In the window that opens, drag Knowledge Vault onto Applications, then open it from Applications.";
     case "setup":
       return "Follow the installer's steps.";
     case "deb":
@@ -60,7 +60,7 @@ function onceOpen(kind: InstallerKind): string {
 function howToInstall(kind: InstallerKind, name: string): { quit: string; open: string } {
   switch (kind) {
     case "dmg":
-      return { quit: "Click the Knowledge Vault icon in the menu bar, at the top right of the screen, and choose Quit.", open: `Open ${name} in your Downloads folder and drag Knowledge Vault onto Applications, replacing the old one.` };
+      return { quit: "Click the Knowledge Vault icon in the menu bar, at the top right of the screen, and choose Quit.", open: `Open ${name} in your Downloads folder and drag Knowledge Vault onto Applications, replacing the old one. Then open it from Applications, not from the disk image.` };
     case "setup":
       return { quit: "Click the Knowledge Vault icon in the system tray, at the bottom right of the taskbar (behind ^ if it is hidden), and choose Quit.", open: `Run ${name} from your Downloads folder.` };
     case "deb":

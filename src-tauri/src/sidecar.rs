@@ -51,6 +51,9 @@ pub struct SidecarState {
     /// Set while a delayed respawn is pending.
     pub delay_ms: Option<u64>,
     pub fatal: Option<FatalInfo>,
+    /// "Open from here anyway" (app_location.rs): for this run of the app the engine is not told it
+    /// runs from a temporary place. Kept across retries; a new start of the app asks again.
+    pub location_accepted: bool,
     /// Windows' first launch of a version: the engine is being unpacked (engine_archive.rs); shown as starting.
     pub preparing: bool,
     pub crashes: CrashWindow,
@@ -73,6 +76,7 @@ impl Default for SidecarState {
             attempt: 0,
             delay_ms: None,
             fatal: None,
+            location_accepted: false,
             preparing: false,
             crashes: CrashWindow::new(120_000),
             tail: LogTail::new(50),
@@ -381,6 +385,22 @@ pub fn spawn_sidecar(
     if std::env::var_os("APPIMAGE").is_some() {
         env.push(("KV_APPIMAGE".into(), "1".into()));
     }
+    // macOS: started from the disk image or Downloads, the engine refuses to upgrade the vaults until
+    // the app is in Applications (app_location.rs). Off macOS, and from Applications, nothing is sent.
+    let accepted = app
+        .state::<Mutex<SidecarState>>()
+        .lock()
+        .unwrap()
+        .location_accepted;
+    let (_, location) = crate::app_location::current();
+    if let Some(value) = crate::app_location::engine_hint(
+        location,
+        &paths.data_dir,
+        accepted,
+        std::time::SystemTime::now(),
+    ) {
+        env.push(("KV_APP_LOCATION".into(), value.into()));
+    }
     // cwd = the engine's root: it resolves its packages from <root>/node_modules.
     // The engine's environment is scrubbed by the sidecar itself (environment.ts), whoever spawns it.
     let base = if paths.sidecar.bundled_node {
@@ -634,6 +654,14 @@ fn finish_stop(app: &AppHandle, child: CommandChild) {
 }
 
 /// Start the engine again after the supervisor gave up — the strip's "Try again".
+/// "Open from here anyway": the next spawns carry no location (app_location.rs).
+pub fn accept_location(app: &AppHandle) {
+    app.state::<Mutex<SidecarState>>()
+        .lock()
+        .unwrap()
+        .location_accepted = true;
+}
+
 pub fn retry_sidecar(app: &AppHandle) -> Result<(), String> {
     let params = {
         let state = app.state::<Mutex<SidecarState>>();

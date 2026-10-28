@@ -27,6 +27,8 @@
     "allow-quit-app",
     "allow-install-update",
     "allow-retry-engine",
+    "allow-move-to-applications",
+    "allow-open-from-here",
     "allow-host-loaded",
     "allow-take-dropped-paths",
     "allow-choose-backup-destination",

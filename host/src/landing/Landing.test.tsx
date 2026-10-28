@@ -152,6 +152,44 @@ describe("Landing", () => {
     expect(a.fetchVaults).not.toHaveBeenCalled();
   });
 
+  it("names a refusal as a refusal, not a crash loop (the supervisor reports it as gave_up)", () => {
+    render(<Landing engine={{ state: "gave_up", code: 78, logTail: [], fatal: { reason: "store-too-new", message: "This store was last opened by a newer Knowledge Vault." } }} api={api()} storage={memoryStorage()} onRetry={vi.fn()} />);
+    expect(screen.getByText("The engine refused to start")).toBeTruthy();
+    expect(screen.queryByText("The engine keeps stopping")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("on macOS, offers to move the app into Applications before it upgrades the vaults", async () => {
+    const refusal = { state: "gave_up" as const, code: 78, logTail: [], fatal: { reason: "not-in-applications", message: "This version upgrades your vaults, and it is running from the disk image rather than from Applications." } };
+    let fail: (reason: unknown) => void = () => {};
+    const onMoveToApplications = vi.fn(() => new Promise((_, reject) => { fail = reject; }));
+    const onOpenFromHere = vi.fn();
+    render(<Landing engine={refusal} api={api()} storage={memoryStorage()} onRetry={vi.fn()} onMoveToApplications={onMoveToApplications} onOpenFromHere={onOpenFromHere} />);
+    expect(screen.getByText("Move Knowledge Vault to Applications")).toBeTruthy();
+    expect(screen.getByText(/running from the disk image/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull(); // it would only refuse again
+
+    fireEvent.click(screen.getByRole("button", { name: "Move to Applications" }));
+    expect(onMoveToApplications).toHaveBeenCalledOnce();
+    expect((screen.getByRole("button", { name: "Moving…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // a move that fails says why and can be tried again
+    fail("Knowledge Vault could not replace /Applications/Knowledge Vault.app: Permission denied.");
+    expect(await screen.findByText(/Permission denied/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Move to Applications" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open from here anyway" }));
+    expect(onOpenFromHere).toHaveBeenCalledOnce();
+  });
+
+  it("without the shell's move (a browser), that refusal keeps the plain Try again", () => {
+    const refusal = { state: "gave_up" as const, code: 78, logTail: [], fatal: { reason: "not-in-applications", message: "Move it to Applications first." } };
+    render(<Landing engine={refusal} api={api()} storage={memoryStorage()} onRetry={vi.fn()} />);
+    expect(screen.getByText("The engine refused to start")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Move to Applications" })).toBeNull();
+  });
+
   it("offers Try again when the engine keeps stopping, and shows its last lines without credentials", () => {
     const onRetry = vi.fn();
     render(<Landing engine={{ state: "gave_up", code: 1, logTail: ["Authorization: Bearer abc.def", "boom"], fatal: null }} api={api()} storage={memoryStorage()} onRetry={onRetry} />);

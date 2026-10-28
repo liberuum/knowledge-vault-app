@@ -1,3 +1,4 @@
+mod app_location;
 mod backoff;
 mod config;
 mod download;
@@ -121,6 +122,28 @@ fn host_loaded(state: tauri::State<'_, smoke::HostLoaded>, busy: tauri::State<'_
 /// "Try again" after the engine kept stopping or refused to start.
 #[tauri::command]
 fn retry_engine(app: AppHandle) -> Result<(), String> {
+    sidecar::retry_sidecar(&app)
+}
+
+/// macOS: the engine refused to upgrade the vaults from the disk image or Downloads (app_location.rs).
+/// Copies the app into Applications, replacing the old copy, then reopens it from there and quits.
+#[tauri::command]
+async fn move_to_applications(app: AppHandle) -> Result<(), String> {
+    let data = data_dir(&app);
+    // A few hundred MB are copied: off the async runtime's threads.
+    tauri::async_runtime::spawn_blocking(move || {
+        app_location::move_into_applications(data.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    quit(&app);
+    Ok(())
+}
+
+/// "Open from here anyway": the engine starts as it did before this check, for this run of the app.
+#[tauri::command]
+fn open_from_here(app: AppHandle) -> Result<(), String> {
+    sidecar::accept_location(&app);
     sidecar::retry_sidecar(&app)
 }
 
@@ -310,6 +333,8 @@ pub fn run() {
             install_update,
             quit_app,
             retry_engine,
+            move_to_applications,
+            open_from_here,
             host_loaded,
             take_dropped_paths,
             choose_backup_destination,
@@ -706,6 +731,8 @@ mod capability_tests {
             "reveal_path",
             "quit_app",
             "retry_engine",
+            "move_to_applications",
+            "open_from_here",
             "host_loaded",
             "take_dropped_paths",
             "choose_backup_destination",

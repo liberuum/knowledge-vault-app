@@ -8,6 +8,8 @@ const COMMANDS: &[&str] = &[
     "quit_app",
     "install_update",
     "retry_engine",
+    "move_to_applications",
+    "open_from_here",
     "host_loaded",
     "take_dropped_paths",
     "choose_backup_destination",
