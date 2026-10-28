@@ -45,6 +45,9 @@ const TROUBLE = new Set<EngineState["state"]>(["exited", "failed", "gave_up"]);
 /** macOS: the engine would upgrade the vaults from the disk image or Downloads (sidecar/src/app-location.ts). */
 const NOT_IN_APPLICATIONS = "not-in-applications";
 
+/** While the shell copies the app (some 1.6 GB: over a minute from a disk image), which nothing else shows. */
+const MOVING = "Copying it into Applications takes a minute or two. It then quits and opens again from there by itself.";
+
 function refusal(engine: EngineState): FatalInfo | undefined {
   return engine.state === "gave_up" || engine.state === "exited" ? (engine.fatal ?? undefined) : undefined;
 }
@@ -71,7 +74,7 @@ export function StatusStrip({
   const trouble = TROUBLE.has(engine.state);
   const refused = refusal(engine);
   const move = refused?.reason === NOT_IN_APPLICATIONS && onMoveToApplications !== undefined;
-  const { label, detail } = move && refused ? { label: "Move Knowledge Vault to Applications", detail: moveError ?? refused.message } : copy(engine);
+  const { label, detail } = move && refused ? { label: "Move Knowledge Vault to Applications", detail: moving ? MOVING : (moveError ?? refused.message) } : copy(engine);
   const moveNow = () => {
     setMoving(true);
     setMoveError(undefined);

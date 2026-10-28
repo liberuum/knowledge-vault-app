@@ -172,6 +172,7 @@ describe("Landing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to Applications" }));
     expect(onMoveToApplications).toHaveBeenCalledOnce();
     expect((screen.getByRole("button", { name: "Moving…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/takes a minute or two\. It then quits and opens again/)).toBeTruthy(); // nothing else shows the copy under way
 
     // a move that fails says why and can be tried again
     fail("Knowledge Vault could not replace /Applications/Knowledge Vault.app: Permission denied.");
