@@ -25,7 +25,7 @@ A manual run with Publish unticked never makes the release public; delete the dr
 ```bash
 xcode-select --install                                     # Apple's command-line tools (compiler, linker)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust; rust-toolchain.toml installs 1.98.1 on first use
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"   # Bun, the version CI uses
+curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"   # Bun, the version CI uses
 brew install node                                          # Node 24 or later, for the engine in development
 
 git clone https://github.com/liberuum/knowledge-vault-app.git
