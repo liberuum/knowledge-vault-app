@@ -126,7 +126,13 @@ describe("installBinding", () => {
     expect(native.length).toBe(2);
     expect(native[0]!.range).toBeUndefined();
     expect(native[1]!.range).toMatch(/^bytes=\d+-$/);
-    expect(Number(/\d+/.exec(native[1]!.range!)![0])).toBeGreaterThan(1_000_000);
+    // The fake registry writes 60% of the 2 MB file, then destroys the socket 10 ms later; how much
+    // of that reached the client first is the machine's TCP buffering, not the installer's doing (CI
+    // once got 982,912 of the 1,258,291 written). The installer owes a resume from a real partial —
+    // past the first bytes, short of the whole — and the rest of the test proves the file came out whole.
+    const from = Number(/\d+/.exec(native[1]!.range!)![0]);
+    expect(from).toBeGreaterThan(10_000);
+    expect(from).toBeLessThan(2 * 1024 * 1024);
     expect(existsSync(join(dir, "node_modules", "docling.rs-linux-x64-gnu", "docling-rs.linux-x64-gnu.node"))).toBe(true);
   });
 
