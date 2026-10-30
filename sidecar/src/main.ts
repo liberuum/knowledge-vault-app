@@ -17,7 +17,7 @@ import { bindLoopbackOnly } from "./loopback.js";
 import { checkRemoteVault, discoverRemoteVaults, parseRemoteVaultInput, readRemoteVaults, RemoteInputError, writeRemoteVaults } from "./remote.js";
 import { prepareDataDir, setAsideStaleSnapshots } from "./data-dir.js";
 import { applyEnvironment, engineEnvironment } from "./environment.js";
-import { packageSpecs, switchboardOptions } from "./options.js";
+import { engineConfig, packageSpecs, switchboardOptions } from "./options.js";
 import { fatalLine, readyLine, restartLine, shutdownLine, waitForHealth } from "./ready.js";
 import { createGateway, GATEWAY_PATH } from "./gateway/gateway.js";
 import { createChatGptBridge } from "./gateway/chatgpt.js";
@@ -242,11 +242,16 @@ async function main(): Promise<void> {
   // A vault on this computer gets a dropped file without a network in between, so its convert route takes up to
   // 100 MB (30 MB is the default for a hosted vault). The vault package reads this when the Switchboard sets it up.
   process.env.CONVERT_MAX_UPLOAD_MB ??= "100";
+  // Loaded here, after the env and the working folder are set, like the server itself.
   const { startSwitchboard } = await import("@powerhousedao/switchboard/server");
+  const { switchboardConfigFromEnv } = await import("@powerhousedao/switchboard/config/env");
+  const { callerOverEnv } = await import("@powerhousedao/switchboard/config");
   const options = switchboardOptions(cfg, configFile, packageSpecs(PACKAGE_DIRS, process.cwd()), renownUrl);
-  const switchboard = await startSwitchboard(options);
+  const config = engineConfig(process.env, options.config, { switchboardConfigFromEnv, callerOverEnv });
+  const switchboard = await startSwitchboard(config, options.deps);
   // The SDK writes the keypair world-readable; it is a secret.
-  if (existsSync(options.identity.keypairPath)) chmodSync(options.identity.keypairPath, 0o600);
+  const keypair = options.config.identity.keypairPath;
+  if (existsSync(keypair)) chmodSync(keypair, 0o600);
   const origin = `http://127.0.0.1:${switchboard.port}`;
   await waitForHealth(`${origin}/health`, { timeoutMs: 60_000, intervalMs: 250 });
   // (5) the store now belongs to this stack.

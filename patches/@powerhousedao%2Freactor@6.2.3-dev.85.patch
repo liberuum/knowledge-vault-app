@@ -1,13 +1,13 @@
 diff --git a/dist/index.js b/dist/index.js
-index 7d039bd..4467540 100644
+index 5b8607f..2a1c3d7 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -5086,9 +5086,21 @@ function addEntry(map, entry) {
+@@ -6441,9 +6441,21 @@ function addEntry(map, entry) {
  	}
  	if (!existing.spec && entry.spec) existing.spec = entry.spec;
  }
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.73.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.85.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
@@ -25,16 +25,16 @@ index 7d039bd..4467540 100644
  	const moduleRef = isFile ? { filePath: source.filePath } : { packageName: specifier };
  	let moduleNs;
  	try {
-diff --git a/dist/load-spec-ZLjuyhxz.js b/dist/load-spec-ZLjuyhxz.js
-index 913cef7..a03111b 100644
---- a/dist/load-spec-ZLjuyhxz.js
-+++ b/dist/load-spec-ZLjuyhxz.js
-@@ -230,9 +230,21 @@ var DocumentModelRegistry = class {
+diff --git a/dist/load-spec-BS34dxCu.js b/dist/load-spec-BS34dxCu.js
+index 71776b5..759ec83 100644
+--- a/dist/load-spec-BS34dxCu.js
++++ b/dist/load-spec-BS34dxCu.js
+@@ -1005,9 +1005,21 @@ var DocumentModelRegistry = class {
  //#endregion
  //#region src/executor/worker/load-spec.ts
  /** Imports `spec.module` and calls the export with `spec.initArgs`, or returns it if not a function. */
 +/**
-+ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.73.patch): a file path as a file
++ * Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor@6.2.3-dev.85.patch): a file path as a file
 + * URL on Windows too. Upstream builds new URL(`file://${path}`): `C:\\…` and a drive-less `\\Users\\…` both
 + * yield a URL Windows cannot import. A drive-less path takes the working folder's drive.
 + */
