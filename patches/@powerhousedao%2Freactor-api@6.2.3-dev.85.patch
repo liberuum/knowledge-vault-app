@@ -1,0 +1,81 @@
+diff --git a/dist/error-info-BaEL50f5.mjs b/dist/error-info-BaEL50f5.mjs
+index a01414b..b4b529a 100644
+--- a/dist/error-info-BaEL50f5.mjs
++++ b/dist/error-info-BaEL50f5.mjs
+@@ -22,6 +22,22 @@ const DEFAULT_VACUUM_FULL_MAX_DEFER_MS = 0;
+ /** The deadline `PH_PGLITE_VACUUM_FULL=forced` sets. */
+ const FORCED_VACUUM_FULL_MAX_DEFER_MS = 18e5;
+ const MAINTENANCE_RETRY_MS = 1e3;
++/**
++* Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor-api@6.2.3-dev.85.patch): planner
++* statistics. PGlite has no autovacuum and this pass ran VACUUM without ANALYZE, so a store's tables never
++* had statistics and Postgres planned from its defaults: on a 930 MB store the sync outbox query took 5 s
++* per page instead of 105 ms, and the first write after a start stalled the store for minutes. Every
++* pass now runs VACUUM (ANALYZE) (ANALYZE after VACUUM FULL), and one early pass, shortly after open,
++* runs ANALYZE when a table that holds rows has no statistics. Statistics persist in the store, so that
++* happens once per store; afterwards the early pass is one catalog query.
++*/
++const KV_STATS_CHECK_DELAY_MS = 15e3;
++const KV_STATS_MISSING_SQL = "select exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind = 'r' and c.reltuples <> 0 and n.nspname not in ('pg_catalog', 'information_schema', 'pg_toast') and not exists (select 1 from pg_statistic s where s.starelid = c.oid))";
++/** True when a table that holds rows (or was never counted) has no planner statistics. */
++async function kvStatsMissing(pg) {
++	const { messages } = await pg.execProtocol(protocol.serialize.query(KV_STATS_MISSING_SQL), { syncToFs: false });
++	return messages.find((m) => m.name === "dataRow")?.fields?.[0] === "t";
++}
+ var PgliteMaintenance = class {
+ 	intervalMs;
+ 	vacuumFullAboveBytes;
+@@ -41,6 +57,7 @@ var PgliteMaintenance = class {
+ 	deferralLogged = false;
+ 	lastSyncAt = 0;
+ 	openedAt = 0;
++	kvStatsChecked = false;
+ 	constructor(options = {}) {
+ 		this.intervalMs = Math.max(0, options.intervalMs ?? 3e5);
+ 		this.vacuumFullAboveBytes = Math.max(0, options.vacuumFullAboveBytes ?? 268435456);
+@@ -62,7 +79,7 @@ var PgliteMaintenance = class {
+ 		this.vacuumFullPending = this.vacuumFullAboveBytes > 0 && baseBytes > this.vacuumFullAboveBytes;
+ 		this.lastSyncAt = this.now();
+ 		this.openedAt = this.lastSyncAt;
+-		this.schedule(this.intervalMs);
++		this.schedule(Math.min(KV_STATS_CHECK_DELAY_MS, this.intervalMs));
+ 	}
+ 	noteSync() {
+ 		this.syncsSinceMaintenance++;
+@@ -97,7 +114,7 @@ var PgliteMaintenance = class {
+ 			this.deferralLogged = true;
+ 			this.logger?.warn(`DurableNodeFs: ${this.label}/base exceeds ${this.vacuumFullAboveBytes} bytes; VACUUM FULL waits until the store has had no writes for ${this.vacuumFullQuietMs} ms${this.vacuumFullMaxDeferMs > 0 ? `, or at most ${this.vacuumFullMaxDeferMs} ms from open` : ""}`);
+ 		}
+-		if (!full && this.syncsSinceMaintenance === 0) return "idle";
++		if (!full && this.syncsSinceMaintenance === 0 && this.kvStatsChecked) return "idle";
+ 		const baseDir = path.join(this.label, "base");
+ 		const bytesBefore = full ? await dirBytes(baseDir) : 0;
+ 		const startedAt = this.now();
+@@ -108,11 +125,25 @@ var PgliteMaintenance = class {
+ 				const { messages } = await pg.execProtocol(protocol.serialize.query(""), { syncToFs: false });
+ 				if (transactionStatus(messages) !== "I") return "in-transaction";
+ 				if (full) this.logger?.warn(`DurableNodeFs: ${this.label}/base exceeds ${this.vacuumFullAboveBytes} bytes; running VACUUM FULL`);
+-				for (const statement of [full ? "VACUUM FULL" : "VACUUM", "CHECKPOINT"]) {
++				let statements;
++				let kind = full ? "vacuum-full" : "vacuum";
++				if (full) statements = ["VACUUM FULL", "ANALYZE"];
++				else if (!this.kvStatsChecked) {
++					this.kvStatsChecked = true;
++					kind = "analyze";
++					statements = await kvStatsMissing(pg) ? ["ANALYZE"] : [];
++					if (statements.length > 0) {
++						const message = `DurableNodeFs: ${this.label} has tables without planner statistics; running ANALYZE`;
++						if (this.logger?.info) this.logger.info(message);
++						else this.logger?.warn(message);
++					}
++				} else statements = ["VACUUM (ANALYZE)"];
++				if (statements.length === 0) return "idle";
++				for (const statement of [...statements, "CHECKPOINT"]) {
+ 					if (!isReady()) return "not-ready";
+ 					await pg.execProtocol(protocol.serialize.query(statement), { syncToFs: false });
+ 				}
+-				return full ? "vacuum-full" : "vacuum";
++				return kind;
+ 			});
+ 		} catch (err) {
+ 			this.logger?.warn(`DurableNodeFs maintenance failed: ${errorMessage(err)}`);

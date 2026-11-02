@@ -46,6 +46,7 @@
     "vitest": "4.1.1"
   },
   "patchedDependencies": {
-    "@powerhousedao/reactor@6.2.3-dev.85": "patches/@powerhousedao%2Freactor@6.2.3-dev.85.patch"
+    "@powerhousedao/reactor@6.2.3-dev.85": "patches/@powerhousedao%2Freactor@6.2.3-dev.85.patch",
+    "@powerhousedao/reactor-api@6.2.3-dev.85": "patches/@powerhousedao%2Freactor-api@6.2.3-dev.85.patch"
   }
 }
