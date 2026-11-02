@@ -54,8 +54,9 @@ export async function fillConnection(deps: FillDeps, connectionId: string, optio
     const minted = await deps.engineToken(); // before anything is written: a refusal costs nothing
     const created = await gql<{ workflowRuntime: { createSecret: { ref: string } } }>(
       origin,
-      `mutation($v: String!, $l: String) { workflowRuntime { createSecret(value: $v, label: $l) { ref } } }`,
-      { v: minted.value, l: `${name} — engine token` },
+      // Owned by this connection: the runtime hands a secret only to the document that owns it.
+      `mutation($v: String!, $l: String, $d: String!) { workflowRuntime { createSecret(value: $v, label: $l, documentId: $d) { ref } } }`,
+      { v: minted.value, l: `${name} — engine token`, d: connectionId },
       f,
     );
     const slot = (state.secretRefs ?? []).find((s) => s.name === "token");

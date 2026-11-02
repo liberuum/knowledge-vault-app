@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteDocument, execute, gql, toActions } from "./reactor-gql.js";
 import { SettingsError, type AppSettings } from "./settings.js";
-import { createPipelineConnection, fillPipeline, fillWorkflow, instantiatePipeline, instantiateWorkflow, replaceWorkflowInPlace, type PipelineTemplate, type TemplateOp, type WorkflowTemplate } from "./templates.js";
+import { createPipelineConnection, fillPipeline, fillWorkflow, instantiatePipeline, instantiateWorkflow, replaceWorkflowInPlace, type PipelineSecretRefs, type PipelineTemplate, type TemplateOp, type WorkflowTemplate } from "./templates.js";
 import { classifyRunError, type RunProblem } from "./run-problems.js";
 
 /**
@@ -33,6 +33,11 @@ export type PipelineRecord = {
   gatewayKeyed?: true;
   /** The vault's Reweave notes workflow, on this pipeline's connection, and the template digest it was made from. */
   reweave?: { workflowId: string; digest: string };
+  /**
+   * Set when the start-up check found secrets the connection does not own and could not replace them. The runtime serves a
+   * secret only to the document that owns it (since 6.2.3-dev.85), so every run fails until Update makes new ones.
+   */
+  secretsUnowned?: true;
 };
 /** A failed run whose work still waits (spec §1): which source, when, and what went wrong. */
 export type PipelineFailure = {
@@ -106,6 +111,13 @@ export type PipelineManagerDeps = {
   engineStartedAt?: string;
   instantiate?: typeof instantiatePipeline;
   now?: () => string;
+  /**
+   * How long the start-up secrets check waits for the runtime to seed its trigger registry, after which the engine has
+   * given its secrets an owner (patches/@powerhousedao%2Freactor-workflow@6.2.3-dev.90.patch), and how long between
+   * looks. Tests set them to 0.
+   */
+  seedWaitMs?: number;
+  seedPollMs?: number;
 };
 
 /** The bearer the piece uses lasts long enough to be forgotten about; an Update mints a new one. */
@@ -253,11 +265,16 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   const instantiate = deps.instantiate ?? instantiatePipeline;
   const instantiateReweave = deps.instantiateReweave ?? instantiateWorkflow;
 
-  async function createSecret(value: string, label: string): Promise<string> {
+  /**
+   * A runtime secret owned by `owner`, the connection that will name it. The runtime binds every secret to an existing
+   * connection or workflow and hands it to that document only (since 6.2.3-dev.85), and only while the owner exists
+   * can the secret be rotated or deleted.
+   */
+  async function createSecret(owner: string, value: string, label: string): Promise<string> {
     const data = await gql<{ workflowRuntime: { createSecret: { ref: string } } }>(
       deps.origin,
-      `mutation($v: String!, $l: String) { workflowRuntime { createSecret(value: $v, label: $l) { ref } } }`,
-      { v: value, l: label },
+      `mutation($v: String!, $l: String, $d: String!) { workflowRuntime { createSecret(value: $v, label: $l, documentId: $d) { ref } } }`,
+      { v: value, l: label, d: owner },
       f,
     ).catch((error: unknown) => {
       throw runtimeMissing(error) ? new Error("Processing is still starting up. Try again in a minute.") : error;
@@ -265,9 +282,47 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     return data.workflowRuntime.createSecret.ref;
   }
   const deleteSecret = (ref: string) => gql(deps.origin, `mutation($ref: String!) { workflowRuntime { deleteSecret(ref: $ref) } }`, { ref }, f).catch(() => undefined);
+  const deleteSecrets = async (refs: PipelineSecretRefs) => {
+    await deleteSecret(refs.token);
+    await deleteSecret(refs.llm);
+  };
+  /** A pipeline connection's two secrets, owned by it: the engine bearer and the model gateway key. */
+  async function createPipelineSecrets(connectionId: string, name: string, token: EngineToken): Promise<PipelineSecretRefs> {
+    const tokenRef = await createSecret(connectionId, token.value, `${name} — engine token`);
+    try {
+      return { token: tokenRef, llm: await createSecret(connectionId, deps.gateway.key, `${name} — model gateway key`) };
+    } catch (error) {
+      await deleteSecret(tokenRef);
+      throw error;
+    }
+  }
+  /**
+   * Whether the pipeline's connection owns both its secrets. `secret(ref)` answers null for a secret without an owner
+   * (one made before 6.2.3-dev.85), one gone, or one this caller may not read: none of those can serve the connection.
+   */
+  async function secretsOwnedBy(record: PipelineRecord): Promise<boolean> {
+    const data = await gql<{ workflowRuntime: { t: { ownerId: string | null } | null; l: { ownerId: string | null } | null } }>(
+      deps.origin,
+      `query($t: String!, $l: String!) { workflowRuntime { t: secret(ref: $t) { ownerId } l: secret(ref: $l) { ownerId } } }`,
+      { t: record.secretRefs.token, l: record.secretRefs.llm },
+      f,
+    );
+    return data.workflowRuntime.t?.ownerId === record.connectionId && data.workflowRuntime.l?.ownerId === record.connectionId;
+  }
+  const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+  /** Until the runtime's trigger registry holds this workflow (it was seeded), or the wait runs out. */
+  async function registered(workflowId: string): Promise<void> {
+    const until = Date.now() + (deps.seedWaitMs ?? 30_000);
+    for (;;) {
+      const data = await gql<{ workflowRuntime: { triggerStates: Array<{ workflowId: string }> } }>(deps.origin, `query { workflowRuntime { triggerStates { workflowId } } }`, {}, f).catch(() => null);
+      if (data?.workflowRuntime.triggerStates.some((t) => t.workflowId === workflowId) || Date.now() >= until) return;
+      await pause(deps.seedPollMs ?? 1_000);
+    }
+  }
+  /** The secrets go first, while the connection that owns them still exists to vouch for the delete. */
   async function discard(record: PipelineRecord): Promise<void> {
+    await deleteSecrets(record.secretRefs);
     for (const id of [...(record.reweave ? [record.reweave.workflowId] : []), record.workflowId, record.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
-    for (const ref of [record.secretRefs.token, record.secretRefs.llm]) await deleteSecret(ref);
   }
   const engineToken = () => mintEngineToken(deps.identity, deps.engineProtected === true, now);
   // A model on this computer needs no key; its connection gets a placeholder the server ignores.
@@ -317,6 +372,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   /** Why a recorded pipeline no longer fits: disabled, other model settings, an "open" bearer on a protected engine, a token near its end. */
   function staleReason(record: PipelineRecord, settings: AppSettings): string | undefined {
     if (record.disabled) return record.disabled;
+    if (record.secretsUnowned) return "its keys were made before this version of the engine and need replacing";
     // Records written before these fields existed carry neither; they are judged on what they have.
     if (record.models && (record.models.endpoint !== settings.models.endpoint || record.models.model !== settings.models.model)) return "the model settings changed";
     if (deps.engineProtected && record.token?.kind === "open") return "the engine is now protected; the pipeline was set up while it was open";
@@ -456,9 +512,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     }
     const name = await deps.vaultName(vaultId);
     const { id: workflowsDriveId } = await deps.workflowsDrive();
-    const tokenRef = await createSecret(token.value, `${name} — engine token`);
-    const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
-    let made: { workflowId: string; connectionId: string } | undefined;
+    let made: { workflowId: string; connectionId: string; secretRefs: PipelineSecretRefs } | undefined;
     try {
       made = await instantiate({
         origin: deps.origin,
@@ -466,20 +520,21 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         vaultName: name,
         driveId: vaultId,
         workflowsDriveId,
-        secretRefs: { token: tokenRef, llm: llmRef },
+        createSecrets: (connectionId) => createPipelineSecrets(connectionId, name, token),
+        deleteSecrets,
         llm: { baseUrl: deps.gateway.url(), model: settings.models.model },
         pieceVersion: deps.pieceVersion,
         now,
         fetchImpl: f,
       });
-      const { workflowId, connectionId } = made;
+      const { workflowId, connectionId, secretRefs } = made;
       await updateConnectionModels(connectionId, settings);
       writePipelines(deps.dataDir, {
         ...readPipelines(deps.dataDir),
         [vaultId]: {
           workflowId,
           connectionId,
-          secretRefs: { token: tokenRef, llm: llmRef },
+          secretRefs,
           createdAt: now(),
           models: { endpoint: settings.models.endpoint, model: settings.models.model },
           token: { kind: token.kind, expiresAt: token.expiresAt },
@@ -491,12 +546,13 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       await ensureReweave(vaultId);
       return { state: "ready", workflowId, connectionId };
     } catch (error) {
-      // A failed instantiatePipeline removed its own documents. Once it has returned they are ours: the
-      // config write or the record can still fail, and nothing would ever point at them again.
-      if (made) for (const id of [made.workflowId, made.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
-      // The two secrets are ours to remove either way.
-      await deleteSecret(tokenRef);
-      await deleteSecret(llmRef);
+      // A failed instantiatePipeline removed its own secrets and documents. Once it has returned they are ours: the
+      // config write or the record can still fail, and nothing would ever point at them again. Secrets first, while
+      // their connection still exists.
+      if (made) {
+        await deleteSecrets(made.secretRefs);
+        for (const id of [made.workflowId, made.connectionId]) await deleteDocument(deps.origin, id, f).catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -504,8 +560,8 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
   /**
    * Update in place (spec §2): the pipeline keeps its workflow, the workflow's id, its runs and its place in the
    * Workflows drive. In order:
-   *  1. two new secrets;
-   *  2. the connection kept, or made from the template when it was deleted in Studio;
+   *  1. the connection kept, or made from the template when it was deleted in Studio;
+   *  2. two new secrets, owned by that connection (a secret serves only the connection that owns it);
    *  3. the workflow brought to the template and published (replaceWorkflowInPlace, which rolls back to the last
    *     publish on a rejection);
    *  4. the template replayed onto the kept connection, with the new secret refs and the model settings, in one write;
@@ -522,16 +578,17 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
     let newConnection: string | undefined;
     let restoreRefs: TemplateOp[] | undefined; // set once the kept connection may name the new secrets
     try {
-      const tokenRef = await createSecret(token.value, `${name} — engine token`);
-      made.push(tokenRef);
-      const llmRef = await createSecret(deps.gateway.key, `${name} — model gateway key`);
-      made.push(llmRef);
-      const fill = { origin: deps.origin, template, vaultName: name, driveId: vaultId, secretRefs: { token: tokenRef, llm: llmRef }, llm: { baseUrl: deps.gateway.url(), model: settings.models.model }, pieceVersion: deps.pieceVersion, now, fetchImpl: f };
+      const base = { origin: deps.origin, template, vaultName: name, driveId: vaultId, llm: { baseUrl: deps.gateway.url(), model: settings.models.model }, pieceVersion: deps.pieceVersion, now, fetchImpl: f };
+      let secretRefs: PipelineSecretRefs;
       if ((await globalState(connectionId)) === null) {
         const { id: workflowsDriveId } = await deps.workflowsDrive();
-        newConnection = await createPipelineConnection({ ...fill, workflowsDriveId });
+        const created = await createPipelineConnection({ ...base, workflowsDriveId, createSecrets: (id) => createPipelineSecrets(id, name, token), deleteSecrets });
+        newConnection = created.connectionId;
         connectionId = newConnection;
-      }
+        secretRefs = created.secretRefs;
+      } else secretRefs = await createPipelineSecrets(connectionId, name, token);
+      made.push(secretRefs.token, secretRefs.llm);
+      const fill = { ...base, secretRefs };
       const filled = fillPipeline(fill, connectionId);
       await replaceWorkflowInPlace({ origin: deps.origin, workflowId: previous.workflowId, operations: filled.workflow, status: "ENABLED", now, fetchImpl: f });
       if (newConnection) {
@@ -542,14 +599,14 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         await execute(deps.origin, connectionId, toActions(ops, now), f);
       }
       // This record now, re-read: what another step wrote meanwhile (the Reweave notes workflow) is kept.
-      const { disabled: _wasDisabled, ...kept } = readPipelines(deps.dataDir)[vaultId] ?? previous;
+      const { disabled: _wasDisabled, secretsUnowned: _wereUnowned, ...kept } = readPipelines(deps.dataDir)[vaultId] ?? previous;
       writePipelines(deps.dataDir, {
         ...readPipelines(deps.dataDir),
         [vaultId]: {
           ...kept,
           workflowId: previous.workflowId,
           connectionId,
-          secretRefs: { token: tokenRef, llm: llmRef },
+          secretRefs,
           models: { endpoint: settings.models.endpoint, model: settings.models.model },
           token: { kind: token.kind, expiresAt: token.expiresAt },
           modelFromConnection: true,
@@ -558,7 +615,12 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
         },
       });
     } catch (error) {
-      if (newConnection) await deleteDocument(deps.origin, newConnection, f).catch(() => undefined);
+      if (newConnection) {
+        // Its secrets first: once the connection is gone, nothing may delete them.
+        for (const ref of made) await deleteSecret(ref);
+        await deleteDocument(deps.origin, newConnection, f).catch(() => undefined);
+        throw error;
+      }
       // The connection's write may have landed in part: it is pointed back at the record's secrets before the new ones go.
       const restored = !restoreRefs || (await execute(deps.origin, connectionId, toActions(restoreRefs, now), f).then(() => true, () => false));
       if (restored) for (const ref of made) await deleteSecret(ref);
@@ -608,6 +670,51 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
      * the new secret, the connection, the record — and only then loses its old secret, so a failure or a
      * crash at any point leaves a pipeline that still works.
      */
+    /**
+     * At start: a pipeline whose two secrets its connection does not own gets new ones it does. The runtime binds every
+     * secret to the connection or workflow that owns it and serves it to that document only (since 6.2.3-dev.85); secrets
+     * made before then own nothing, so every run of such a pipeline fails. The connection is pointed at the new secrets
+     * and the workflow is left as it is (Studio edits stay). One that cannot be renewed is marked, so the chip offers Update.
+     * Old secrets are deleted where the engine allows it (one without an owner cannot be).
+     */
+    async followSecretOwnership(): Promise<{ renewed: string[]; failed: string[] }> {
+      const out = { renewed: [] as string[], failed: [] as string[] };
+      const template = deps.template;
+      if (!template) return out;
+      for (const vaultId of Object.keys(readPipelines(deps.dataDir))) await exclusive(vaultId, async () => {
+        const record = readPipelines(deps.dataDir)[vaultId];
+        if (!record || record.disabled || !record.gatewayKeyed) return;
+        // The engine gives an older secret to the document naming it once it has seeded its registry: wait for that,
+        // and renew only what it left without an owner (a ref no document names, a seeding that failed).
+        if ((await secretsOwnedBy(record).catch(() => undefined)) !== false) return; // owned, or the engine cannot say
+        await registered(record.workflowId);
+        if ((await secretsOwnedBy(record).catch(() => undefined)) !== false) return;
+        await pause(deps.seedPollMs ?? 2_000);
+        if ((await secretsOwnedBy(record).catch(() => undefined)) !== false) return;
+        let fresh: PipelineSecretRefs | undefined;
+        try {
+          const settings = deps.readSettings();
+          const name = await deps.vaultName(vaultId).catch(() => vaultId);
+          const token = await engineToken();
+          fresh = await createPipelineSecrets(record.connectionId, name, token);
+          const fill = { origin: deps.origin, template, vaultName: name, driveId: vaultId, secretRefs: fresh, llm: { baseUrl: deps.gateway.url(), model: settings.models.model }, pieceVersion: deps.pieceVersion, now };
+          const refOps = fillPipeline(fill, record.connectionId).connection.filter((o) => o.type === "SET_SECRET_REF");
+          await execute(deps.origin, record.connectionId, toActions(refOps, now), f);
+          const { secretsUnowned: _wereUnowned, ...kept } = readPipelines(deps.dataDir)[vaultId] ?? record;
+          writePipelines(deps.dataDir, { ...readPipelines(deps.dataDir), [vaultId]: { ...kept, secretRefs: fresh, token: { kind: token.kind, expiresAt: token.expiresAt } } });
+          fresh = undefined;
+          await deleteSecrets(record.secretRefs);
+          out.renewed.push(vaultId);
+        } catch (error) {
+          if (fresh) await deleteSecrets(fresh);
+          writePipelines(deps.dataDir, { ...readPipelines(deps.dataDir), [vaultId]: { ...(readPipelines(deps.dataDir)[vaultId] ?? record), secretsUnowned: true } });
+          console.warn(`[pipelines] could not give vault ${vaultId}'s pipeline secrets it owns; Update is on offer: ${error instanceof Error ? error.message : String(error)}`);
+          out.failed.push(vaultId);
+        }
+      });
+      return out;
+    },
+
     async followGateway(): Promise<{ moved: string[]; failed: string[] }> {
       const settings = deps.readSettings();
       const out = { moved: [] as string[], failed: [] as string[] };
@@ -628,7 +735,7 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
             if (current.llm_base_url === deps.gateway.url()) return;
             await updateConnectionModels(record.connectionId, settings);
           } else {
-            created = await createSecret(deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
+            created = await createSecret(record.connectionId, deps.gateway.key, `${await deps.vaultName(vaultId).catch(() => vaultId)} — model gateway key`);
             await updateConnectionModels(record.connectionId, settings, created);
             // This record now, re-read: a crash later loses nothing, and a pipeline set up meanwhile is not overwritten.
             writePipelines(deps.dataDir, { ...readPipelines(deps.dataDir), [vaultId]: { ...record, secretRefs: { ...record.secretRefs, llm: created }, gatewayKeyed: true } });

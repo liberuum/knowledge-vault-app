@@ -42,22 +42,34 @@ export function fillPlaceholders(input: unknown, values: Partial<PlaceholderValu
   return JSON.parse(text);
 }
 
+/** Workflow-runtime secret refs (`secret://…`): the engine bearer the piece calls the vault with, and the LLM key. */
+export type PipelineSecretRefs = { token: string; llm: string };
+
 export type InstantiateOptions = {
   origin: string;
   template: PipelineTemplate;
   vaultName: string;
   driveId: string;
   workflowsDriveId: string;
-  /** Workflow-runtime secret refs (`secret://…`): the engine bearer the piece calls the vault with, and the LLM key. */
-  secretRefs: { token: string; llm: string };
+  /**
+   * Makes the connection's two secrets once the connection exists. The workflow runtime binds a secret to the document
+   * that owns it (createSecret's documentId, which must exist; since 6.2.3-dev.85) and hands it only to that connection,
+   * so the secrets are made after the connection and before its operations name them.
+   */
+  createSecrets: (connectionId: string) => Promise<PipelineSecretRefs>;
+  /** Removes those secrets when a later step fails. Called before their connection is deleted: a secret whose owner is gone can no longer be deleted. */
+  deleteSecrets: (refs: PipelineSecretRefs) => Promise<void>;
   llm: { baseUrl: string; model: string };
   pieceVersion: string;
   now?: () => string;
   fetchImpl?: typeof fetch;
 };
 
-/** What fillPipeline needs: everything instantiatePipeline takes except where the documents go and how to reach the engine. */
-export type PipelineFillOptions = Omit<InstantiateOptions, "workflowsDriveId" | "fetchImpl">;
+/** What fillPipeline needs: the documents' values, with the secrets already made. */
+export type PipelineFillOptions = Omit<InstantiateOptions, "workflowsDriveId" | "fetchImpl" | "createSecrets" | "deleteSecrets"> & { secretRefs: PipelineSecretRefs };
+
+/** Stand-in refs for checking a template's placeholders before anything is made. */
+const PROBE_REFS: PipelineSecretRefs = { token: "probe", llm: "probe" };
 
 /**
  * The template's connection and workflow operations, filled for this vault and one connection. The connection carries
@@ -85,41 +97,45 @@ export function fillPipeline(opts: PipelineFillOptions, connectionId: string): {
 }
 
 /**
- * Create the pipeline's connection in the Workflows drive and replay its operations. Used at setup, and by an Update
- * whose connection was deleted in Studio. Every placeholder is checked before the reactor is touched; a rejected
- * operation deletes the connection again.
+ * Create the pipeline's connection in the Workflows drive, then its secrets (owned by it), then replay its operations.
+ * Used at setup, and by an Update whose connection was deleted in Studio. Every placeholder is checked before the
+ * reactor is touched; a failure removes the secrets, then the connection.
  */
-export async function createPipelineConnection(opts: InstantiateOptions): Promise<string> {
+export async function createPipelineConnection(opts: InstantiateOptions): Promise<{ connectionId: string; secretRefs: PipelineSecretRefs }> {
   const f = opts.fetchImpl ?? fetch;
   const now = opts.now ?? (() => new Date().toISOString());
-  fillPipeline(opts, "probe");
+  fillPipeline({ ...opts, secretRefs: PROBE_REFS }, "probe");
   const connectionId = await createDocument(opts.origin, opts.template.connection.documentType, `${opts.vaultName} — Knowledge Vault`, opts.workflowsDriveId, f);
+  let secretRefs: PipelineSecretRefs | undefined;
   try {
-    await execute(opts.origin, connectionId, toActions(fillPipeline(opts, connectionId).connection, now), f);
-    return connectionId;
+    secretRefs = await opts.createSecrets(connectionId);
+    await execute(opts.origin, connectionId, toActions(fillPipeline({ ...opts, secretRefs }, connectionId).connection, now), f);
+    return { connectionId, secretRefs };
   } catch (error) {
+    if (secretRefs) await opts.deleteSecrets(secretRefs).catch(() => undefined);
     await deleteDocument(opts.origin, connectionId, f).catch(() => undefined);
     throw error;
   }
 }
 
 /**
- * Create the connection, then the workflow, in the Workflows drive, replaying each document's operations with the
- * placeholders filled. The template is validated first: an unknown placeholder aborts before anything is created.
- * When the reactor rejects an operation, both documents are deleted.
+ * Create the connection (with its secrets), then the workflow, in the Workflows drive, replaying each document's
+ * operations with the placeholders filled. The template is validated first: an unknown placeholder aborts before
+ * anything is created. When the reactor rejects an operation, the secrets and both documents are deleted.
  */
-export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ workflowId: string; connectionId: string }> {
+export async function instantiatePipeline(opts: InstantiateOptions): Promise<{ workflowId: string; connectionId: string; secretRefs: PipelineSecretRefs }> {
   const f = opts.fetchImpl ?? fetch;
   const now = opts.now ?? (() => new Date().toISOString());
   // Every placeholder the template uses must be one we fill — checked before the reactor is touched.
-  fillPipeline(opts, "probe");
-  const connectionId = await createPipelineConnection(opts);
+  fillPipeline({ ...opts, secretRefs: PROBE_REFS }, "probe");
+  const { connectionId, secretRefs } = await createPipelineConnection(opts);
   let workflowId: string | undefined;
   try {
     workflowId = await createDocument(opts.origin, opts.template.workflow.documentType, `${opts.vaultName} — Vault pipeline`, opts.workflowsDriveId, f);
-    await execute(opts.origin, workflowId, toActions(fillPipeline(opts, connectionId).workflow, now), f);
-    return { workflowId, connectionId };
+    await execute(opts.origin, workflowId, toActions(fillPipeline({ ...opts, secretRefs }, connectionId).workflow, now), f);
+    return { workflowId, connectionId, secretRefs };
   } catch (error) {
+    await opts.deleteSecrets(secretRefs).catch(() => undefined);
     for (const id of [connectionId, ...(workflowId ? [workflowId] : [])]) await deleteDocument(opts.origin, id, f).catch(() => undefined);
     throw error;
   }

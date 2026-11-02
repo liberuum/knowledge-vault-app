@@ -51,11 +51,31 @@ describe("fillPlaceholders", () => {
   });
 });
 
+/**
+ * The secrets as the runtime makes them since 6.2.3-dev.85: for a connection that exists, owned by it. `deleted` counts
+ * the documents already deleted when the secrets went — 0 means their connection still existed to vouch for them.
+ */
+function runtimeSecrets(calls: Array<{ query: string }>, refs = { token: "secret://v1:aaaa", llm: "secret://v1:bbbb" }) {
+  const seen = { owners: [] as string[], deleted: [] as number[] };
+  return {
+    seen,
+    createSecrets: vi.fn(async (connectionId: string) => {
+      seen.owners.push(connectionId);
+      return refs;
+    }),
+    deleteSecrets: vi.fn(async () => {
+      seen.deleted.push(calls.filter((c) => c.query.includes("deleteDocument")).length);
+    }),
+  };
+}
+
 describe("instantiatePipeline", () => {
-  const opts = { origin: "http://127.0.0.1:4201", template, vaultName: "Research", driveId: "vault1", workflowsDriveId: "wfdrive", secretRefs: { token: "secret://v1:aaaa", llm: "secret://v1:bbbb" }, llm: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, pieceVersion: "1.0.54-dev.23", now: () => "2026-10-07T10:00:00.000Z" };
-  it("creates the connection, then the workflow, in the Workflows drive, and replays each with its values", async () => {
+  const opts = { origin: "http://127.0.0.1:4201", template, vaultName: "Research", driveId: "vault1", workflowsDriveId: "wfdrive", llm: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" }, pieceVersion: "1.0.54-dev.23", now: () => "2026-10-07T10:00:00.000Z" };
+  it("creates the connection, then its secrets (owned by it), then the workflow, in the Workflows drive, and replays each with its values", async () => {
     const { fetchImpl, calls } = fakeReactor();
-    expect(await instantiatePipeline({ ...opts, fetchImpl })).toEqual({ connectionId: "doc1", workflowId: "doc2" });
+    const secrets = runtimeSecrets(calls);
+    expect(await instantiatePipeline({ ...opts, ...secrets, fetchImpl })).toEqual({ connectionId: "doc1", workflowId: "doc2", secretRefs: { token: "secret://v1:aaaa", llm: "secret://v1:bbbb" } });
+    expect(secrets.seen.owners).toEqual(["doc1"]); // made for the connection, once it existed
     const creates = calls.filter((c) => c.query.includes("createDocument"));
     expect(creates[0]!.query).toMatch(/Connection\s*\{/);
     expect(creates[0]!.variables).toEqual({ name: "Research — Knowledge Vault", parent: "wfdrive" });
@@ -75,17 +95,22 @@ describe("instantiatePipeline", () => {
     expect(wf[2]!.input).toEqual({ id: "s1", config: { drive: "vault1", model: "", source_id: "{{trigger.payload.source_id}}" }, connectionId: "doc1" });
     expect(wf[3]!.input).toEqual({ publishedAt: "2026-10-07T10:00:00.000Z" });
   });
-  it("deletes what it created when a replayed operation is rejected, naming the operation and the reason", async () => {
+  it("deletes what it created when a replayed operation is rejected, the secrets before their connection, naming the operation and the reason", async () => {
     const { fetchImpl, calls } = fakeReactor({ rejectType: "SET_WORKFLOW_NAME", rejectWith: "Name is empty" });
-    await expect(instantiatePipeline({ ...opts, fetchImpl })).rejects.toThrow(/SET_WORKFLOW_NAME.*Name is empty/);
+    const secrets = runtimeSecrets(calls);
+    await expect(instantiatePipeline({ ...opts, ...secrets, fetchImpl })).rejects.toThrow(/SET_WORKFLOW_NAME.*Name is empty/);
     const deletes = calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id);
     expect(deletes.sort()).toEqual(["doc1", "doc2"]);
+    expect(secrets.deleteSecrets).toHaveBeenCalledWith({ token: "secret://v1:aaaa", llm: "secret://v1:bbbb" });
+    expect(secrets.seen.deleted).toEqual([0]);
   });
   it("refuses a template whose placeholders it does not know, before touching the reactor", async () => {
     const { fetchImpl, calls } = fakeReactor();
+    const secrets = runtimeSecrets(calls);
     const odd: PipelineTemplate = { ...template, workflow: { ...template.workflow, operations: [{ type: "SET_X", input: { v: "{{SOMETHING_NEW}}" } }] } };
-    await expect(instantiatePipeline({ ...opts, template: odd, fetchImpl })).rejects.toThrow("Unknown placeholder {{SOMETHING_NEW}}");
+    await expect(instantiatePipeline({ ...opts, ...secrets, template: odd, fetchImpl })).rejects.toThrow("Unknown placeholder {{SOMETHING_NEW}}");
     expect(calls.length).toBe(0);
+    expect(secrets.createSecrets).not.toHaveBeenCalled();
   });
 });
 
@@ -120,14 +145,19 @@ describe("Update in place", () => {
     expect(sent(calls)[1]![0]!.input).toEqual({});
   });
 
-  it("makes a connection from the template, and deletes it again when an operation is rejected", async () => {
+  it("makes a connection from the template with secrets it owns, and deletes them, then it, when an operation is rejected", async () => {
     const ok = fakeReactor();
-    expect(await createPipelineConnection({ ...fill, workflowsDriveId: "wfdrive", fetchImpl: ok.fetchImpl })).toBe("doc1");
+    const okSecrets = runtimeSecrets(ok.calls, fill.secretRefs);
+    expect(await createPipelineConnection({ ...fill, ...okSecrets, workflowsDriveId: "wfdrive", fetchImpl: ok.fetchImpl })).toEqual({ connectionId: "doc1", secretRefs: fill.secretRefs });
+    expect(okSecrets.seen.owners).toEqual(["doc1"]);
     expect(ok.calls.find((c) => c.query.includes("createDocument"))!.variables).toEqual({ name: "Research — Knowledge Vault", parent: "wfdrive" });
     expect(sent(ok.calls)[0]!.map((a) => a.type)).toEqual(["SET_CONNECTION_NAME", "SET_CONNECTOR", "SET_CONFIG", "SET_SECRET_REF", "SET_SECRET_REF"]);
+    expect(sent(ok.calls)[0]!.filter((a) => a.type === "SET_SECRET_REF").map((a) => (a.input as { ref: string }).ref)).toEqual([fill.secretRefs.token, fill.secretRefs.llm]);
     const bad = fakeReactor({ rejectType: "SET_CONNECTOR", rejectWith: "The reactor connector id goes only with authType REACTOR" });
-    await expect(createPipelineConnection({ ...fill, workflowsDriveId: "wfdrive", fetchImpl: bad.fetchImpl })).rejects.toThrow(/SET_CONNECTOR/);
+    const badSecrets = runtimeSecrets(bad.calls, fill.secretRefs);
+    await expect(createPipelineConnection({ ...fill, ...badSecrets, workflowsDriveId: "wfdrive", fetchImpl: bad.fetchImpl })).rejects.toThrow(/SET_CONNECTOR/);
     expect(bad.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id)).toEqual(["doc1"]);
+    expect(badSecrets.seen.deleted).toEqual([0]); // the secrets went while the connection still existed
   });
 
   it("fills a workflow template with the workflow's own values, the model left to the connection", () => {

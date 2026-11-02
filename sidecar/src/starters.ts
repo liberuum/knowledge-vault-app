@@ -331,8 +331,12 @@ export function createStarterManager(deps: StarterDeps) {
   const now = () => (deps.now ?? (() => new Date().toISOString()))();
   const run = <T>(query: string, variables: Record<string, unknown>) => gql<T>(deps.origin, query, variables, f);
 
-  async function createSecret(value: string, label: string): Promise<string> {
-    const data = await run<{ workflowRuntime: { createSecret: { ref: string } } }>(`mutation($v: String!, $l: String) { workflowRuntime { createSecret(value: $v, label: $l) { ref } } }`, { v: value, l: label });
+  /** A runtime secret owned by `owner`, the connection that names it: the runtime hands a secret only to its owner (since 6.2.3-dev.85). */
+  async function createSecret(owner: string, value: string, label: string): Promise<string> {
+    const data = await run<{ workflowRuntime: { createSecret: { ref: string } } }>(
+      `mutation($v: String!, $l: String, $d: String!) { workflowRuntime { createSecret(value: $v, label: $l, documentId: $d) { ref } } }`,
+      { v: value, l: label, d: owner },
+    );
     return data.workflowRuntime.createSecret.ref;
   }
   const deleteSecret = (ref: string) => run(`mutation($ref: String!) { workflowRuntime { deleteSecret(ref: $ref) } }`, { ref }).catch(() => undefined);
@@ -395,8 +399,9 @@ export function createStarterManager(deps: StarterDeps) {
     for (const record of readStarters(deps.dataDir)[vaultId] ?? []) {
       const state = await workflowState(record.workflowId);
       if (!state) {
-        if (record.connectionId) await remove(record.connectionId);
+        // The key before its connection: the runtime deletes a secret only while its owner exists.
         if (record.secretRef) await deleteSecret(record.secretRef);
+        if (record.connectionId) await remove(record.connectionId);
         save(vaultId, (l) => l.filter((r) => r.workflowId !== record.workflowId));
         continue;
       }
@@ -418,18 +423,19 @@ export function createStarterManager(deps: StarterDeps) {
     const { id: workflowsDriveId } = await deps.workflowsDrive();
 
     const made: { documents: string[]; secret?: string } = { documents: [] };
+    // The secret first, while the connection that owns it still exists: an ownerless secret cannot be deleted.
     const undo = async () => {
-      for (const id of [...made.documents].reverse()) await remove(id);
       if (made.secret) await deleteSecret(made.secret);
+      for (const id of [...made.documents].reverse()) await remove(id);
     };
     try {
       // 1. A key gets its own connection, checked before anything else is made.
       let connectionId: string | undefined;
       if (plan.connection) {
         const connectionName = `${vaultName} — ${plan.connection.name}`;
-        made.secret = await createSecret(plan.connection.key, `${connectionName} — API key`);
         connectionId = await createDocument(deps.origin, "powerhouse/connection", connectionName, workflowsDriveId, f);
         made.documents.push(connectionId);
+        made.secret = await createSecret(connectionId, plan.connection.key, `${connectionName} — API key`);
         await execute(
           deps.origin,
           connectionId,
@@ -509,9 +515,10 @@ export function createStarterManager(deps: StarterDeps) {
   /** A vault going away takes its starters with it: their workflows, connections and keys. */
   async function removeVault(vaultId: string): Promise<void> {
     for (const record of readStarters(deps.dataDir)[vaultId] ?? []) {
+      // The key before its connection: the runtime deletes a secret only while its owner exists.
+      if (record.secretRef) await deleteSecret(record.secretRef);
       await remove(record.workflowId);
       if (record.connectionId) await remove(record.connectionId);
-      if (record.secretRef) await deleteSecret(record.secretRef);
     }
     save(vaultId, () => []);
   }

@@ -555,6 +555,13 @@ async function main(): Promise<void> {
       if (failed.length) console.warn(`[sidecar] ${failed.length} pipeline(s) could not be moved to the gateway and keep their previous settings: ${failed.join(", ")}`);
     })
     .catch((e: unknown) => console.warn(`[sidecar] could not move pipelines to the gateway: ${e instanceof Error ? e.message : String(e)}`))
+    // Secrets made before the engine bound each one to its connection (6.2.3-dev.85) serve nothing: the pipeline gets ones it owns.
+    .then(() => pipelines.followSecretOwnership())
+    .then(({ renewed, failed }) => {
+      if (renewed.length) console.log(`[sidecar] ${renewed.length} pipeline(s) got secrets their connection owns`);
+      if (failed.length) console.warn(`[sidecar] ${failed.length} pipeline(s) still hold secrets their connection does not own; Update is on offer: ${failed.join(", ")}`);
+    })
+    .catch((e: unknown) => console.warn(`[sidecar] could not check the pipelines' secrets: ${e instanceof Error ? e.message : String(e)}`))
     // Pipelines made before the template's run policy (enforced since 6.2.3-dev.50) or the template's 10 s poll interval (a queue check on every 15 s wake-up of the runtime) get them.
     .then(() => pipelines.followTemplate())
     .then((r) => {

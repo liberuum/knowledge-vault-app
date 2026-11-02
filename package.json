@@ -47,6 +47,7 @@
   },
   "patchedDependencies": {
     "@powerhousedao/reactor@6.2.3-dev.90": "patches/@powerhousedao%2Freactor@6.2.3-dev.90.patch",
-    "@powerhousedao/reactor-api@6.2.3-dev.90": "patches/@powerhousedao%2Freactor-api@6.2.3-dev.90.patch"
+    "@powerhousedao/reactor-api@6.2.3-dev.90": "patches/@powerhousedao%2Freactor-api@6.2.3-dev.90.patch",
+    "@powerhousedao/reactor-workflow@6.2.3-dev.90": "patches/@powerhousedao%2Freactor-workflow@6.2.3-dev.90.patch"
   }
 }

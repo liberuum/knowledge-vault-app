@@ -15,6 +15,8 @@ function fakeEngine(opts: { checkOk?: boolean; testError?: string; items?: unkno
   const calls: Call[] = [];
   const docs = new Map<string, { name: string; ops: Op[] }>();
   const secrets = new Set<string>();
+  /** Each secret's owner: the runtime makes a secret only for an existing document, and deletes it only while that exists. */
+  const owners = new Map<string, string>();
   let n = 0;
   const ok = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
   const fail = (message: string) => ({ ok: true, json: async () => ({ errors: [{ message }] }) });
@@ -30,11 +32,16 @@ function fakeEngine(opts: { checkOk?: boolean; testError?: string; items?: unkno
       return ok({ [ns]: { createDocument: { id } } });
     }
     if (q.includes("createSecret")) {
+      if (typeof v.d !== "string" || !q.includes("documentId: $d")) return fail('Field "createSecret" argument "documentId" of type "String!" is required, but it was not provided.');
+      if (!docs.has(v.d)) return fail(`Document ${v.d} not found`);
       const ref = `secret://v1:${++n}`;
       secrets.add(ref);
+      owners.set(ref, v.d);
       return ok({ workflowRuntime: { createSecret: { ref } } });
     }
     if (q.includes("deleteSecret")) {
+      const owner = owners.get(v.ref as string);
+      if (owner && !docs.has(owner)) return fail(`Document ${owner} not found`);
       secrets.delete(v.ref as string);
       return ok({ workflowRuntime: { deleteSecret: true } });
     }
@@ -63,7 +70,7 @@ function fakeEngine(opts: { checkOk?: boolean; testError?: string; items?: unkno
     throw new Error(`unexpected query: ${q}`);
   }) as unknown as typeof fetch;
   const opsOf = (id: string) => docs.get(id)?.ops.map((o) => o.action) ?? [];
-  return { fetchImpl, calls, docs, secrets, opsOf };
+  return { fetchImpl, calls, docs, secrets, owners, opsOf };
 }
 
 const NOW = "2026-10-15T10:00:00.000Z";
@@ -223,6 +230,7 @@ describe("the starter manager", () => {
     expect(connection.map((a) => a.type)).toEqual(["SET_CONNECTION_NAME", "SET_CONNECTOR", "SET_SECRET_REF"]);
     expect(connection[1]!.input).toEqual({ connectorId: "@activepieces/piece-granola#granola", authType: "SECRET_TEXT" });
     expect(connection[2]!.input).toMatchObject({ name: "value", ref: [...engine.secrets][0] });
+    expect(engine.owners.get([...engine.secrets][0]!)).toBe(record.connectionId); // made for the connection, once it existed
     const trigger = engine.opsOf(out.workflowId).find((a) => a.type === "SET_TRIGGER")!.input as Record<string, unknown>;
     expect(trigger.connectionId).toBe(record.connectionId);
     expect(record.secretRef).toBe([...engine.secrets][0]);

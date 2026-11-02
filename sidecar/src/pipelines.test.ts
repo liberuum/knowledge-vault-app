@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPipelineManager, documentGone, readPipelines, templateDigest, templatePolicy, templatePollSeconds, workflowDigest, writePipelines, type PipelineManagerDeps, type PipelineRecord } from "./pipelines.js";
-import type { PipelineTemplate, WorkflowTemplate } from "./templates.js";
+import type { InstantiateOptions, PipelineTemplate, WorkflowTemplate } from "./templates.js";
 
 const template = { version: 1, exportedAt: "x", placeholders: [], connection: { documentType: "powerhouse/connection", operations: [] }, workflow: { documentType: "powerhouse/workflow", operations: [] } } as unknown as PipelineTemplate;
 const reweaveTemplate = { version: 1, exportedAt: "x", placeholders: [], workflow: { documentType: "powerhouse/workflow", operations: [{ type: "SET_WORKFLOW_NAME", input: { name: "{{WORKFLOW_NAME}}" } }] } } as unknown as WorkflowTemplate;
@@ -27,6 +27,11 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
   /** Documents the engine cannot read just now. */
   const unreadable = new Set<string>();
   const ops = new Map<string, Array<{ index: number; error: string | null; action: { id: string; type: string } }>>();
+  /** Each secret's owner, as the runtime binds it (6.2.3-dev.85): a secret is deleted only while its owner exists. */
+  const secretOwners = new Map<string, string>();
+  const deletedDocuments = new Set<string>();
+  /** Secret deletes the engine refused because the owner was already gone: the secret is stranded. */
+  const strandedSecrets: string[] = [];
   const reply = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
   const refuse = (message: string) => ({ ok: true, json: async () => ({ errors: [{ message }] }) });
   const fetchImpl = vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
@@ -34,9 +39,32 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     calls.push(body);
     const q = body.query;
     const id = String(body.variables.id);
-    if (q.includes("createSecret")) return reply({ workflowRuntime: { createSecret: { ref: `secret://v1:${++secrets}` } } });
-    if (q.includes("deleteSecret")) return reply({ workflowRuntime: { deleteSecret: true } });
-    if (q.includes("deleteDocument")) return reply({ deleteDocument: true });
+    if (q.includes("createSecret")) {
+      const owner = body.variables.d;
+      if (typeof owner !== "string" || !q.includes("documentId: $d")) return { ok: false, status: 400, json: async () => ({ errors: [{ message: 'Field "createSecret" argument "documentId" of type "String!" is required, but it was not provided.' }] }) };
+      if (gone.has(owner) || deletedDocuments.has(owner)) return refuse(`Document ${owner} not found`);
+      const ref = `secret://v1:${++secrets}`;
+      secretOwners.set(ref, owner);
+      return reply({ workflowRuntime: { createSecret: { ref } } });
+    }
+    if (q.includes("deleteSecret")) {
+      const ref = String(body.variables.ref);
+      const owner = secretOwners.get(ref);
+      if (owner && deletedDocuments.has(owner)) {
+        strandedSecrets.push(ref);
+        return refuse(`Document ${owner} not found`);
+      }
+      return reply({ workflowRuntime: { deleteSecret: true } });
+    }
+    if (q.includes("secret(ref:")) {
+      // The runtime answers null for a secret without an owner (made before 6.2.3-dev.85).
+      const stat = (ref: unknown) => (secretOwners.has(String(ref)) ? { ownerId: secretOwners.get(String(ref)) } : null);
+      return reply({ workflowRuntime: { t: stat(body.variables.t), l: stat(body.variables.l) } });
+    }
+    if (q.includes("deleteDocument")) {
+      deletedDocuments.add(id);
+      return reply({ deleteDocument: true });
+    }
     if (q.includes("createDocument")) return reply({ Connection: { createDocument: { id: "conn-new" } } });
     if (q.includes("execute(")) {
       if (failExecuteFor.has(id)) return refuse(`the engine refused the write to ${id}`);
@@ -57,12 +85,17 @@ function fakeEngine(triggers: Array<{ workflowId: string; status: string }> = []
     }
     throw new Error(`unexpected query: ${q}`);
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls, connectionConfig, failExecuteFor, rejectTypes, states, gone, unreadable };
+  return { fetchImpl, calls, connectionConfig, failExecuteFor, rejectTypes, states, gone, unreadable, secretOwners, strandedSecrets };
 }
 function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?: boolean; model?: string; endpoint?: string; triggers?: Array<{ workflowId: string; status: string }> } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "kv-pipelines-"));
   const engine = fakeEngine(over.triggers);
-  const instantiate = vi.fn(async () => ({ workflowId: "wf-1", connectionId: "conn-1" }));
+  // As instantiatePipeline does: a new connection each time, then the secrets it owns.
+  let instantiated = 0;
+  const instantiate = vi.fn(async (o: InstantiateOptions) => {
+    const n = ++instantiated;
+    return { workflowId: `wf-${n}`, connectionId: `conn-${n}`, secretRefs: await o.createSecrets(`conn-${n}`) };
+  });
   const hasKey = over.hasKey ?? true;
   const d: PipelineManagerDeps = {
     dataDir,
@@ -73,6 +106,8 @@ function deps(over: Partial<PipelineManagerDeps> & { hasKey?: boolean; signedIn?
     pieceVersion: "1.0.54-dev.23",
     readSettings: () => ({ version: 1, models: { endpoint: over.endpoint ?? "https://openrouter.ai/api/v1", model: over.model ?? "openai/gpt-6-luna", hasKey, local: (over.endpoint ?? "").startsWith("http://127.") }, conversion: { mode: "local", remoteUrl: "" } }),
     readModelKey: () => (hasKey ? "sk-or-secret" : undefined),
+    seedWaitMs: 0,
+    seedPollMs: 0,
     identity: {
       status: async () => ({ authenticated: over.signedIn ?? true }),
       token: async (expiresIn: number) => ({ token: `jwt-${expiresIn}` }),
@@ -112,17 +147,19 @@ describe("pipeline manager — ensure", () => {
   it("stores the engine token (90 days, minted by the identity) and the model key as runtime secrets, instantiates the template, and records the pipeline", async () => {
     const { manager, engine, instantiate, dataDir } = deps();
     expect(await manager.ensure("vault1")).toEqual({ state: "ready", workflowId: "wf-1", connectionId: "conn-1" });
+    // Both secrets belong to the connection that names them: the runtime serves a secret to its owner only.
     const secrets = engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables);
     expect(secrets).toEqual([
-      { v: `jwt-${90 * 86_400}`, l: "Research — engine token" },
-      { v: "gw-key", l: "Research — model gateway key" },
+      { v: `jwt-${90 * 86_400}`, l: "Research — engine token", d: "conn-1" },
+      { v: "gw-key", l: "Research — model gateway key", d: "conn-1" },
     ]);
     expect(instantiate).toHaveBeenCalledWith(expect.objectContaining({
       origin: "http://127.0.0.1:4201",
       vaultName: "Research",
       driveId: "vault1",
       workflowsDriveId: "wfdrive",
-      secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" },
+      createSecrets: expect.any(Function),
+      deleteSecrets: expect.any(Function),
       llm: { baseUrl: "http://127.0.0.1:4202/llm/v1", model: "openai/gpt-6-luna" },
       pieceVersion: "1.0.54-dev.23",
     }));
@@ -141,6 +178,7 @@ describe("pipeline manager — ensure", () => {
     expect(instantiate).toHaveBeenCalledTimes(2);
     expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort()).toEqual(["conn-1", "wf-1"]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
+    expect(engine.strandedSecrets).toEqual([]); // deleted while their connection still existed
   });
 });
 
@@ -292,6 +330,22 @@ describe("pipeline manager — Update in place", () => {
     const [edits] = batches(h.engine.calls, "wf-1");
     expect(edits!.find((a) => a.type === "SET_TRIGGER")!.input).toMatchObject({ connectionId: "conn-new" });
     expect(readPipelines(h.dataDir).vault1).toMatchObject({ workflowId: "wf-1", connectionId: "conn-new", secretRefs: { token: "secret://v1:3", llm: "secret://v1:4" } });
+    // The new connection exists before its secrets, and owns them.
+    expect([h.engine.secretOwners.get("secret://v1:3"), h.engine.secretOwners.get("secret://v1:4")]).toEqual(["conn-new", "conn-new"]);
+  });
+
+  it("a failed Update that made a new connection deletes that connection's secrets before the connection, so none is stranded", async () => {
+    const h = deps({ template: inPlace });
+    await h.manager.ensure("vault1");
+    const before = readPipelines(h.dataDir).vault1;
+    h.engine.states["wf-1"] = running;
+    h.engine.gone.add("conn-1");
+    h.engine.rejectTypes.add("ADD_EDGE");
+    await expect(h.manager.ensure("vault1")).rejects.toThrow(/ADD_EDGE was rejected/);
+    expect(deletedSecrets(h.engine.calls)).toEqual(["secret://v1:3", "secret://v1:4"]);
+    expect(h.engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id)).toEqual(["conn-new"]);
+    expect(h.engine.strandedSecrets).toEqual([]);
+    expect(readPipelines(h.dataDir).vault1).toEqual(before);
   });
 
   it("brings the Reweave notes workflow along: switched on again when the app had switched it off", async () => {
@@ -525,11 +579,11 @@ describe("pipeline manager — status reads the work, not the last run", () => {
 });
 
 describe("pipeline manager — lifecycle (review fixes)", () => {
-  it("a failed instantiation deletes the two new secrets and leaves no record — status reads missing, never ready", async () => {
+  it("a failed instantiation leaves ensure nothing to remove and no record — status reads missing, never ready", async () => {
     const { manager, engine, dataDir } = deps({ instantiate: vi.fn(async () => { throw new Error("Operation SET_TRIGGER was rejected: drive unknown"); }) });
     await expect(manager.ensure("vault1")).rejects.toThrow(/SET_TRIGGER/);
-    expect(engine.calls.filter((c) => c.query.includes("deleteDocument"))).toEqual([]); // instantiate removed its own; ensure never saw their ids
-    expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
+    // instantiatePipeline removes its own secrets and documents (templates.test.ts); ensure never saw their ids
+    expect(engine.calls.filter((c) => c.query.includes("deleteDocument") || c.query.includes("Secret"))).toEqual([]);
     expect(readPipelines(dataDir).vault1).toBeUndefined();
     expect(await manager.status("vault1")).toEqual({ state: "missing" });
   });
@@ -539,6 +593,7 @@ describe("pipeline manager — lifecycle (review fixes)", () => {
     await expect(manager.ensure("vault1")).rejects.toThrow(/refused the write to conn-1/);
     expect(engine.calls.filter((c) => c.query.includes("deleteDocument")).map((c) => c.variables.id).sort()).toEqual(["conn-1", "wf-1"]);
     expect(engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref).sort()).toEqual(["secret://v1:1", "secret://v1:2"]);
+    expect(engine.strandedSecrets).toEqual([]); // the secrets went before their connection
     expect(readPipelines(dataDir).vault1).toBeUndefined();
     expect(await manager.status("vault1")).toEqual({ state: "missing" });
   });
@@ -856,5 +911,81 @@ describe("documentGone — only the engine's own document messages", () => {
     "The engine answered without data",
   ])("does not read %j as gone", (message) => {
     expect(documentGone(new Error(message))).toBe(false);
+  });
+});
+
+describe("pipeline manager — secrets the connection owns (6.2.3-dev.85)", () => {
+  /** A template whose connection names the two secrets, as the vault package's does. */
+  const named = {
+    version: 1,
+    exportedAt: "x",
+    placeholders: [],
+    connection: { documentType: "powerhouse/connection", operations: [{ type: "SET_SECRET_REF", input: { id: "tok", ref: "{{TOKEN_SECRET_REF}}", name: "token" } }, { type: "SET_SECRET_REF", input: { id: "llm", ref: "{{LLM_SECRET_REF}}", name: "llm_api_key" } }] },
+    workflow: { documentType: "powerhouse/workflow", operations: [] },
+  } as unknown as PipelineTemplate;
+  /** A pipeline set up before the runtime bound secrets to their owner: its secrets own nothing. */
+  const legacy = (): PipelineRecord => ({
+    workflowId: "wf-1",
+    connectionId: "conn-1",
+    secretRefs: { token: "secret://legacy:tok", llm: "secret://legacy:llm" },
+    createdAt: "2026-10-01T00:00:00.000Z",
+    models: { endpoint: "https://openrouter.ai/api/v1", model: "openai/gpt-6-luna" },
+    token: { kind: "minted", expiresAt: "2027-01-05T10:00:00.000Z" },
+    modelFromConnection: true,
+    templateDigest: templateDigest(named),
+    gatewayKeyed: true,
+  });
+
+  it("gives a pipeline whose secrets own nothing new ones its connection owns, repoints the connection, and leaves the workflow alone", async () => {
+    const h = deps({ template: named });
+    writePipelines(h.dataDir, { vault1: legacy() });
+    expect(await h.manager.followSecretOwnership()).toEqual({ renewed: ["vault1"], failed: [] });
+    expect(h.engine.calls.filter((c) => c.query.includes("createSecret")).map((c) => c.variables.d)).toEqual(["conn-1", "conn-1"]);
+    expect(batches(h.engine.calls, "conn-1")).toEqual([[expect.objectContaining({ type: "SET_SECRET_REF", input: { id: "tok", ref: "secret://v1:1", name: "token" } }), expect.objectContaining({ type: "SET_SECRET_REF", input: { id: "llm", ref: "secret://v1:2", name: "llm_api_key" } })]]);
+    expect(batches(h.engine.calls, "wf-1")).toEqual([]);
+    expect(readPipelines(h.dataDir).vault1).toMatchObject({ secretRefs: { token: "secret://v1:1", llm: "secret://v1:2" }, workflowId: "wf-1" });
+    expect(readPipelines(h.dataDir).vault1!.secretsUnowned).toBeUndefined();
+    // The old ones are asked to go; the engine keeps a secret without an owner, which is harmless.
+    expect(h.engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref)).toEqual(["secret://legacy:tok", "secret://legacy:llm"]);
+    // Now owned: the next start leaves it alone.
+    expect(await h.manager.followSecretOwnership()).toEqual({ renewed: [], failed: [] });
+  });
+
+  it("waits for the engine to give the older secrets their owner at seeding, and then makes none of its own", async () => {
+    const h = deps({ template: named, triggers: [{ workflowId: "wf-1", status: "ENABLED" }] });
+    writePipelines(h.dataDir, { vault1: legacy() });
+    const engineFetch = h.d.fetchImpl;
+    // The patched runtime seeds its registry, then gives each secret to the document naming it.
+    const fetchImpl = vi.fn(async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (String(init?.body).includes("triggerStates")) for (const ref of ["secret://legacy:tok", "secret://legacy:llm"]) h.engine.secretOwners.set(ref, "conn-1");
+      return engineFetch(url, init);
+    }) as unknown as typeof fetch;
+    expect(await createPipelineManager({ ...h.d, fetchImpl }).followSecretOwnership()).toEqual({ renewed: [], failed: [] });
+    expect(h.engine.calls.filter((c) => c.query.includes("createSecret") || c.query.includes("execute("))).toEqual([]);
+    expect(readPipelines(h.dataDir).vault1).toEqual(legacy());
+  });
+
+  it("leaves a pipeline whose connection owns its secrets alone", async () => {
+    const h = deps({ template: named });
+    await h.manager.ensure("vault1");
+    const before = h.engine.calls.length;
+    expect(await h.manager.followSecretOwnership()).toEqual({ renewed: [], failed: [] });
+    expect(h.engine.calls.slice(before).filter((c) => !c.query.includes("secret(ref:"))).toEqual([]);
+  });
+
+  it("one that cannot be renewed keeps its record, loses the secrets made for it, and reads stale so the chip offers Update", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const h = deps({ template: named });
+    writePipelines(h.dataDir, { vault1: legacy() });
+    h.engine.failExecuteFor.add("conn-1");
+    expect(await h.manager.followSecretOwnership()).toEqual({ renewed: [], failed: ["vault1"] });
+    expect(readPipelines(h.dataDir).vault1).toEqual({ ...legacy(), secretsUnowned: true });
+    expect(h.engine.calls.filter((c) => c.query.includes("deleteSecret")).map((c) => c.variables.ref)).toEqual(["secret://v1:1", "secret://v1:2"]);
+    expect(await h.manager.status("vault1")).toMatchObject({ state: "stale", reason: "its keys were made before this version of the engine and need replacing" });
+    // Once the connection takes the write, the next start renews it and clears the mark.
+    h.engine.failExecuteFor.delete("conn-1");
+    expect(await h.manager.followSecretOwnership()).toEqual({ renewed: ["vault1"], failed: [] });
+    expect(readPipelines(h.dataDir).vault1!.secretsUnowned).toBeUndefined();
+    warn.mockRestore();
   });
 });

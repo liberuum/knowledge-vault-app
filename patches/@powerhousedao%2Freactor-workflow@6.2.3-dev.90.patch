@@ -1,0 +1,67 @@
+diff --git a/dist/index.js b/dist/index.js
+index be12bc3..8e8a58c 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -11148,6 +11148,38 @@ const logger$1 = childLogger(["workflow", "runtime"]);
+ const DRIVE_DOCUMENT_TYPE = "powerhouse/document-drive";
+ const WORKFLOW_DOCUMENT_TYPE = "powerhouse/workflow";
+ const CONNECTION_DOCUMENT_TYPE = "powerhouse/connection";
++/**
++* Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor-workflow@6.2.3-dev.90.patch): secrets made before
++* the runtime bound each one to the document that owns it (6.2.3-dev.85) have no owner, and `get` refuses them to every
++* document, so a connection set up on an older version loses every key it holds. Each such secret is given to the
++* connection, else the workflow, whose state names it: the document it was made for. A secret no document names keeps
++* no owner; host secrets (OAuth apps, labelled `oauth-app:`) keep none by design. Returns how many were given.
++*/
++async function kvAdoptOwnerlessSecrets(store, client) {
++	if (!(store instanceof LocalEncryptedSecretStore)) return 0;
++	const orphans = (await store.db.selectFrom("secret").select(["id", "label"]).where("owner_id", "is", null).where("status", "=", "ACTIVE").execute()).filter((row) => !String(row.label ?? "").startsWith("oauth-app:"));
++	if (orphans.length === 0) return 0;
++	const unclaimed = new Map(orphans.map((row) => [JSON.stringify(secretRefFromId(row.id)), row.id]));
++	let adopted = 0;
++	for (const type of [CONNECTION_DOCUMENT_TYPE, WORKFLOW_DOCUMENT_TYPE]) {
++		let page = await client.find({ type });
++		for (;;) {
++			for (const document of page.results) {
++				const text = JSON.stringify(document.state?.global ?? {});
++				for (const [quoted, id] of [...unclaimed]) {
++					if (!text.includes(quoted)) continue;
++					unclaimed.delete(quoted);
++					const updated = await store.db.updateTable("secret").set({ owner_id: document.header.id }).where("id", "=", id).where("owner_id", "is", null).returning("id").execute();
++					adopted += updated.length;
++				}
++				if (unclaimed.size === 0) return adopted;
++			}
++			if (!page.next) break;
++			page = await page.next();
++		}
++	}
++	return adopted;
++}
+ const DOCUMENT_SCOPE = "document";
+ const CHILD_RELATIONSHIP = "child";
+ function operationKey(op) {
+@@ -11481,6 +11513,15 @@ var WorkflowRuntimeService = class {
+ 	secretProvider() {
+ 		return { get: (ref, owner) => this.secrets().then((s) => s.get(ref, owner)) };
+ 	}
++	/** Patched by knowledge-vault-app: once the registry is seeded (the reactor answers `find`), see kvAdoptOwnerlessSecrets. */
++	async kvAdoptOwnerlessSecrets() {
++		try {
++			const adopted = await kvAdoptOwnerlessSecrets(await this.secrets(), this.host.reactorClient);
++			if (adopted > 0) this.logger.info(`Gave ${adopted} secret(s) made before secrets had owners to the connection or workflow that names them`);
++		} catch (error) {
++			this.logger.warn("Could not give secrets made before secrets had owners to the documents that name them: @error", error);
++		}
++	}
+ 	callerAddress(ctx) {
+ 		return (ctx ? this.host.subjectOf?.(ctx) : void 0)?.address?.toLowerCase() ?? null;
+ 	}
+@@ -11555,6 +11596,7 @@ var WorkflowRuntimeService = class {
+ 		for (let attempt = 1; attempt <= SEED_ATTEMPTS; attempt += 1) try {
+ 			await this.seedRegistry();
+ 			this.seedError = void 0;
++			await this.kvAdoptOwnerlessSecrets();
+ 			return;
+ 		} catch (error) {
+ 			this.seedError = error;

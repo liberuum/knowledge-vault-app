@@ -6,11 +6,16 @@ type State = { name?: string; connectorId: string | null; config: Record<string,
 function engine(state: State) {
   const executed: { id: string; type: string; input: Record<string, unknown> }[] = [];
   const created: string[] = [];
+  const owners: string[] = [];
   const deleted: string[] = [];
   const fetchImpl = (async (_url: string, init: { body: string }) => {
     const { query, variables } = JSON.parse(init.body) as { query: string; variables: Record<string, unknown> };
     let data: unknown = {};
     if (query.includes("createSecret")) {
+      if (typeof variables.d !== "string" || !query.includes("documentId: $d")) {
+        return new Response(JSON.stringify({ errors: [{ message: 'Field "createSecret" argument "documentId" of type "String!" is required, but it was not provided.' }] }), { status: 400 });
+      }
+      owners.push(variables.d);
       created.push(String(variables.v));
       data = { workflowRuntime: { createSecret: { ref: `ref-${created.length}` } } };
     } else if (query.includes("deleteSecret")) {
@@ -26,7 +31,7 @@ function engine(state: State) {
     }
     return new Response(JSON.stringify({ data }), { status: 200 });
   }) as unknown as typeof fetch;
-  return { fetchImpl, executed, created, deleted };
+  return { fetchImpl, executed, created, owners, deleted };
 }
 
 const deps = (fetchImpl: typeof fetch, over: Partial<FillDeps> = {}): FillDeps => ({
@@ -58,6 +63,7 @@ describe("fillConnection (a Knowledge Vault connection, filled from this app)", 
     const e = engine(kv({ config: { base_url: "http://127.0.0.1:4201" } }));
     const r = await fillConnection(deps(e.fetchImpl), "c1", { token: true });
     expect(e.created).toEqual(["jwt-90d"]);
+    expect(e.owners).toEqual(["c1"]); // the runtime hands a secret only to the connection that owns it
     expect(e.executed.map((a) => a.type)).toEqual(["SET_SECRET_REF"]);
     expect(e.executed[0]!.input).toMatchObject({ ref: "ref-1", name: "token" });
     expect(r.token).toEqual({ kind: "minted", expiresAt: "2027-01-05T00:00:00.000Z" });
