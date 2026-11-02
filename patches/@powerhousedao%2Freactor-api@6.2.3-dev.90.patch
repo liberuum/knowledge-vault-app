@@ -1,13 +1,12 @@
-diff --git a/dist/error-info-BaEL50f5.mjs b/dist/error-info-BaEL50f5.mjs
-index a01414b..b4b529a 100644
---- a/dist/error-info-BaEL50f5.mjs
-+++ b/dist/error-info-BaEL50f5.mjs
-@@ -22,6 +22,22 @@ const DEFAULT_VACUUM_FULL_MAX_DEFER_MS = 0;
- /** The deadline `PH_PGLITE_VACUUM_FULL=forced` sets. */
+diff --git a/dist/error-info-Cr6oQACe.mjs b/dist/error-info-Cr6oQACe.mjs
+index 92b07fd..025b4f3 100644
+--- a/dist/error-info-Cr6oQACe.mjs
++++ b/dist/error-info-Cr6oQACe.mjs
+@@ -23,6 +23,22 @@ const DEFAULT_VACUUM_FULL_MAX_DEFER_MS = 0;
  const FORCED_VACUUM_FULL_MAX_DEFER_MS = 18e5;
  const MAINTENANCE_RETRY_MS = 1e3;
-+/**
-+* Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor-api@6.2.3-dev.85.patch): planner
+ /**
++* Patched by knowledge-vault-app (patches/@powerhousedao%2Freactor-api@6.2.3-dev.90.patch): planner
 +* statistics. PGlite has no autovacuum and this pass ran VACUUM without ANALYZE, so a store's tables never
 +* had statistics and Postgres planned from its defaults: on a 930 MB store the sync outbox query took 5 s
 +* per page instead of 105 ms, and the first write after a start stalled the store for minutes. Every
@@ -22,18 +21,19 @@ index a01414b..b4b529a 100644
 +	const { messages } = await pg.execProtocol(protocol.serialize.query(KV_STATS_MISSING_SQL), { syncToFs: false });
 +	return messages.find((m) => m.name === "dataRow")?.fields?.[0] === "t";
 +}
- var PgliteMaintenance = class {
- 	intervalMs;
- 	vacuumFullAboveBytes;
-@@ -41,6 +57,7 @@ var PgliteMaintenance = class {
++/**
+ * A table rewrite waits for this long a gap between the store's statements.
+ * Short, because PGlite syncs after every statement and an idle reactor still
+ * reads every 2 s (catch-up, sync polls), so a longer gap never comes.
+@@ -52,6 +68,7 @@ var PgliteMaintenance = class {
  	deferralLogged = false;
  	lastSyncAt = 0;
  	openedAt = 0;
 +	kvStatsChecked = false;
+ 	rewriting;
  	constructor(options = {}) {
  		this.intervalMs = Math.max(0, options.intervalMs ?? 3e5);
- 		this.vacuumFullAboveBytes = Math.max(0, options.vacuumFullAboveBytes ?? 268435456);
-@@ -62,7 +79,7 @@ var PgliteMaintenance = class {
+@@ -76,7 +93,7 @@ var PgliteMaintenance = class {
  		this.vacuumFullPending = this.vacuumFullAboveBytes > 0 && baseBytes > this.vacuumFullAboveBytes;
  		this.lastSyncAt = this.now();
  		this.openedAt = this.lastSyncAt;
@@ -42,7 +42,7 @@ index a01414b..b4b529a 100644
  	}
  	noteSync() {
  		this.syncsSinceMaintenance++;
-@@ -97,7 +114,7 @@ var PgliteMaintenance = class {
+@@ -146,7 +163,7 @@ var PgliteMaintenance = class {
  			this.deferralLogged = true;
  			this.logger?.warn(`DurableNodeFs: ${this.label}/base exceeds ${this.vacuumFullAboveBytes} bytes; VACUUM FULL waits until the store has had no writes for ${this.vacuumFullQuietMs} ms${this.vacuumFullMaxDeferMs > 0 ? `, or at most ${this.vacuumFullMaxDeferMs} ms from open` : ""}`);
  		}
@@ -51,7 +51,7 @@ index a01414b..b4b529a 100644
  		const baseDir = path.join(this.label, "base");
  		const bytesBefore = full ? await dirBytes(baseDir) : 0;
  		const startedAt = this.now();
-@@ -108,11 +125,25 @@ var PgliteMaintenance = class {
+@@ -157,11 +174,25 @@ var PgliteMaintenance = class {
  				const { messages } = await pg.execProtocol(protocol.serialize.query(""), { syncToFs: false });
  				if (transactionStatus(messages) !== "I") return "in-transaction";
  				if (full) this.logger?.warn(`DurableNodeFs: ${this.label}/base exceeds ${this.vacuumFullAboveBytes} bytes; running VACUUM FULL`);

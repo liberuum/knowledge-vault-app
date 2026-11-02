@@ -1,6 +1,6 @@
 /**
  * The engine's PGlite store maintenance collects planner statistics
- * (patches/@powerhousedao%2Freactor-api@6.2.3-dev.85.patch). Without them Postgres plans from its
+ * (patches/@powerhousedao%2Freactor-api@6.2.3-dev.90.patch). Without them Postgres plans from its
  * defaults: on a 930 MB store the sync outbox query took 5 s per page instead of 105 ms, and the
  * first write after a start stalled the store for minutes. This runs the maintenance the engine
  * actually loads — the reactor-api beside the installed Switchboard — so a stack bump that drops
