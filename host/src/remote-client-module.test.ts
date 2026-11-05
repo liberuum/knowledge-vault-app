@@ -32,17 +32,18 @@ describe("remoteClientModule", () => {
     const { client, calls } = fakeClient();
     const m = remoteClientModule(client, libs);
     const doc = { header: { documentType: "powerhouse/workflow", name: "Untitled 1", meta: { preferredEditor: "workflow-editor" } } };
-    const made = await m.client.drives.addFile("drive-1", doc as never, undefined);
+    const made = await m.client.write.drives.addFile("drive-1", doc as never, undefined);
     expect(calls[0]!.query).toMatch(/Workflow\s*\{\s*createDocument\(/);
     expect(calls[0]!.variables).toEqual({ name: "Untitled 1", parent: "drive-1", editor: "workflow-editor" });
-    expect(made.header.id).toBe("new-typed");
+    expect(made.documentId).toBe("new-typed");
+    expect((await made.document()).header.id).toBe("new-typed");
     expect(calls).toHaveLength(1);
   });
 
   it("moves the new document into a folder when one is given", async () => {
     const { client, calls } = fakeClient();
     const m = remoteClientModule(client, libs);
-    await m.client.drives.addFile("drive-1", { header: { documentType: "powerhouse/connection", name: "OpenRouter", meta: {} } } as never, "folder-9");
+    await m.client.write.drives.addFile("drive-1", { header: { documentType: "powerhouse/connection", name: "OpenRouter", meta: {} } } as never, "folder-9");
     expect(calls[1]!.query).toMatch(/DocumentDrive\s*\{\s*moveNode\(/);
     expect(calls[1]!.variables).toEqual({ drive: "drive-1", input: { srcFolder: "new-typed", targetParentFolder: "folder-9" } });
   });
@@ -50,7 +51,7 @@ describe("remoteClientModule", () => {
   it("falls back to the generic create and names the node for a model without a known namespace", async () => {
     const { client, calls } = fakeClient();
     const m = remoteClientModule(client, libs);
-    await m.client.drives.addFile("drive-1", { header: { documentType: "acme/other", name: "Thing", meta: {} } } as never, undefined);
+    await m.client.write.drives.addFile("drive-1", { header: { documentType: "acme/other", name: "Thing", meta: {} } } as never, undefined);
     expect(calls[0]!.query).toMatch(/createEmptyDocument\(documentType: \$type, parentIdOrSlug: \$parent\)/);
     expect(calls[0]!.variables).toEqual({ type: "acme/other", parent: "drive-1" });
     expect(calls[1]!.query).toMatch(/updateNode\(/);
@@ -68,9 +69,9 @@ describe("remoteClientModule", () => {
     ];
     const files = fakeClient(tree);
     const m = remoteClientModule(files.client, libs);
-    await m.client.drives.removeNode("drive-1", "doc-1");
+    await m.client.write.drives.removeNode("drive-1", "doc-1");
     expect(files.deleted).toEqual(["doc-1"]);
-    await m.client.drives.removeNode("drive-1", "dir-1");
+    await m.client.write.drives.removeNode("drive-1", "dir-1");
     expect(files.deleted).toEqual(["doc-1", "wf-1", "conn-1"]);
     expect(files.calls.at(-1)!.query).toMatch(/DocumentDrive\s*\{\s*deleteNode\(/);
     // The engine's model mutations take `input: <Model>_<Op>Input!`: a nullable variable fails validation there.
@@ -78,13 +79,22 @@ describe("remoteClientModule", () => {
     expect(files.calls.at(-1)!.variables).toEqual({ drive: "drive-1", input: { id: "dir-1" } });
   });
 
-  it("answers the model lookups addDocument makes before creating", async () => {
+  it("answers the model lookups, and makes the page's document addDocument names before the engine creates it", async () => {
     const m = remoteClientModule(fakeClient().client, libs);
-    expect((await m.client.getDocumentModelModule("powerhouse/connection")).documentModel.global.name).toBe("Connection");
-    expect((await m.client.getDocumentModelModules()).results).toHaveLength(2);
-    await expect(m.client.getDocumentModelModule("acme/missing")).rejects.toThrow(/acme\/missing/);
-    expect(await m.client.getCreateSignaturePolicy()).toBe("legacy");
-    expect(await m.client.getCreateProtocolVersions()).toEqual({});
+    expect((await m.client.read.getDocumentModelModule("powerhouse/connection")).documentModel.global.name).toBe("Connection");
+    expect((await m.client.read.getDocumentModelModules()).results).toHaveLength(2);
+    await expect(m.client.read.getDocumentModelModule("acme/missing")).rejects.toThrow(/acme\/missing/);
+    expect((await m.client.read.newDocument("powerhouse/workflow")).header.documentType).toBe("powerhouse/workflow");
+    await expect(m.client.read.newDocument("acme/missing")).rejects.toThrow(/acme\/missing/);
+  });
+
+  it("hands back a write whose stages are settled, since the engine has answered before it returns", async () => {
+    const m = remoteClientModule(fakeClient([{ id: "doc-1", kind: "file" }]).client, libs);
+    const made = await m.client.write.drives.addFile("drive-1", { header: { documentType: "powerhouse/workflow", name: "W", meta: {} } } as never, undefined);
+    await expect(made.written).resolves.toMatchObject({ documentId: "new-typed" });
+    await expect(made.readable).resolves.toMatchObject({ documentId: "new-typed" });
+    const removed = await m.client.write.drives.removeNode("drive-1", "doc-1");
+    await expect(removed.readable).resolves.toMatchObject({ documentId: "drive-1" });
   });
 
   it("refreshes the drive after a create, a move and a delete, before returning", async () => {
@@ -93,9 +103,9 @@ describe("remoteClientModule", () => {
     const m = remoteClientModule(files.client, libs, async (id) => {
       refreshed.push(id);
     });
-    await m.client.drives.addFile("drive-1", { header: { documentType: "powerhouse/workflow", name: "W", meta: {} } } as never, "folder-9");
+    await m.client.write.drives.addFile("drive-1", { header: { documentType: "powerhouse/workflow", name: "W", meta: {} } } as never, "folder-9");
     expect(refreshed).toEqual(["drive-1"]);
-    await m.client.drives.removeNode("drive-1", "doc-1");
+    await m.client.write.drives.removeNode("drive-1", "doc-1");
     expect(refreshed).toEqual(["drive-1", "drive-1"]);
   });
 
@@ -103,8 +113,8 @@ describe("remoteClientModule", () => {
     const m = remoteClientModule(fakeClient().client, libs, async () => {
       throw new Error("offline");
     });
-    const made = await m.client.drives.addFile("drive-1", { header: { documentType: "powerhouse/workflow", name: "W", meta: {} } } as never, undefined);
-    expect(made.header.id).toBe("new-typed");
+    const made = await m.client.write.drives.addFile("drive-1", { header: { documentType: "powerhouse/workflow", name: "W", meta: {} } } as never, undefined);
+    expect((await made.document()).header.id).toBe("new-typed");
   });
 
   it("leaves the full-reactor parts empty, so sync and registry lookups stay off", () => {

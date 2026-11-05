@@ -1,3 +1,4 @@
+import type { PHGlobal } from "@powerhousedao/reactor-browser";
 import type { DocumentModelLib, DocumentModelModule, PHDocument } from "document-model";
 
 /**
@@ -11,6 +12,38 @@ export type ModuleClient = {
 };
 
 type DriveNode = { id: string; kind: string; parentFolder?: string | null };
+
+/** The full client reactor-browser's full-client actions call: Connect's router fills the slot there. */
+type FullClient = NonNullable<PHGlobal["fullReactorClient"]>;
+type DriveWrites = FullClient["write"]["drives"];
+type WriteHandle = Awaited<ReturnType<DriveWrites["addFile"]>>;
+
+/**
+ * The part of the full client reactor-browser's full-client actions call on the desktop (addDocument,
+ * deleteNode, copyNode, the model lookups), named as reactor names it: a member renamed or retyped upstream
+ * fails the type check here, and remote-client-module.halves.test.ts catches a member they start to call.
+ */
+export type DesktopFullClient = {
+  read: Pick<FullClient["read"], "newDocument" | "get" | "getDocumentModelModule" | "getDocumentModelModules">;
+  write: { drives: Pick<DriveWrites, "addFile" | "removeNode"> };
+};
+
+/**
+ * A write this module has finished: the engine's mutations have answered and the drive was read again before
+ * it returns, so both stages are settled. No caller reads the receipt's job (addDocument reads the document,
+ * deleteNode and copyNode await `readable`), so the receipt names the document and stops there.
+ */
+function settled(documentId: string, read: () => Promise<PHDocument>): WriteHandle {
+  const receipt = Promise.resolve({ documentId, branch: "main" } as Awaited<WriteHandle["readable"]>);
+  return {
+    jobId: "",
+    documentId,
+    branch: "main",
+    written: receipt,
+    readable: receipt,
+    document: <TDocument extends PHDocument = PHDocument>() => read() as Promise<TDocument>,
+  };
+}
 
 /** A model's GraphQL namespace: its name in PascalCase ("Workflow", "Connection"). */
 function namespaceOf(module: DocumentModelModule): string | undefined {
@@ -26,11 +59,12 @@ function namespaceOf(module: DocumentModelModule): string | undefined {
 /**
  * Stand-in for Connect's in-browser reactor in `window.ph.reactorClientModule`.
  *
- * reactor-browser's drive helpers (`addDocument`, `deleteNode`, used by Workflow
+ * reactor-browser's full-client actions (`addDocument`, `deleteNode`, used by Workflow
  * Studio) call that slot's client, which the desktop deliberately never has: the
- * engine is the only reactor. This answers those calls over the engine's GraphQL
- * API, the same way the vault app creates documents — the engine builds and signs
- * the document, nothing is constructed in the page and sent. `reactorModule` stays
+ * engine is the only reactor. They call its read and write halves (6.2.3-dev.90); this
+ * answers them over the engine's GraphQL API, the same way the vault app creates
+ * documents — the engine builds and signs the document. `read.newDocument` makes one in
+ * the page only for addDocument to name; it is never sent. `reactorModule` stays
  * empty, so sync and registry lookups keep seeing "no local reactor".
  */
 export function remoteClientModule(
@@ -75,65 +109,73 @@ export function remoteClientModule(
     return id;
   }
 
-  const adapter = {
-    get: (id: string) => client.get(id),
-    getDocumentModelModule: async (type: string) => {
-      const module = moduleFor(type);
-      if (!module) throw new Error(`No document model registered for ${type}`);
-      return module;
-    },
-    getDocumentModelModules: async () => ({ results: modules() }),
-    // The page's document is never sent (the engine creates it), so its policy is moot.
-    getCreateSignaturePolicy: async () => "legacy" as const,
-    getCreateProtocolVersions: async () => ({}),
-    drives: {
-      async addFile(driveId: string, document: PHDocument, parentFolder?: string | null) {
-        const editor = document.header.meta?.preferredEditor;
-        const id = await createInDrive(driveId, document.header.documentType, document.header.name, editor ?? undefined);
-        if (parentFolder) {
-          await client.request(
-            `mutation DesktopMove($drive: String, $input: DocumentDrive_MoveNodeInput!) {
-               DocumentDrive { moveNode(documentIdOrSlug: $drive, input: $input) { id } }
-             }`,
-            { drive: driveId, input: { srcFolder: id, targetParentFolder: parentFolder } },
-          );
-        }
-        // Before returning: Studio selects the new node next, which needs it in the cached drive.
-        await refreshDrive(driveId);
-        return client.get(id);
+  const requireModule = (type: string): DocumentModelModule => {
+    const module = moduleFor(type);
+    if (!module) throw new Error(`No document model registered for ${type}`);
+    return module;
+  };
+
+  const fullClient: DesktopFullClient = {
+    read: {
+      // addDocument names it and hands it to write.drives.addFile, which has the engine create the document itself.
+      newDocument: async <TDocument extends PHDocument = PHDocument>(documentType: string) => requireModule(documentType).utils.createDocument() as TDocument,
+      get: <TDocument extends PHDocument = PHDocument>(identifier: string) => client.get(identifier) as Promise<TDocument>,
+      getDocumentModelModule: async (type: string) => requireModule(type),
+      getDocumentModelModules: async () => {
+        const results = modules();
+        return { results, options: { cursor: "0", limit: results.length } };
       },
-      async removeNode(driveId: string, nodeId: string) {
-        const drive = await client.get(driveId);
-        const nodes = ((drive.state as { global?: { nodes?: DriveNode[] } }).global?.nodes ?? []);
-        const node = nodes.find((n) => n.id === nodeId);
-        if (node?.kind === "folder") {
-          // DELETE_NODE removes only the drive's entry: the documents under it stay alive, and a workflow
-          // keeps firing. Studio deletes a workflow through its home folder (6.2.3-dev.47), so every
-          // document under the folder goes first, as upstream's DriveClient.deleteNode does.
-          const under = new Set([nodeId]);
-          for (let grew = true; grew; ) {
-            grew = false;
-            for (const n of nodes) {
-              if (n.parentFolder && under.has(n.parentFolder) && !under.has(n.id)) {
-                under.add(n.id);
-                grew = true;
+    },
+    write: {
+      drives: {
+        async addFile(driveId: string, document: PHDocument, parentFolder?: string) {
+          const editor = document.header.meta?.preferredEditor;
+          const id = await createInDrive(driveId, document.header.documentType, document.header.name, editor ?? undefined);
+          if (parentFolder) {
+            await client.request(
+              `mutation DesktopMove($drive: String, $input: DocumentDrive_MoveNodeInput!) {
+                 DocumentDrive { moveNode(documentIdOrSlug: $drive, input: $input) { id } }
+               }`,
+              { drive: driveId, input: { srcFolder: id, targetParentFolder: parentFolder } },
+            );
+          }
+          // Before returning: Studio selects the new node next, which needs it in the cached drive.
+          await refreshDrive(driveId);
+          return settled(id, () => client.get(id));
+        },
+        async removeNode(driveId: string, nodeId: string) {
+          const drive = await client.get(driveId);
+          const nodes = ((drive.state as { global?: { nodes?: DriveNode[] } }).global?.nodes ?? []);
+          const node = nodes.find((n) => n.id === nodeId);
+          if (node?.kind === "folder") {
+            // DELETE_NODE removes only the drive's entry: the documents under it stay alive, and a workflow
+            // keeps firing. Studio deletes a workflow through its home folder (6.2.3-dev.47), so every
+            // document under the folder goes first, as upstream's DriveClient.deleteNode does.
+            const under = new Set([nodeId]);
+            for (let grew = true; grew; ) {
+              grew = false;
+              for (const n of nodes) {
+                if (n.parentFolder && under.has(n.parentFolder) && !under.has(n.id)) {
+                  under.add(n.id);
+                  grew = true;
+                }
               }
             }
+            for (const n of nodes) if (n.kind === "file" && under.has(n.id)) await client.deleteDocument(n.id);
+            await client.request(
+              `mutation DesktopDeleteNode($drive: String, $input: DocumentDrive_DeleteNodeInput!) {
+                 DocumentDrive { deleteNode(documentIdOrSlug: $drive, input: $input) { id } }
+               }`,
+              { drive: driveId, input: { id: nodeId } },
+            );
+          } else {
+            await client.deleteDocument(nodeId);
           }
-          for (const n of nodes) if (n.kind === "file" && under.has(n.id)) await client.deleteDocument(n.id);
-          await client.request(
-            `mutation DesktopDeleteNode($drive: String, $input: DocumentDrive_DeleteNodeInput!) {
-               DocumentDrive { deleteNode(documentIdOrSlug: $drive, input: $input) { id } }
-             }`,
-            { drive: driveId, input: { id: nodeId } },
-          );
           await refreshDrive(driveId);
-          return;
-        }
-        await client.deleteDocument(nodeId);
-        await refreshDrive(driveId);
+          return settled(driveId, () => client.get(driveId));
+        },
       },
     },
   };
-  return { kind: "remote" as const, client: adapter };
+  return { kind: "remote" as const, client: fullClient };
 }
