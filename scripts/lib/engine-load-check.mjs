@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,6 +49,39 @@ export function engineArgs(loader) {
   return ["--import", pathToFileURL(loader).href, join("dist", "main.js")];
 }
 
+/**
+ * The throwaway store goes once the engine has stopped. On Windows a file the engine's last child process or the
+ * antivirus still holds cannot be deleted for a moment (EPERM or EBUSY: the 0.2.6 release build failed on it after a
+ * passing check), so the removal is retried for about 10 s, and a folder still there after that is reported with
+ * what it holds. It never decides a check.
+ */
+export function removeScratch(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    return true;
+  } catch (error) {
+    let held = [];
+    try {
+      held = readdirSync(dir, { recursive: true }).slice(0, 8);
+    } catch {
+      // the listing is only a clue
+    }
+    console.warn(`[stage] the load check's scratch folder stays behind (${error.code ?? error.message}): ${dir}${held.length ? `; still holding ${held.join(", ")}` : ""}`);
+    return false;
+  }
+}
+
+/** Stops the engine through its stdin and waits for it to exit: a stop that hangs gets SIGKILL and 5 s more. */
+async function stopEngine(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((r) => child.once("exit", r));
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms).unref());
+  child.stdin.end(); // KV_STDIN_STOP: the engine stops when its stdin closes
+  if (await Promise.race([exited.then(() => true), wait(15_000).then(() => false)])) return;
+  child.kill("SIGKILL");
+  await Promise.race([exited, wait(5_000)]);
+}
+
 export async function engineLoadCheck(stageDir, { node = process.execPath, timeoutMs = 120_000, port = 48401 } = {}) {
   const data = mkdtempSync(join(tmpdir(), "kv-load-check-"));
   const trace = join(data, "loaded.txt");
@@ -58,6 +91,7 @@ export async function engineLoadCheck(stageDir, { node = process.execPath, timeo
   const env = { ...process.env, KV_TRACE_OUT: trace, KV_STDIN_STOP: "1", KV_DATA_DIR: data, KV_PORT: String(port), KV_CONTROL_PORT: String(port + 1), KV_CONTROL_TOKEN: "load-check" };
   const child = spawn(node, engineArgs(loader), { cwd: stageDir, env, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
+  child.stdin.on("error", () => {}); // an engine already gone closes the pipe under the stop
   child.stdout.on("data", (d) => (output += d));
   child.stderr.on("data", (d) => (output += d));
   const control = `http://127.0.0.1:${port + 1}`;
@@ -75,12 +109,11 @@ export async function engineLoadCheck(stageDir, { node = process.execPath, timeo
       await new Promise((r) => setTimeout(r, 1000)); // the trace file is appended as modules load
     }
   } finally {
-    child.stdin.end(); // KV_STDIN_STOP: the engine stops when its stdin closes
-    await new Promise((r) => { child.once("exit", r); setTimeout(() => { child.kill("SIGKILL"); r(); }, 15_000); });
+    await stopEngine(child);
   }
   const loaded = readFileSync(trace, "utf8").split("\n").filter(Boolean);
   const v = verdict(loaded, join(stageDir, "node_modules"), output);
-  rmSync(data, { recursive: true, force: true });
+  removeScratch(data);
   const signIn = typeof loginUrl === "string" && /^https:\/\/.+\/console\?session=/.test(loginUrl);
   return { ready, signIn, loadedModules: loaded.length, ...v, ok: ready && signIn && v.dropped.length === 0 && v.missing.length === 0, output };
 }

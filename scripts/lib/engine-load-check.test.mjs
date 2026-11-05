@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
-import { engineArgs, engineLoadCheck, packageOf, verdict } from "./engine-load-check.mjs";
+import { describe, expect, it, vi } from "vitest";
+import { engineArgs, engineLoadCheck, packageOf, removeScratch, verdict } from "./engine-load-check.mjs";
 
 /** A stand-in engine: the ready line, a control port that answers the sign-in link, and a stop when stdin closes. */
 const FAKE_ENGINE = `
@@ -77,4 +77,32 @@ describe("engine load check", () => {
       rmSync(stage, { recursive: true, force: true });
     }
   }, 40_000);
+  it("removes its scratch folder, files and all", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kv-scratch-"));
+    mkdirSync(join(dir, "reactor"));
+    writeFileSync(join(dir, "reactor", "PG_VERSION"), "17");
+    expect(removeScratch(dir)).toBe(true);
+    expect(existsSync(dir)).toBe(false);
+  });
+  // A read-only folder keeps its files on Linux and macOS (not for root): what a file still open does on Windows.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("reports a scratch folder it cannot remove, with what it holds, and does not throw", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kv-scratch-"));
+    const held = join(dir, "converter");
+    mkdirSync(held);
+    writeFileSync(join(held, "binding.node"), "");
+    chmodSync(held, 0o555);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(removeScratch(dir)).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const [message] = warn.mock.calls[0];
+      expect(message).toContain("stays behind");
+      expect(message).toContain(dir);
+      expect(message).toContain(join("converter", "binding.node"));
+    } finally {
+      warn.mockRestore();
+      chmodSync(held, 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
