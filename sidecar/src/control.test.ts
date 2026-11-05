@@ -34,9 +34,11 @@ let deletedBackups: string[] = [];
 let transferCalls: unknown[] = [];
 let shutdowns = 0;
 let debugRoutes = false;
+/** The exit codes the crash route asked for: it ends the process through deps.exit. */
+let exits: number[] = [];
 let settingsPatches: unknown[] = [];
 let gatewayCalls: Array<{ url: string; body: string }> = [];
-afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; deletedBackups = []; transferCalls = []; shutdowns = 0; debugRoutes = false; settingsPatches = []; gatewayCalls = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
+afterEach(async () => { await close?.(); close = undefined; deleted = []; signedIn = false; remotes = []; applied = []; restarted = 0; installed = []; protection = { protected: false, adminAddress: null }; restartsRequested = 0; expired = false; modelKey = false; removedPipelines = []; disabledFor = []; modelsApplied = 0; scheduled = []; deletedBackups = []; transferCalls = []; shutdowns = 0; debugRoutes = false; exits = []; settingsPatches = []; gatewayCalls = []; settings = { version: 1, models: { endpoint: "https://openrouter.ai/api/v1", model: "", hasKey: false, local: false, provider: "openrouter" }, conversion: { mode: "local", remoteUrl: "" }, ui: { closeToTray: true } }; });
 
 async function start() {
   const server = createControlServer(await harnessDeps());
@@ -121,6 +123,7 @@ async function harnessDeps(): Promise<Parameters<typeof createControlServer>[0]>
     exportVault: async (id) => { if (id !== "v1") throw new NotAVaultError("That drive is not a vault."); return { path: "/data/vault/exports/research-2026-10-07T12-00-00Z", documents: 2, bytes: 4096 }; },
     logsTail: () => ["line one", "line two"],
     debugRoutes,
+    exit: (code: number) => { exits.push(code); },
   });
 }
 
@@ -486,6 +489,28 @@ describe("settings changes reach the pipelines", () => {
     expect(shutdowns).toBe(1);
     expect(await (await fetch(`${base}/logs/tail`, { headers: h })).json()).toEqual({ lines: ["line one", "line two"] });
     expect((await fetch(`${base}/debug/crash`, { method: "POST", headers: h })).status).toBe(404);
+  });
+
+  it("Plan 5: the crash route exits 3 at once when debug routes are on", async () => {
+    debugRoutes = true;
+    const base = await start();
+    const crash = await fetch(`${base}/debug/crash`, { method: "POST", headers: { authorization: "Bearer secret" } });
+    expect(crash.status).toBe(202);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(exits).toEqual([3]);
+  });
+
+  it("Plan 5: ?downMs= keeps the control port dark that long before the exit, so the window's health check sees the outage however fast the engine restarts", async () => {
+    debugRoutes = true;
+    const base = await start();
+    const h = { authorization: "Bearer secret" };
+    expect((await fetch(`${base}/debug/crash?downMs=400`, { method: "POST", headers: h })).status).toBe(202);
+    await new Promise((r) => setTimeout(r, 150));
+    // Dark at once: /status, what the window polls, gets no answer; the process is still up.
+    await expect(fetch(`${base}/status`, { headers: h })).rejects.toThrow();
+    expect(exits).toEqual([]);
+    await new Promise((r) => setTimeout(r, 450));
+    expect(exits).toEqual([3]);
   });
 
   it("Plan 5: a busy control port falls back upward, and the bound port is what listen() resolves", async () => {

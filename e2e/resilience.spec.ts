@@ -26,8 +26,10 @@ test("resilience: a crash is survived, a backup is made, and delete-all returns 
   await expect(page.locator('[data-place="notes"]').first()).toBeVisible({ timeout: 60_000 });
 
   // (a) The engine crashes: the banner says the app is reconnecting, the dev loop's supervisor
-  // brings the engine back after 1 s, and the banner clears with the vault still open.
-  const crash = await request.post(`${CONTROL}/debug/crash`, { headers: auth });
+  // brings the engine back after 1 s, and the banner clears with the vault still open. The window
+  // checks the engine every 5 s and shows the banner on the second miss in a row, so an engine back
+  // within 5 s is never missed twice: the crash keeps it dark 12 s first, and any 12 s holds two checks.
+  const crash = await request.post(`${CONTROL}/debug/crash?downMs=12000`, { headers: auth });
   expect(crash.status()).toBe(202);
   await expect(page.getByText(/Reconnecting…/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Reconnecting…/)).toHaveCount(0, { timeout: 90_000 });

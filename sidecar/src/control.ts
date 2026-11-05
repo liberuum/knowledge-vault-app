@@ -142,8 +142,14 @@ export type ControlDeps = {
   shutdown: () => void;
   /** GET /logs/tail: the supervisor's last lines, for Diagnostics. */
   logsTail: () => string[];
-  /** KV_DEBUG_ROUTES=1 only: POST /debug/crash exits 3 so the supervisor can be exercised. */
+  /**
+   * KV_DEBUG_ROUTES=1 only: POST /debug/crash exits 3 so the supervisor can be exercised. `?downMs=` keeps the control
+   * port dark that long first: the window checks the engine every 5 s and shows its banner on the second miss in a
+   * row, so an engine that restarts within 5 s is never missed twice (e2e/resilience.spec.ts).
+   */
   debugRoutes?: boolean;
+  /** How the crash route ends the process: process.exit, unless a test records it. */
+  exit?: (code: number) => void;
   /** A new release's installer, downloaded into Downloads (app-update.ts): GET /update/download, POST /update/download. */
   update?: UpdateDownloader;
 };
@@ -589,8 +595,16 @@ export function createControlServer(deps: ControlDeps) {
       }
       if (req.method === "GET" && url.pathname === "/logs/tail") return send(res, 200, { lines: deps.logsTail() }, allowed);
       if (req.method === "POST" && url.pathname === "/debug/crash" && deps.debugRoutes === true) {
+        const downMs = Math.min(Math.max(Number(url.searchParams.get("downMs")) || 0, 0), 60_000);
+        const exit = deps.exit ?? ((code: number) => process.exit(code));
         send(res, 202, { crashing: true }, allowed);
-        setTimeout(() => process.exit(3), 50);
+        setTimeout(() => {
+          if (downMs > 0) {
+            server.close();
+            server.closeAllConnections();
+          }
+          setTimeout(() => exit(3), downMs);
+        }, 50);
         return;
       }
       return send(res, 404, { error: "Not found" }, allowed);
