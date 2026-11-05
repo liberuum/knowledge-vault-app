@@ -66,7 +66,7 @@ jobs:
           - runner: ubuntu-22.04 # the oldest glibc the AppImage supports
             target: x86_64-unknown-linux-gnu
             assets: Knowledge-Vault_[version]_Linux_x86-64[ext]
-          - runner: macos-14
+          - runner: macos-15 # GitHub retired macos-14 on 2026-11-02; the app still targets macOS 13.5 (minimumSystemVersion)
             target: aarch64-apple-darwin
             assets: Knowledge-Vault_[version]_macOS_Apple-silicon[ext]
           - runner: windows-latest

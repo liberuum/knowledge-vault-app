@@ -14,7 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Per workflow as well as per ref: release.yml calls this file for its checks (github.workflow is then
+  # "Release"), and a release's checks and a push's CI on the same branch must not cancel each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -120,7 +122,7 @@ jobs:
   # macOS: the shell compiles with its SIGTERM handling, and the engine's and the shell's process-tree
   # cleanup is exercised on real processes with macOS's own ps and kill.
   macos-shutdown:
-    runs-on: macos-14
+    runs-on: macos-15 # Apple silicon; GitHub retired the macos-14 image on 2026-11-02
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
