@@ -989,3 +989,48 @@ describe("pipeline manager — secrets the connection owns (6.2.3-dev.85)", () =
     warn.mockRestore();
   });
 });
+
+describe("pipeline manager — forWorkflow", () => {
+  const record = (workflowId: string, reweave?: string): PipelineRecord => ({ workflowId, connectionId: `c-${workflowId}`, secretRefs: { token: "t", llm: "l" }, createdAt: "2026-10-01T00:00:00.000Z", ...(reweave ? { reweave: { workflowId: reweave, digest: "d" } } : {}) });
+  /** Work that records when it starts and ends, and ends when told to. */
+  function step(name: string, log: string[]) {
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => (finish = resolve));
+    return { finish, work: async () => { log.push(`${name} start`); await done; log.push(`${name} end`); return name; } };
+  }
+
+  it("runs a change to a vault's pipeline or Reweave notes workflow under that vault's lock, one at a time", async () => {
+    const { manager, dataDir } = deps();
+    writePipelines(dataDir, { vault1: record("wf-pipe", "wf-reweave") });
+    const log: string[] = [];
+    const a = step("pipeline", log);
+    const b = step("reweave", log);
+    const first = manager.forWorkflow("wf-pipe", a.work);
+    const second = manager.forWorkflow("wf-reweave", b.work);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toEqual(["pipeline start"]); // the Reweave change waits for the vault's lock
+    a.finish();
+    b.finish();
+    expect(await Promise.all([first, second])).toEqual(["pipeline", "reweave"]);
+    expect(log).toEqual(["pipeline start", "pipeline end", "reweave start", "reweave end"]);
+  });
+
+  it("runs a workflow no vault's pipeline owns at once", async () => {
+    const { manager, dataDir } = deps();
+    writePipelines(dataDir, { vault1: record("wf-pipe") });
+    const log: string[] = [];
+    const a = step("pipeline", log);
+    const b = step("studio", log);
+    const c = step("studio 2", log);
+    const first = manager.forWorkflow("wf-pipe", a.work);
+    const second = manager.forWorkflow("wf-made-in-studio", b.work);
+    const third = manager.forWorkflow("wf-also-from-studio", c.work);
+    await new Promise((r) => setTimeout(r, 0));
+    // All three started before any ended: neither Studio workflow waited for a lock.
+    expect([...log].sort()).toEqual(["pipeline start", "studio 2 start", "studio start"]);
+    a.finish();
+    b.finish();
+    c.finish();
+    await Promise.all([first, second, third]);
+  });
+});

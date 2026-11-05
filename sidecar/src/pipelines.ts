@@ -855,6 +855,16 @@ export function createPipelineManager(deps: PipelineManagerDeps) {
       return out;
     },
 
+    /**
+     * Runs `work` under the lock of the vault whose pipeline or Reweave notes workflow `workflowId` is, so a change made
+     * from outside this manager (piece-pins.ts) never races that vault's Update or start-up upkeep. A workflow no
+     * vault's pipeline owns (a starter, one made in Studio) runs at once.
+     */
+    forWorkflow<T>(workflowId: string, work: () => Promise<T>): Promise<T> {
+      const owner = Object.entries(readPipelines(deps.dataDir)).find(([, r]) => r.workflowId === workflowId || r.reweave?.workflowId === workflowId)?.[0];
+      return owner ? exclusive(owner, work) : work();
+    },
+
     /** At start: every vault's pipeline gets its Reweave notes workflow, or has it brought to a newer template in place (ensureReweave). */
     async followReweave(): Promise<{ created: string[]; updated: string[]; failed: string[] }> {
       const out = { created: [] as string[], updated: [] as string[], failed: [] as string[] };

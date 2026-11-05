@@ -37,6 +37,7 @@ import { compareStack, TOO_NEW_MESSAGE } from "./store-guard.js";
 import { MOVE_FIRST_MESSAGE, mustMoveFirst, readAppLocation } from "./app-location.js";
 import { createPipelineManager, mintEngineToken, readPipelines } from "./pipelines.js";
 import { createStarterManager } from "./starters.js";
+import { followPiecePins } from "./piece-pins.js";
 import { fillConnection } from "./connections.js";
 import { fetchModelCatalog, probeLocalModels, validateModelEndpoint } from "./models-validate.js";
 import { watchParent } from "./parent-watch.js";
@@ -590,7 +591,16 @@ async function main(): Promise<void> {
       if (r.moved.length) console.log(`[sidecar] ${r.moved.length} starter workflow(s) now run on their vault's current connection`);
       if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} starter workflow(s) could not follow their vault's connection: ${r.failed.join(", ")}`);
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    // After an update the pieces the app ships exist only at their new version: each workflow pins the version the
+    // runtime runs, not one it reports as not available. Last, after the steps above have set up what they set up.
+    .then(() => followPiecePins({ origin, fetchImpl: engineFetch, workflowsDrive, lock: pipelines.forWorkflow }))
+    .then((r) => {
+      if (r.updated.length) console.log(`[sidecar] ${r.updated.length} workflow(s) now pin the piece versions this app ships`);
+      if (r.skipped.length) console.warn(`[sidecar] ${r.skipped.length} workflow(s) have unpublished edits in Workflow Studio and keep their pinned piece versions: ${r.skipped.join(", ")}`);
+      if (r.failed.length) console.warn(`[sidecar] ${r.failed.length} workflow(s) keep their pinned piece versions until the next start: ${r.failed.join(", ")}`);
+    })
+    .catch((e: unknown) => console.warn(`[sidecar] could not move the workflows to the installed piece versions: ${e instanceof Error ? e.message : String(e)}`));
   process.stdout.write(readyLine(switchboard.port, controlPort) + "\n");
 
   // Tasks a failed run left held, or whose source was deleted, would wait forever (queue-watchdog.ts).
