@@ -19,7 +19,7 @@
         "@fontsource-variable/source-serif-4": "5.3.0",
         "@powerhousedao/connect": "6.2.3-dev.90",
         "@powerhousedao/design-system": "6.2.3-dev.90",
-        "@powerhousedao/knowledge-note": "1.0.54-dev.51",
+        "@powerhousedao/knowledge-note": "1.0.54-dev.59",
         "@powerhousedao/reactor-browser": "6.2.3-dev.90",
         "@powerhousedao/workflow": "6.2.3-dev.90",
         "@tauri-apps/api": "^2.12.4",
@@ -43,7 +43,7 @@
       "name": "@knowledge-vault-app/sidecar",
       "dependencies": {
         "@electric-sql/pglite": "0.3.15",
-        "@powerhousedao/knowledge-note": "1.0.54-dev.51",
+        "@powerhousedao/knowledge-note": "1.0.54-dev.59",
         "@powerhousedao/knowledge-vault-assets": "1.0.0",
         "@powerhousedao/switchboard": "6.2.3-dev.90",
         "@powerhousedao/workflow": "6.2.3-dev.90",
@@ -778,7 +778,7 @@
 
     "@powerhousedao/host-core": ["@powerhousedao/host-core@6.2.3-dev.90", "https://registry.vetra.io/@powerhousedao/host-core/-/host-core-6.2.3-dev.90.tgz", { "dependencies": { "@powerhousedao/shared": "6.2.3-dev.90", "zod": "^4.5.4" } }, "sha512-Rcdxh1oV1IU2kHZu2nw/H8I53T73PpcU+2dt4syk0xinF80UXPaUhdkXjtFL8B1lrNQR0yBk3tyr6DK0T9AF0A=="],
 
-    "@powerhousedao/knowledge-note": ["@powerhousedao/knowledge-note@1.0.54-dev.51", "https://registry.vetra.io/@powerhousedao/knowledge-note/-/knowledge-note-1.0.54-dev.51.tgz", { "dependencies": { "@huggingface/transformers": "^4.0.1", "@noble/hashes": "^2.4.0", "@powerhousedao/reactor-attachments": "6.2.3-dev.90", "pdfjs-dist": "^6.3.289", "sharp": "^0.35.4" }, "peerDependencies": { "@powerhousedao/knowledge-vault-assets": "1.0.0", "@powerhousedao/reactor": "6.2.3-dev.90", "@powerhousedao/reactor-browser": "6.2.3-dev.90", "docling.rs-wasm": "2.46.3", "document-model": "6.2.3-dev.90", "graphql": "^16", "graphql-tag": "^2", "react": "^19", "react-dom": "^19", "zod": "^4" }, "optionalPeers": ["@powerhousedao/knowledge-vault-assets", "docling.rs-wasm"] }, "sha512-Ya6+5g+6bp69e4fDLL3Lr7mQXWvAD67FgymPAmwkxAlTLKWwVoHB6HIBWfEja2b3ftqPX2pTtOKthCovSF2ILw=="],
+    "@powerhousedao/knowledge-note": ["@powerhousedao/knowledge-note@1.0.54-dev.59", "https://registry.vetra.io/@powerhousedao/knowledge-note/-/knowledge-note-1.0.54-dev.59.tgz", { "dependencies": { "@huggingface/transformers": "^4.0.1", "@noble/hashes": "^2.4.0", "@powerhousedao/reactor-attachments": "6.2.3-dev.90", "pdfjs-dist": "^6.3.289", "sharp": "^0.35.4" }, "peerDependencies": { "@powerhousedao/knowledge-vault-assets": "1.0.0", "@powerhousedao/reactor": "6.2.3-dev.90", "@powerhousedao/reactor-browser": "6.2.3-dev.90", "docling.rs-wasm": "2.46.3", "document-model": "6.2.3-dev.90", "graphql": "^16", "graphql-tag": "^2", "react": "^19", "react-dom": "^19", "zod": "^4" }, "optionalPeers": ["@powerhousedao/knowledge-vault-assets", "docling.rs-wasm"] }, "sha512-N8MaLtXpvFfGYsg+dmnxPAVZ5GG0kC0m/Wzx6/xZXoK04OU+IyHS9fnX+j781i2VFWQAxHbTO+R0zdZ2hgH+rA=="],
 
     "@powerhousedao/knowledge-vault-assets": ["@powerhousedao/knowledge-vault-assets@1.0.0", "https://registry.vetra.io/@powerhousedao/knowledge-vault-assets/-/knowledge-vault-assets-1.0.0.tgz", {}, "sha512-JRdG1vtS0FWvMIjihwatkhRIt166vjebj+T6AUhbE9Ej+t1rvU7BD/jyJSfnSH1i3e2pSxSVagc8yRzd9AVMBQ=="],
 
