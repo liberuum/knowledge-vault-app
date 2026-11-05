@@ -33,10 +33,39 @@ export function packageOf(fileUrl, nodeModules) {
   return rest[0].startsWith("@") ? `${rest[0]}/${rest[1]}` : rest[0];
 }
 
+/** The entries reactor-api's package loader asks every package for (loadDependency in its subgraph-extraction). */
+const LOADER_ENTRIES = new Set(["document-models", "subgraphs", "processors", "scalars"]);
+
+/**
+ * The package loader asks every package for each kind of entry, and a package without one is the normal answer.
+ * reactor-api's isExpectedLoaderMiss silences that miss by finding `'<package>/` in the error; on Windows the error
+ * names `<package>\subgraphs`, so the miss is logged as a failure (6.2.3-dev.90), e.g. "[ImportPackageLoader] Cannot
+ * find module 'D:\…\node_modules\@powerhousedao\workflow\subgraphs'". Such a line names an optional entry of a package
+ * the engine has, directly under its node_modules, not a module the prune dropped; Linux and macOS never print it.
+ */
+export function isLoaderProbe(line, nodeModules) {
+  const m = /\[ImportPackageLoader\] Cannot find module '([^']+)'/.exec(line);
+  if (!m) return false;
+  const norm = (p) => p.replaceAll("\\", "/").replace(/\/+$/, "");
+  let path = norm(m[1]);
+  let root = norm(nodeModules);
+  if (/^[A-Za-z]:\//.test(root)) {
+    // Windows paths compare without case
+    path = path.toLowerCase();
+    root = root.toLowerCase();
+  }
+  if (!path.startsWith(`${root}/`)) return false;
+  const rest = path.slice(root.length + 1).split("/");
+  const scoped = rest[0].startsWith("@");
+  return rest.length === (scoped ? 3 : 2) && LOADER_ENTRIES.has(rest[rest.length - 1]);
+}
+
 /** Dropped packages among the loaded files, and the missing-module lines in the engine's output. */
 export function verdict(loadedUrls, nodeModules, output) {
   const dropped = [...new Set(loadedUrls.map((u) => packageOf(u, nodeModules)).filter((p) => p && BROWSER_WALLET_PACKAGES.test(p)))];
-  const missing = output.split("\n").filter((l) => /ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find (package|module)/.test(l) && !/onnxruntime-node/.test(l));
+  const missing = output
+    .split("\n")
+    .filter((l) => /ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find (package|module)/.test(l) && !/onnxruntime-node/.test(l) && !isLoaderProbe(l, nodeModules));
   return { dropped, missing };
 }
 

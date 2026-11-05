@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { engineArgs, engineLoadCheck, packageOf, removeScratch, verdict } from "./engine-load-check.mjs";
+import { engineArgs, engineLoadCheck, isLoaderProbe, packageOf, removeScratch, verdict } from "./engine-load-check.mjs";
 
 /** A stand-in engine: the ready line, a control port that answers the sign-in link, and a stop when stdin closes. */
 const FAKE_ENGINE = `
@@ -104,5 +104,28 @@ describe("engine load check", () => {
       chmodSync(held, 0o755);
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+  it("does not count the package loader's probes for an entry a package lacks, which Windows logs as failures", () => {
+    // The four lines that failed the 0.2.6 Windows build (6.2.3-dev.90), the last with a lower-case drive.
+    const nm = "D:\\a\\knowledge-vault-app\\knowledge-vault-app\\.stage\\sidecar\\node_modules";
+    const from = `imported from ${nm}\\@powerhousedao\\reactor-api\\dist\\subgraph-extraction-DioqM_Dc.mjs`;
+    const probes = [
+      `  [ImportPackageLoader] Cannot find module '${nm}\\@powerhousedao\\knowledge-note\\scalars' ${from}`,
+      `  [ImportPackageLoader] Cannot find module '${nm}\\@powerhousedao\\workflow\\scalars' ${from}`,
+      `  [ImportPackageLoader] Cannot find module '${nm}\\@powerhousedao\\workflow\\subgraphs' ${from}`,
+      `  [ImportPackageLoader] Cannot find module 'd:\\a\\knowledge-vault-app\\knowledge-vault-app\\.stage\\sidecar\\node_modules\\@powerhousedao\\workflow\\processors' ${from}`,
+    ];
+    expect(verdict([], nm, `${probes.join("\n")}\n`)).toEqual({ dropped: [], missing: [] });
+    // the same probe on Linux or macOS, should a later stack log it there; an unscoped package too
+    expect(isLoaderProbe("[ImportPackageLoader] Cannot find module '/stage/sidecar/node_modules/@powerhousedao/workflow/subgraphs' imported from /x.mjs", "/stage/sidecar/node_modules")).toBe(true);
+    expect(isLoaderProbe("[ImportPackageLoader] Cannot find module '/stage/sidecar/node_modules/some-pkg/document-models' imported from /x.mjs", "/stage/sidecar/node_modules/")).toBe(true);
+    // what the check is for still counts: a package the prune dropped, a file inside a package, another entry, a package outside the engine
+    const real = [
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@reown/appkit' imported from D:\\x\\node_modules\\@renown\\sdk\\dist\\node.js",
+      `[ImportPackageLoader] Cannot find module '${nm}\\@powerhousedao\\workflow\\dist\\node\\index.mjs' ${from}`,
+      `[ImportPackageLoader] Cannot find module '${nm}\\@powerhousedao\\workflow\\pieces' ${from}`,
+      "[ImportPackageLoader] Cannot find module 'D:\\elsewhere\\node_modules\\@powerhousedao\\workflow\\subgraphs' imported from D:\\x.mjs",
+    ];
+    expect(verdict([], nm, real.join("\n")).missing).toEqual(real);
   });
 });
