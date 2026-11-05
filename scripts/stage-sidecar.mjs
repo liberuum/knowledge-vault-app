@@ -82,7 +82,7 @@ if (links.length) {
 }
 // 3b. the pruned engine, run: it must start and build a sign-in link without loading anything the prune dropped.
 //     The engine runs on this machine's Node, whatever the target: the pruned JavaScript is the same for every
-//     target, only the natives differ. --no-load-check skips it (a cross-stage on a machine with no Node 24).
+//     target, only the natives differ. --no-load-check skips it (a cross-stage on a machine with no Node 26).
 if (!process.argv.includes("--no-load-check")) {
   const t2 = Date.now();
   const check = await engineLoadCheck(out);

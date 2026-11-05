@@ -1,5 +1,5 @@
 # The toolchain CI and release builds use (clippy runs with -D warnings: a new stable's lints must not
 # break a build unannounced). Bump deliberately.
 [toolchain]
-channel = "1.98.1"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]

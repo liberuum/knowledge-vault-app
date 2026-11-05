@@ -12,7 +12,7 @@ to use it, see the [README](README.md).
 | **Page** | `host/` | The React app in the window: the landing, settings, and the mounted Knowledge Vault app and Workflow Studio. It talks to the engine over GraphQL and the control API. |
 | **Scripts** | `scripts/` | The development loop, packaging (staging the engine, fetching Node), checks and smoke tests. |
 
-The installers bundle their own Node (24 LTS) for the engine, so users install nothing else.
+The installers bundle their own Node (26 LTS) for the engine, so users install nothing else.
 
 **One model for the whole app.** The engine's control server hosts an OpenAI-compatible model gateway at `/llm/v1`
 (`sidecar/src/gateway/`). The vault chat and every pipeline reach the model through it, so the provider's key stays
@@ -43,7 +43,7 @@ resolved from the Powerhouse registry (`bunfig.toml` and `.npmrc` route the `@po
 ## Requirements
 
 - [Bun](https://bun.sh) 1.3 or later (the package manager and script runner)
-- Node 24 or later (the engine runs on Node)
+- Node 26 or later (the engine runs on Node; the installers bundle 26)
 - Rust (the version in `rust-toolchain.toml`) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/)
   for your system
 

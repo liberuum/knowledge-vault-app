@@ -1,4 +1,4 @@
-import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { createPublicKey, verify, type webcrypto } from "node:crypto";
 
 /**
  * The ID token from a ChatGPT sign-in, verified as OpenAI's docs require: the signature against OpenAI's
@@ -9,7 +9,7 @@ import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
 export type IdClaims = { sub: string; email?: string; name?: string; plan?: string };
 export class IdTokenError extends Error {}
 
-type Jwk = JsonWebKey & { kid?: string; kty?: string };
+type Jwk = webcrypto.JsonWebKey & { kid?: string; kty?: string };
 export type KeySource = { find(kid: string | undefined): Promise<Jwk | undefined> };
 
 const CLOCK_SKEW_S = 60;

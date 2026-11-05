@@ -48,7 +48,7 @@
         }
       },
       "deb": {
-        "depends": [],
+        "depends": ["libatomic1"],
         "files": {
           "/usr/share/metainfo/io.github.liberuum.knowledge-vault-app.metainfo.xml": "linux/io.github.liberuum.knowledge-vault-app.metainfo.xml"
         }
