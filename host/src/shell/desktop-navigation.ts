@@ -43,6 +43,10 @@ export const desktopNavigation: PHNavigation = {
     const driveId = target ? findDriveBySlug(store?.drives, target.driveSlug)?.header.id : undefined;
     const nodeId = target?.nodeSlug ? extractNodeIdFromSlug(target.nodeSlug) : undefined;
     const changed = driveId !== store?.selectedDriveId || nodeId !== store?.selectedNodeId;
+    // Drive first: a new drive resets the node. Both before the URL: the history guard records the document the store
+    // holds on the entry the URL write makes, and Back reopens that one (written first, each entry named the previous).
+    setSelectedDriveId(driveId);
+    setSelectedNodeId(nodeId);
     // As a router does: another target keeps only the app-wide params; `search` applies on top.
     if (changed || options?.search) {
       browserNavigation.setSearch(
@@ -50,9 +54,6 @@ export const desktopNavigation: PHNavigation = {
         options?.replace ? { replace: true } : undefined,
       );
     }
-    // Drive first: a new drive resets the node.
-    setSelectedDriveId(driveId);
-    setSelectedNodeId(nodeId);
   },
   hrefFor: (target) => browserNavigation.hrefFor?.(target) ?? targetPathname(target),
   setSearch: (update, options) => browserNavigation.setSearch(update, options),

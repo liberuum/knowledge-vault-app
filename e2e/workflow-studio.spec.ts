@@ -29,9 +29,12 @@ async function documentExists(request: APIRequestContext, id: string): Promise<b
  * Workflow Studio runs inside the app on our own client adapter (host/src/remote-client-module.ts)
  * and history guard (host/src/shell/history-guard.ts), not Connect's. Since 6.2.3-dev.47 it keeps each
  * workflow in a home folder that orders the sidebar, walks back and forward through the workflows
- * visited, and deletes a workflow by deleting its home folder. Each is driven through the UI here and
- * the drive read back from the engine.
+ * visited, and deletes a workflow by deleting its home folder. Since 6.2.3-dev.90 it keeps the selected
+ * workflow in the query (`?item=<id>`), under the app's own hash route. Each is driven through the UI
+ * here and the drive read back from the engine.
  */
+/** The address with `id` selected in Studio: `?item=<id>`, the app's route after it. */
+const selecting = (id: string) => new RegExp(`[?&]item=${id}(?:[&#]|$)`);
 test("Workflow Studio in the app: + creates in a home folder, back and forward, keyboard reorder, delete removes the workflow", async ({ page, request }) => {
   const consoleLines: string[] = [];
   page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") consoleLines.push(`${m.type()}: ${m.text().slice(0, 300)}`); });
@@ -79,19 +82,19 @@ test("Workflow Studio in the app: + creates in a home folder, back and forward, 
     const { node: latest, folder: home } = await homeOf();
     created.push(latest!);
     expect(home!.name).toContain(` · ${latest!.name}`);
-    await expect(page).toHaveURL(new RegExp(`#${latest!.id}$`));
+    await expect(page).toHaveURL(selecting(latest!.id));
   }
   const [first, second] = created as [DriveNode, DriveNode];
 
   // Back and forward walk the workflows visited, without leaving Studio, and the open editor follows
-  // (reactor-browser would read both from Connect's path, which the app keeps at "/": history-guard.ts).
+  // (Connect would keep it in the path, which the app keeps at "/": history-guard.ts records it on each entry).
   const openEditor = () => page.evaluate(() => (window as unknown as { ph?: { selectedNodeId?: string } }).ph?.selectedNodeId);
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`#${first.id}$`));
+  await expect(page).toHaveURL(selecting(first.id));
   await expect(page.locator('button[aria-label="New workflow"]')).toBeVisible(); // still in Studio
   await expect.poll(openEditor).toBe(first.id);
   await page.goForward();
-  await expect(page).toHaveURL(new RegExp(`#${second.id}$`));
+  await expect(page).toHaveURL(selecting(second.id));
   await expect.poll(openEditor).toBe(second.id);
 
   // Alt+ArrowUp on the second row moves it above the first: its home folder now sorts first.

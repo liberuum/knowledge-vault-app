@@ -22,15 +22,19 @@ vi.mock("@powerhousedao/reactor-browser", () => ({
   setPHToast: vi.fn(),
   setReactorClientModule: vi.fn(),
   setSelectedNode: vi.fn(),
+  setSelectedNodeId: vi.fn(),
   setSwitchboardUrl: vi.fn(),
   setVetraPackageManager: vi.fn(),
   StaticPackageManager: class {},
 }));
 vi.mock("./remote-client-module.js", () => ({ remoteClientModule: vi.fn(() => ({})) }));
 vi.mock("./shell/history-guard.js", () => ({ setHistoryEditorRestorer: vi.fn() }));
+vi.mock("./shell/desktop-navigation.js", () => ({ installDesktopNavigation: vi.fn() }));
 vi.mock("./components/HostToasts.js", () => ({ hostToasts: { toast: vi.fn() } }));
 
-const { activate, activateAfterCleanup } = await import("./reactor.js");
+const { activate, activateAfterCleanup, installReactor } = await import("./reactor.js");
+const rb = await import("@powerhousedao/reactor-browser");
+const guard = await import("./shell/history-guard.js");
 
 const LOCAL = "http://127.0.0.1:4201";
 const SERVER = "https://switchboard.example.org";
@@ -59,3 +63,17 @@ describe("activateAfterCleanup", () => {
     expect(current()).toBe(`${SERVER}/graphql`);
   });
 });
+
+describe("installReactor — back and forward", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("reopen an entry's editor in the store only: a navigation would write a history entry and drop the ones ahead, so Forward would go nowhere", () => {
+    installReactor({ origin: LOCAL, graphqlUrl: `${LOCAL}/graphql`, controlOrigin: "http://127.0.0.1:4202", controlToken: "t" }, []);
+    const restore = vi.mocked(guard.setHistoryEditorRestorer).mock.calls.at(-1)![0];
+    restore("wf-1");
+    restore(undefined);
+    expect(vi.mocked(rb.setSelectedNodeId).mock.calls).toEqual([["wf-1"], [undefined]]);
+    expect(rb.setSelectedNode).not.toHaveBeenCalled();
+  });
+});
+

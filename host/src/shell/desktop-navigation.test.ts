@@ -14,6 +14,8 @@ const rb = vi.hoisted(() => {
       search = next;
     },
     open: vi.fn(),
+    /** The document the store held each time the URL was written: what the history guard records on that entry. */
+    writes: [] as Array<string | undefined>,
   };
 });
 vi.mock("@powerhousedao/reactor-browser", () => ({
@@ -29,6 +31,7 @@ vi.mock("@powerhousedao/reactor-browser", () => ({
   browserNavigation: {
     open: rb.open,
     setSearch: (update: (prev: Record<string, string>) => Record<string, string | undefined>) => {
+      rb.writes.push(rb.store.selectedNodeId);
       rb.search = Object.fromEntries(Object.entries(update(rb.search)).filter((e): e is [string, string] => e[1] !== undefined));
     },
     hrefFor: (target?: { driveSlug: string }) => (target ? `/d/${target.driveSlug}` : "/"),
@@ -107,5 +110,20 @@ describe("desktop navigation (reactor-browser 6.2.3-dev.70+)", () => {
   it("installs itself as the store's navigation", () => {
     installDesktopNavigation();
     expect(rb.store.navigation).toBe(desktopNavigation);
+  });
+});
+
+describe("desktopNavigation — the history entry a navigation writes", () => {
+  it("is written once the store holds what it opens, so the history guard records that document on it", () => {
+    rb.store.drives = [{ header: { id: "wf-drive", slug: "workflows" } }];
+    rb.store.selectedDriveId = "wf-drive";
+    rb.store.selectedNodeId = "a";
+    rb.search = { item: "a" };
+    rb.writes.length = 0;
+    // Studio's go(): the new workflow's editor and its item, in one navigation.
+    desktopNavigation.open({ driveSlug: "workflows", nodeSlug: "workflow-b" }, { search: { item: "b" } });
+    expect(rb.writes, "an entry stamped with the previous editor sends Back one workflow too far").toEqual(["b"]);
+    expect(rb.store.selectedNodeId).toBe("b");
+    expect(rb.search).toEqual({ item: "b" });
   });
 });

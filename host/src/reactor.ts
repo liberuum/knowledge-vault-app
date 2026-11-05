@@ -7,7 +7,7 @@ import {
   setReactorClient,
   setPHToast,
   setReactorClientModule,
-  setSelectedNode,
+  setSelectedNodeId,
   setSwitchboardUrl,
   setVetraPackageManager,
   StaticPackageManager,
@@ -58,9 +58,10 @@ export function activate(target: Target): GraphQLReactorClient {
   setReactorClient(client);
   const cache = new DocumentCache(client);
   setDocumentCache(cache);
-  // reactor-browser's drive helpers (Workflow Studio's create and delete) call
-  // Connect's in-browser reactor; this answers them over the engine's GraphQL API.
-  // Its reactorModule stays empty, so sync and registry lookups still see none.
+  // reactor-browser's full-client actions (Workflow Studio's create and delete) call
+  // Connect's in-browser reactor, through its read and write halves; this answers them
+  // over the engine's GraphQL API. Its reactorModule stays empty, so sync and registry
+  // lookups still see none.
   setReactorClientModule(remoteClientModule(client, libs, (id) => cache.get(id, true)) as unknown as Parameters<typeof setReactorClientModule>[0]);
   setSwitchboardUrl(`${target.origin}/graphql`);
   // Workflow Studio derives its runtime endpoint from the drive's sync channel or, failing
@@ -95,8 +96,9 @@ export function installReactor(info: SidecarInfo, packages: readonly DocumentMod
   ensurePHEventHandlers();
   // Opening a drive or a document writes the selection into the store, not Connect's path (shell/desktop-navigation.ts).
   installDesktopNavigation();
-  // Back and forward reopen the editor each history entry had open (shell/history-guard.ts).
-  setHistoryEditorRestorer((nodeId) => setSelectedNode(nodeId));
+  // Back and forward reopen the editor each history entry had open (shell/history-guard.ts), in the store only: the
+  // URL is the entry's already, and a navigation would write an entry of its own and drop the ones ahead (Forward).
+  setHistoryEditorRestorer((nodeId) => setSelectedNodeId(nodeId));
   libs = packages;
   setVetraPackageManager(new StaticPackageManager(packages));
   // Mounted apps report through usePHToast(); Connect provides that service, here the host does.
