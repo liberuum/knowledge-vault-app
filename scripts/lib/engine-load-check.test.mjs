@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { engineArgs, engineLoadCheck, packageOf, verdict } from "./engine-load-check.mjs";
 
@@ -30,21 +30,27 @@ const freePort = () =>
   });
 
 describe("engine load check", () => {
-  const nm = "/stage/sidecar/node_modules";
+  // Folders absolute on the OS the test runs on (/stage/... here, D:\stage\... on a Windows runner), and their files as
+  // the loader reports them: a file:///stage/... URL has no drive letter, and Windows cannot read it as a path.
+  const nm = resolve("/stage/sidecar/node_modules");
+  const loaded = (...parts) => pathToFileURL(join(nm, ...parts)).href;
   it("names the package a loaded file belongs to, scoped or not, and nothing outside node_modules", () => {
-    expect(packageOf("file:///stage/sidecar/node_modules/viem/_esm/index.js", nm)).toBe("viem");
-    expect(packageOf("file:///stage/sidecar/node_modules/@renown/sdk/dist/node.js", nm)).toBe("@renown/sdk");
-    expect(packageOf("file:///stage/sidecar/node_modules/@wagmi/connectors/dist/x.js", nm)).toBe("@wagmi/connectors");
-    expect(packageOf("file:///stage/sidecar/dist/main.js", nm)).toBeNull();
+    expect(packageOf(loaded("viem", "_esm", "index.js"), nm)).toBe("viem");
+    expect(packageOf(loaded("@renown", "sdk", "dist", "node.js"), nm)).toBe("@renown/sdk");
+    expect(packageOf(loaded("@wagmi", "connectors", "dist", "x.js"), nm)).toBe("@wagmi/connectors");
+    expect(packageOf(pathToFileURL(resolve("/stage/sidecar/dist/main.js")).href, nm)).toBeNull();
     // percent-encoded spaces in the path; a Windows drive path only on Windows (fileURLToPath is the OS's)
-    expect(packageOf("file:///stage/Knowledge%20Vault/node_modules/viem/index.js", "/stage/Knowledge Vault/node_modules")).toBe("viem");
+    const spaced = resolve("/stage/Knowledge Vault/node_modules");
+    const spacedUrl = pathToFileURL(join(spaced, "viem", "index.js")).href;
+    expect(spacedUrl).toContain("Knowledge%20Vault");
+    expect(packageOf(spacedUrl, spaced)).toBe("viem");
     if (process.platform === "win32") expect(packageOf("file:///C:/Program%20Files/Knowledge%20Vault/sidecar/node_modules/viem/index.js", "C:\\Program Files\\Knowledge Vault\\sidecar\\node_modules")).toBe("viem");
     expect(packageOf("not a url", nm)).toBeNull();
   });
   it("fails on a loaded wallet package or a missing module, and not on the onnxruntime-node fallback the engine expects", () => {
-    const ok = verdict(["file:///stage/sidecar/node_modules/@renown/sdk/dist/node.js", "file:///stage/sidecar/node_modules/viem/index.js"], nm, "[Embedder] onnxruntime-node not found (Cannot find package 'onnxruntime-node'), falling back to wasm\n");
+    const ok = verdict([loaded("@renown", "sdk", "dist", "node.js"), loaded("viem", "index.js")], nm, "[Embedder] onnxruntime-node not found (Cannot find package 'onnxruntime-node'), falling back to wasm\n");
     expect(ok).toEqual({ dropped: [], missing: [] });
-    const bad = verdict(["file:///stage/sidecar/node_modules/wagmi/dist/index.js", "file:///stage/sidecar/node_modules/@privy-io/react-auth/dist/i.js"], nm, "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@reown/appkit'\n");
+    const bad = verdict([loaded("wagmi", "dist", "index.js"), loaded("@privy-io", "react-auth", "dist", "i.js")], nm, "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@reown/appkit'\n");
     expect(bad.dropped).toEqual(["wagmi", "@privy-io/react-auth"]);
     expect(bad.missing).toHaveLength(1);
   });
