@@ -86,7 +86,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: 1.99.1
+      # Not on macOS: the three macOS builds that restored this cache never showed their page in the launch check, on
+      # either runner image, and the two built from scratch did (0.2.6 draft runs 4-6). A clean build costs ~2.5 min.
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        if: runner.os != 'macOS'
         with:
           workspaces: src-tauri
           key: ${{ matrix.target }}
@@ -210,6 +213,14 @@ jobs:
           # once took over 90 s to load the page (0.2.6, run 5) where it had taken 15 s the run before.
           KV_SMOKE_SECS: "180"
         run: node scripts/smoke-app.mjs
+      - name: What the macOS launch check saw, when it failed (screenshot, threads, system log)
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-launch-diagnostics
+          path: smoke-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Install the Windows build and launch it (engine unpacked, ready, page served, page reached the shell)
         if: runner.os == 'Windows'
         shell: pwsh

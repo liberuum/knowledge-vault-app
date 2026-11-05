@@ -53,3 +53,5 @@ host/.vault-dev/
 
 # The ori tool's per-machine workspace state (a live SQLite database)
 .ori/
+# what a failed macOS launch check saw (scripts/smoke-app.mjs)
+smoke-diagnostics/

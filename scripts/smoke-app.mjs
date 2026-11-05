@@ -2,8 +2,8 @@
 // its bundled engine is ready and its own host page answers (stopping the engine on the way out).
 // Reports the installer sizes, the time to ready and the peak memory of the whole process tree.
 //   node scripts/smoke-app.mjs [path-to-AppImage]
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -55,6 +55,53 @@ let out = "";
 child.stdout.on("data", (d) => (out += d));
 child.stderr.on("data", (d) => (out += d));
 
+// macOS: a window that never loads its page showed nothing else in this check's output (0.2.6, runs 5 and 6). When
+// the app has not passed 25 s before its deadline, what it is doing goes to smoke-diagnostics/, which the release
+// uploads when the check fails: a screenshot, its threads (spindump as root, else sample, which the hardened runtime
+// may refuse) and the processes; after the exit, the system log of the app and WebKit, and crash reports.
+const diagDir = resolve("smoke-diagnostics");
+const sh = (cmd, args, timeout = 60_000) => {
+  try {
+    return execFileSync(cmd, args, { encoding: "utf8", timeout, maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    return `${cmd} failed: ${e.message}\n${e.stdout ?? ""}${e.stderr ?? ""}`;
+  }
+};
+let caught = false;
+function catchMacWindow(pid) {
+  if (child.exitCode !== null || /\[smoke\] (ok|failed)/.test(out)) return;
+  caught = true;
+  rmSync(diagDir, { recursive: true, force: true });
+  mkdirSync(diagDir, { recursive: true });
+  sh("screencapture", ["-x", join(diagDir, "screen.png")]);
+  const threads = join(diagDir, "app-threads.txt");
+  sh("sudo", ["-n", "spindump", String(pid), "3", "10", "-file", threads], 120_000);
+  if (!existsSync(threads)) sh("sample", [String(pid), "3", "-file", threads]);
+  const ps = sh("ps", ["-axo", "pid,ppid,stat,%cpu,%mem,rss,etime,command"]);
+  writeFileSync(join(diagDir, "ps.txt"), ps);
+  const mine = ps.split("\n").filter((l, i) => i === 0 || /knowledge-vault-app|com\.apple\.WebKit|kv-node|converter/i.test(l));
+  console.log(`[smoke] not passed after ${((Date.now() - started) / 1000).toFixed(0)} s; the app's and WebKit's processes:\n${mine.map((l) => l.slice(0, 200)).join("\n")}`);
+}
+const watcher = process.platform === "darwin" ? setTimeout(() => catchMacWindow(child.pid), Math.max(10, smokeSecs - 25) * 1000) : undefined;
+
+/** After a failed run on macOS: the app's and WebKit's system log, crash reports, and the main thread's stack. */
+function reportMacWindow() {
+  if (!caught) return;
+  const minutes = Math.ceil((Date.now() - started) / 60_000) + 1;
+  const log = sh("log", ["show", "--style", "compact", "--last", `${minutes}m`, "--predicate", 'process == "knowledge-vault-app" OR process BEGINSWITH "com.apple.WebKit"'], 180_000);
+  writeFileSync(join(diagDir, "system.log"), log);
+  const reports = join(process.env.HOME ?? "", "Library", "Logs", "DiagnosticReports");
+  const crashes = existsSync(reports) ? readdirSync(reports).filter((f) => /WebKit|knowledge|kv-node/i.test(f) && statSync(join(reports, f)).mtimeMs >= started) : [];
+  for (const f of crashes) copyFileSync(join(reports, f), join(diagDir, f));
+  const threads = existsSync(join(diagDir, "app-threads.txt")) ? readFileSync(join(diagDir, "app-threads.txt"), "utf8") : "";
+  const at = threads.indexOf("main-thread");
+  const stack = at >= 0 ? threads.slice(threads.lastIndexOf("\n", at) + 1).split("\n").slice(0, 45) : threads.split("\n").slice(0, 12);
+  console.log(`[smoke] the app's main thread:\n${stack.map((l) => l.slice(0, 200)).join("\n") || "(no stack captured)"}`);
+  const notable = log.split("\n").filter((l) => /error|fail|denied|crash|terminat|sandbox|invalid|refus|timed? ?out|blocked/i.test(l));
+  console.log(`[smoke] notable lines in the app's and WebKit's system log (${notable.length}; the last 40):\n${notable.slice(-40).map((l) => l.slice(0, 240)).join("\n")}`);
+  console.log(`[smoke] diagnostics in ${diagDir}: ${readdirSync(diagDir).join(", ")}`);
+}
+
 // Peak resident memory of the app and everything it started (Linux /proc).
 let peak = 0;
 const tree = (pid) => {
@@ -80,6 +127,7 @@ const killer = setTimeout(() => child.kill("SIGKILL"), (smokeSecs + 60) * 1000);
 child.on("exit", (code) => {
   clearInterval(sampler);
   clearTimeout(killer);
+  clearTimeout(watcher);
   const verdict = /\[smoke\] (ok|failed)[^\n]*/.exec(out)?.[0];
   console.log(verdict ?? "[smoke] no verdict from the app");
   if (!verdict && Date.now() - started < 10_000) console.log("[smoke] it exited at once — if Knowledge Vault (or `bun run dev`'s window) is already open, the new launch handed over to it (one instance at a time): close it and run again");
@@ -92,6 +140,7 @@ child.on("exit", (code) => {
     const app = lines.filter((l) => l.trim() && !l.startsWith("[sidecar]") && !l.startsWith("[converter]") && !l.startsWith("[smoke]"));
     console.log(`[smoke] the app's own output (${app.length} lines, last 60):\n${app.slice(-60).join("\n")}`);
     console.log(`[smoke] the engine's last lines:\n${lines.filter((l) => l.startsWith("[sidecar]")).slice(-15).join("\n")}`);
+    reportMacWindow();
   }
   rmSync(home, { recursive: true, force: true });
   for (const f of readdirSync(tmpdir()).filter((f) => f.startsWith("appimage_extracted_") && !extractedBefore.has(f))) {
