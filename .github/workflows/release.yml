@@ -205,6 +205,10 @@ jobs:
           subject-checksums: linux-files.sha256
       - name: Smoke the macOS app
         if: runner.os == 'macOS'
+        env:
+          # The first launch also installs the converter's binding and models; on a busy macOS runner the window
+          # once took over 90 s to load the page (0.2.6, run 5) where it had taken 15 s the run before.
+          KV_SMOKE_SECS: "180"
         run: node scripts/smoke-app.mjs
       - name: Install the Windows build and launch it (engine unpacked, ready, page served, page reached the shell)
         if: runner.os == 'Windows'

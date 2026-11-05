@@ -43,6 +43,9 @@ const env = {
   APPIMAGE_EXTRACT_AND_RUN: "1", // no FUSE needed
 };
 for (const k of ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"]) if (process.env[k]) env[k] = process.env[k];
+// The app's deadline (smoke.rs: 90 s unless KV_SMOKE_SECS says otherwise); this script kills it a minute later.
+const smokeSecs = Number(process.env.KV_SMOKE_SECS) > 0 ? Number(process.env.KV_SMOKE_SECS) : 90;
+env.KV_SMOKE_SECS = String(smokeSecs);
 // WebKit and GLib switches pass through, to try a renderer or a sandbox setting, or to turn on their logging
 for (const [k, v] of Object.entries(process.env)) if (v !== undefined && (k.startsWith("WEBKIT_") || k === "G_MESSAGES_DEBUG")) env[k] = v;
 
@@ -73,7 +76,7 @@ const sampler = setInterval(() => {
   }
   peak = Math.max(peak, kb);
 }, 500);
-const killer = setTimeout(() => child.kill("SIGKILL"), 150_000);
+const killer = setTimeout(() => child.kill("SIGKILL"), (smokeSecs + 60) * 1000);
 child.on("exit", (code) => {
   clearInterval(sampler);
   clearTimeout(killer);
