@@ -17,6 +17,7 @@ dist-linux/
 # Local engine stores (development loop, end-to-end tests)
 .dev-data/
 .e2e-data/
+*.vite-cache/
 sidecar/.ph/
 
 # Test output

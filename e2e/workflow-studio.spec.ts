@@ -111,6 +111,8 @@ test("Workflow Studio in the app: + creates in a home folder, back and forward, 
   await dialog.getByRole("textbox", { name: `Type ${first.name} to confirm` }).fill(first.name);
   await dialog.getByRole("button", { name: "Delete workflow" }).click();
   await expect.poll(async () => documentExists(request, first.id), { timeout: 30_000 }).toBe(false);
+  // Every editor Studio opened rendered: a chunk the dev server no longer has fails only in the console.
+  expect(consoleLines.filter((line) => /Failed to render document|Failed to fetch dynamically imported module/.test(line))).toEqual([]);
   const after = await nodesOf(request, drive.id);
   expect(after.some((n) => n.id === first.id || n.id === firstHome), "neither the workflow nor its home folder stays in the drive").toBe(false);
   expect(after.some((n) => n.id === second.id), "the other workflow is untouched").toBe(true);

@@ -12,6 +12,10 @@ const fresh = process.argv.includes("--fresh"); // wipe the store first (e2e run
 // The e2e runs on its own store (.e2e-data): --fresh must never touch the developer's .dev-data.
 const dataDirIndex = process.argv.indexOf("--data-dir");
 const dataDir = resolve(dataDirIndex >= 0 && process.argv[dataDirIndex + 1] ? process.argv[dataDirIndex + 1] : ".dev-data");
+// Vite's pre-bundled libraries: one cache per data folder, beside it rather than in it. The app's "Delete all local
+// data" empties the data folder while the page is open, and pages then asked for chunks that were gone ("Failed to
+// fetch dynamically imported module": the Workflow Studio spec, run after the resilience spec's delete-all).
+const viteCache = `${dataDir}.vite-cache`;
 // --vault <path>: serve the vault package from that checkout's source, with hot reload (host/vite.config.ts).
 const vaultIndex = process.argv.indexOf("--vault");
 if (vaultIndex >= 0) {
@@ -33,6 +37,7 @@ const run = (cmd, args, opts = {}) => {
 if (fresh) {
   const { rmSync } = await import("node:fs");
   rmSync(dataDir, { recursive: true, force: true });
+  rmSync(viteCache, { recursive: true, force: true });
   console.log(`[dev] fresh store: ${dataDir} removed`);
 }
 console.log("[dev] building and starting the sidecar…");
@@ -158,10 +163,10 @@ async function startSidecar(attempt = 0) {
 const ready = await startSidecar();
 
 const vite = run("bun", ["run", "--cwd", "host", "dev"], {
-  // Vite's pre-bundled libraries live with this run's data: a test run or a second dev loop
+  // Vite's pre-bundled libraries live with this run's data folder (viteCache, above): a test run or a second dev loop
   // rewriting a shared cache leaves this server's pages asking for files that are gone ("504
   // Outdated Optimize Dep", "Importing a module script failed").
-  env: { ...process.env, VITE_SIDECAR_PORT: String(ready.port), VITE_CONTROL_PORT: String(ready.controlPort), VITE_CONTROL_TOKEN: TOKEN, KV_VITE_CACHE: join(dataDir, "vite-cache") },
+  env: { ...process.env, VITE_SIDECAR_PORT: String(ready.port), VITE_CONTROL_PORT: String(ready.controlPort), VITE_CONTROL_TOKEN: TOKEN, KV_VITE_CACHE: viteCache },
 });
 vite.stdout.pipe(process.stdout);
 if (!noShell) {
