@@ -112,6 +112,10 @@ jobs:
           $file = Join-Path $env:DOCLING_RS_HOME '.models\en_dict.txt'
           if (-not (Test-Path $file)) { throw "en_dict.txt was not placed at $file" }
           "en_dict.txt: $((Get-Item $file).Length) bytes"
+      # The release stages the engine on Windows and starts it under engine-load-check.mjs; this runs that harness
+      # here, on a stand-in engine, so a Windows-only break in it (0.2.6: a bare C:\ loader path) shows on a push.
+      - name: The engine load check's harness on Windows
+        run: node node_modules/vitest/vitest.mjs run scripts/lib/engine-load-check.test.mjs
 
   # macOS: the shell compiles with its SIGTERM handling, and the engine's and the shell's process-tree
   # cleanup is exercised on real processes with macOS's own ps and kill.

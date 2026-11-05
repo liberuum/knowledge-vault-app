@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { BROWSER_WALLET_PACKAGES } from "./prune.mjs";
 
 /**
@@ -40,6 +40,15 @@ export function verdict(loadedUrls, nodeModules, output) {
   return { dropped, missing };
 }
 
+/**
+ * The engine's command line. `--import` takes a module specifier, not a path: on Windows a bare
+ * `C:\…\loader.mjs` reads as a URL with the scheme `c:` (ERR_UNSUPPORTED_ESM_URL_SCHEME, which stopped the
+ * 0.2.6 Windows build), so the loader goes in as a file: URL on every OS.
+ */
+export function engineArgs(loader) {
+  return ["--import", pathToFileURL(loader).href, join("dist", "main.js")];
+}
+
 export async function engineLoadCheck(stageDir, { node = process.execPath, timeoutMs = 120_000, port = 48401 } = {}) {
   const data = mkdtempSync(join(tmpdir(), "kv-load-check-"));
   const trace = join(data, "loaded.txt");
@@ -47,7 +56,7 @@ export async function engineLoadCheck(stageDir, { node = process.execPath, timeo
   writeFileSync(loader, LOADER);
   writeFileSync(trace, "");
   const env = { ...process.env, KV_TRACE_OUT: trace, KV_STDIN_STOP: "1", KV_DATA_DIR: data, KV_PORT: String(port), KV_CONTROL_PORT: String(port + 1), KV_CONTROL_TOKEN: "load-check" };
-  const child = spawn(node, ["--import", loader, join("dist", "main.js")], { cwd: stageDir, env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(node, engineArgs(loader), { cwd: stageDir, env, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d) => (output += d));
   child.stderr.on("data", (d) => (output += d));
