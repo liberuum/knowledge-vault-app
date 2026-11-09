@@ -1,4 +1,5 @@
 import {
+  invalidateDriveNodes,
   setDrives,
   setSelectedDrive,
   setSelectedNode,
@@ -119,6 +120,11 @@ export function WorkspaceScreen(props: {
         const stateName = (drive.state as { global?: { name?: string } } | undefined)?.global?.name;
         setTitle(stateName || drive.header.name || props.fallbackTitle || "");
         setDrives([withMeta]);
+        // The node hooks (useSelectedNode, useNodeById) read their own index of the drive's nodes,
+        // which reactor-browser drops only after a write it made itself. Every vault write goes to
+        // the engine, so a changed drive drops it here: otherwise a new document is selected and
+        // nothing opens (a source added from Paste text, 0.2.6).
+        if (state.selected) invalidateDriveNodes(withMeta.header.id);
         if (!state.selected) {
           state.selected = true;
           setSelectedDrive(withMeta); // the object: a string argument is taken as a slug

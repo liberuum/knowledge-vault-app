@@ -1,5 +1,6 @@
 import {
   DocumentCache,
+  invalidateDriveNodes,
   ensurePHEventHandlers,
   GraphQLReactorClient,
   setDefaultDrivesUrl,
@@ -13,9 +14,10 @@ import {
   StaticPackageManager,
 } from "@powerhousedao/reactor-browser";
 import type { DocumentModelLib } from "document-model";
-import { installDesktopNavigation } from "./shell/desktop-navigation.js";
+import { installDesktopNavigation, setDriveRereader } from "./shell/desktop-navigation.js";
 import { setHistoryEditorRestorer } from "./shell/history-guard.js";
 import { hostToasts } from "./components/HostToasts.js";
+import { followVaultWrites } from "./vault-writes.js";
 import { remoteClientModule } from "./remote-client-module.js";
 import type { SidecarInfo } from "./sidecar.js";
 
@@ -30,6 +32,8 @@ let libs: readonly DocumentModelLib[] = [];
 const clients = new Map<string, GraphQLReactorClient>();
 /** Counts `activate` calls, so a deferred switch can tell whether another target took over meanwhile. */
 let activations = 0;
+/** Stops the active cache following the vault's write announcements. */
+let stopFollowingWrites: (() => void) | undefined;
 
 /**
  * What Connect's boot does for us, minus the in-browser reactor: one
@@ -58,6 +62,14 @@ export function activate(target: Target): GraphQLReactorClient {
   setReactorClient(client);
   const cache = new DocumentCache(client);
   setDocumentCache(cache);
+  // The vault's own writes go to the engine over GraphQL; the cache learns of them here.
+  stopFollowingWrites?.();
+  stopFollowingWrites = typeof window === "undefined" ? undefined : followVaultWrites(window, (id) => {
+          // The node hooks read their own index; reactor-browser drops it only after its own writes.
+          invalidateDriveNodes(id);
+          return cache.get(id, true);
+        });
+  setDriveRereader((id) => cache.get(id, true));
   // reactor-browser's full-client actions (Workflow Studio's create and delete) call
   // Connect's in-browser reactor, through its read and write halves; this answers them
   // over the engine's GraphQL API. Its reactorModule stays empty, so sync and registry

@@ -29,7 +29,7 @@ vi.mock("@powerhousedao/reactor-browser", () => ({
 }));
 vi.mock("./remote-client-module.js", () => ({ remoteClientModule: vi.fn(() => ({})) }));
 vi.mock("./shell/history-guard.js", () => ({ setHistoryEditorRestorer: vi.fn() }));
-vi.mock("./shell/desktop-navigation.js", () => ({ installDesktopNavigation: vi.fn() }));
+vi.mock("./shell/desktop-navigation.js", () => ({ installDesktopNavigation: vi.fn(), setDriveRereader: vi.fn() }));
 vi.mock("./components/HostToasts.js", () => ({ hostToasts: { toast: vi.fn() } }));
 
 const { activate, activateAfterCleanup, installReactor } = await import("./reactor.js");

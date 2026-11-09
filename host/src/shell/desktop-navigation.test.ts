@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // reactor-browser's store and helpers, reduced to what the navigation reads and writes.
 const rb = vi.hoisted(() => {
-  const store: { drives?: { header: { id: string; slug: string } }[]; selectedDriveId?: string; selectedNodeId?: string; navigation?: unknown } = {};
+  const store: { driveNodes?: Map<string, { byId: Map<string, unknown> }>; drives?: { header: { id: string; slug: string } }[]; selectedDriveId?: string; selectedNodeId?: string; navigation?: unknown } = {};
   let search: Record<string, string> = {};
   return {
     store,
@@ -14,12 +14,14 @@ const rb = vi.hoisted(() => {
       search = next;
     },
     open: vi.fn(),
+    invalidate: vi.fn(),
     /** The document the store held each time the URL was written: what the history guard records on that entry. */
     writes: [] as Array<string | undefined>,
   };
 });
 vi.mock("@powerhousedao/reactor-browser", () => ({
   getPHStore: () => rb.store,
+  invalidateDriveNodes: rb.invalidate,
   setSelectedDriveId: (id: string | undefined) => (rb.store.selectedDriveId = id),
   setSelectedNodeId: (id: string | undefined) => (rb.store.selectedNodeId = id),
   findDriveBySlug: (drives: { header: { id: string; slug: string } }[] | undefined, slug: string) => drives?.find((d) => d.header.slug === slug),
@@ -39,7 +41,7 @@ vi.mock("@powerhousedao/reactor-browser", () => ({
     useSetSearchParams: () => () => {},
   },
 }));
-import { desktopNavigation, installDesktopNavigation } from "./desktop-navigation.js";
+import { desktopNavigation, installDesktopNavigation, rereadIfMissing } from "./desktop-navigation.js";
 
 const VAULT = { header: { id: "drive-1", slug: "my-vault" } };
 afterEach(() => {
@@ -125,5 +127,37 @@ describe("desktopNavigation — the history entry a navigation writes", () => {
     expect(rb.writes, "an entry stamped with the previous editor sends Back one workflow too far").toEqual(["b"]);
     expect(rb.store.selectedNodeId).toBe("b");
     expect(rb.search).toEqual({ item: "b" });
+  });
+});
+
+describe("rereadIfMissing", () => {
+  const drive = { header: { id: "drive-1" }, state: { global: { nodes: [{ id: "known" }] } } };
+
+  it("reads the drive again when the document to open is not in it yet", () => {
+    const reread = vi.fn().mockResolvedValue(undefined);
+    expect(rereadIfMissing(drive, "just-created", reread)).toBe(true);
+    expect(reread).toHaveBeenCalledWith("drive-1");
+  });
+
+  it("leaves a known document, no document and no reader alone", () => {
+    const reread = vi.fn().mockResolvedValue(undefined);
+    expect(rereadIfMissing(drive, "known", reread)).toBe(false);
+    expect(rereadIfMissing(drive, undefined, reread)).toBe(false);
+    expect(rereadIfMissing(undefined, "x", reread)).toBe(false);
+    expect(rereadIfMissing(drive, "x", undefined)).toBe(false);
+    expect(reread).not.toHaveBeenCalled();
+  });
+});
+
+describe("opening a document the node index does not hold yet", () => {
+  it("drops the index so it reloads, and leaves a known document's alone", () => {
+    rb.store.drives = [{ header: { id: "drive-1", slug: "vault" } }];
+    rb.store.driveNodes = new Map([["drive-1", { byId: new Map([["known", {}]]) }]]);
+    rb.invalidate.mockClear();
+    desktopNavigation.open({ driveSlug: "vault", nodeSlug: "new" });
+    expect(rb.invalidate).toHaveBeenCalledWith("drive-1");
+    rb.invalidate.mockClear();
+    desktopNavigation.open({ driveSlug: "vault", nodeSlug: "known" });
+    expect(rb.invalidate).not.toHaveBeenCalled();
   });
 });
