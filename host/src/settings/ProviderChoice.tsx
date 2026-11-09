@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 export type Choice = "local" | "chatgpt" | "openrouter" | "apikey";
 export type ApiService = "openai" | "anthropic" | "gemini" | "xai" | "custom";
@@ -20,6 +20,9 @@ const SERVICES: ReadonlyArray<{ id: ApiService; name: string; keyPage?: string; 
   { id: "xai", name: "xAI", keyPage: "https://console.x.ai", keyLooksLike: "xai-…" },
   { id: "custom", name: "Another service", keyLooksLike: "Paste a key, if the service needs one" },
 ];
+
+/** The OpenRouter account page shown once a key is saved: credits, with usage and keys beside it. */
+export const OPENROUTER_DASHBOARD = "https://openrouter.ai/settings/credits";
 
 /** With no key saved or pasted yet, signing in is the one thing to do on the OpenRouter card; Save waits. */
 export const signInFirst = (hasKey: boolean, apiKey: string): boolean => !hasKey && !apiKey.trim();
@@ -131,21 +134,37 @@ export function ProviderChoice(props: Props) {
 }
 
 function OpenRouterCard({ apiKey, onApiKey, hasKey, onOpenRouterSignIn, signingIn, disabled, onRemoveKey }: Props) {
+  // Signing in is the way in; the key field appears only for someone who chose to paste a key instead.
+  const [pasting, setPasting] = useState(false);
+  const showField = hasKey || pasting || apiKey.trim() !== "";
   return (
     <>
       <div className="kv-provider-signin">
-        <button
-          type="button"
-          className={signInFirst(hasKey, apiKey) ? "kv-button kv-button-primary" : "kv-button"}
-          onClick={onOpenRouterSignIn}
-          disabled={disabled || signingIn}
-        >
-          {signingIn ? "Waiting for the browser…" : "Sign in with OpenRouter"}
-        </button>
-        <span className="kv-provider-or">or paste a key</span>
+        {hasKey ? (
+          // Signed in (or a key pasted): the account is what is left to look at — credits, usage, keys.
+          <a className="kv-button" href={OPENROUTER_DASHBOARD} target="_blank" rel="noreferrer" title="Opens in your browser">
+            OpenRouter dashboard
+          </a>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={signInFirst(hasKey, apiKey) ? "kv-button kv-button-primary" : "kv-button"}
+              onClick={onOpenRouterSignIn}
+              disabled={disabled || signingIn}
+            >
+              {signingIn ? "Waiting for the browser…" : "Sign in with OpenRouter"}
+            </button>
+            {!showField && (
+              <button type="button" className="kv-link kv-provider-or-link" onClick={() => setPasting(true)} disabled={disabled}>
+                or paste a key
+              </button>
+            )}
+          </>
+        )}
       </div>
       {signingIn && <p className="kv-hint" role="status">Finish signing in on the page that opened in your browser, then come back here.</p>}
-      <KeyField apiKey={apiKey} onApiKey={onApiKey} hasKey={hasKey} looksLike="sk-or-…" disabled={disabled} onRemoveKey={onRemoveKey} />
+      {showField && <KeyField apiKey={apiKey} onApiKey={onApiKey} hasKey={hasKey} looksLike="sk-or-…" disabled={disabled} onRemoveKey={onRemoveKey} />}
     </>
   );
 }
@@ -196,6 +215,21 @@ function ApiKeyCard({ service, onService, customEndpoint, onCustomEndpoint, apiK
 
 /** The key, kept by the engine and never shown again: empty means "keep the saved one". */
 function KeyField({ apiKey, onApiKey, hasKey, looksLike, disabled, onRemoveKey }: { apiKey: string; onApiKey: (v: string) => void; hasKey: boolean; looksLike: string; disabled?: boolean; onRemoveKey?: () => void }) {
+  if (hasKey && !apiKey) {
+    // Saved: there is nothing to type. To use another key, remove this one first.
+    return (
+      <>
+        <span className="kv-key-label">API key</span>
+        <div className="kv-form-inline kv-key-saved">
+          <span className="kv-key-saved-text">Saved on this computer</span>
+          {onRemoveKey && (
+            <button type="button" className="kv-button kv-button-danger-quiet" onClick={onRemoveKey} disabled={disabled}>Remove key</button>
+          )}
+        </div>
+        <p className="kv-hint">Your key stays on this computer and is never shown again.</p>
+      </>
+    );
+  }
   return (
     <>
       <label htmlFor="models-key">API key</label>
