@@ -239,7 +239,7 @@ function KeyField({ apiKey, onApiKey, hasKey, looksLike, disabled, onRemoveKey }
           type="password"
           value={apiKey}
           onChange={(e) => onApiKey(e.target.value)}
-          placeholder={hasKey ? "Saved — leave empty to keep it" : looksLike}
+          placeholder={looksLike}
           autoComplete="off"
           aria-describedby="models-key-hint"
           disabled={disabled}

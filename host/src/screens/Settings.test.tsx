@@ -601,6 +601,7 @@ describe("Settings › Models chooses a provider", () => {
     render(<Harness api={api()} start="models" />);
     const [local, router, apiKey] = (await screen.findAllByRole("radio")) as [HTMLElement, HTMLElement, HTMLElement];
     const chosen = () => screen.getByRole("radio", { checked: true });
+    fireEvent.click(screen.getByRole("button", { name: "or paste a key" }));
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByLabelText("API key"), { key: "ArrowLeft" });
     expect(chosen()).toBe(router); // an arrow typed in a field moves its cursor, not the choice
@@ -627,7 +628,8 @@ describe("Settings › Models chooses a provider", () => {
     render(<Harness api={api()} start="models" />);
     // OpenRouter, the saved provider: sign in, or paste a key
     expect(await screen.findByRole("button", { name: "Sign in with OpenRouter" })).toBeTruthy();
-    expect(screen.getByText("or paste a key")).toBeTruthy();
+    expect(screen.queryByLabelText("API key")).toBeNull(); // the field waits for "or paste a key"
+    fireEvent.click(screen.getByRole("button", { name: "or paste a key" }));
     expect(screen.getByLabelText("API key")).toBeTruthy();
     expect(screen.queryByLabelText("Service")).toBeNull();
     expect(screen.queryByRole("button", { name: "Use a local model…" })).toBeNull();
@@ -698,6 +700,7 @@ describe("Settings › Models chooses a provider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(a.saveSettings).toHaveBeenLastCalledWith(info, { models: { provider: "openrouter", model: "openai/gpt-6-luna" } }));
     expect(await screen.findByText("Saved")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "or paste a key" }));
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-or-pasted" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(a.saveSettings).toHaveBeenLastCalledWith(info, { models: { provider: "openrouter", model: "openai/gpt-6-luna", apiKey: "sk-or-pasted" } }));
@@ -729,10 +732,12 @@ describe("Settings › Models chooses a provider", () => {
     finish("sk-or-issued");
     await waitFor(() => expect(a.saveSettings).toHaveBeenCalledWith(info, { models: { provider: "openrouter", apiKey: "sk-or-issued" } }));
     await waitFor(() => expect(heard).toHaveBeenCalledTimes(1));
-    // the form knows a key is saved now, and can sign in again
+    // the form knows a key is saved now: no field to type into, and the account in place of signing in
     expect(await screen.findByRole("button", { name: "Remove key" })).toBeTruthy();
-    expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe("Saved — leave empty to keep it");
-    expect((screen.getByRole("button", { name: "Sign in with OpenRouter" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("Saved on this computer")).toBeTruthy();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in with OpenRouter" })).toBeNull();
+    expect(screen.getByRole("link", { name: "OpenRouter dashboard" })).toBeTruthy();
     expect(await screen.findByText("Saved")).toBeTruthy();
   });
 
@@ -753,6 +758,7 @@ describe("Settings › Models chooses a provider", () => {
     await screen.findByRole("radiogroup", { name: "AI model provider" });
     const primary = () => screen.getAllByRole("button").filter((b) => b.className.includes("kv-button-primary")).map((b) => b.textContent);
     expect(primary()).toEqual(["Sign in with OpenRouter"]);
+    fireEvent.click(screen.getByRole("button", { name: "or paste a key" }));
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-or-1" } });
     expect(primary()).toEqual(["Save"]);
     fireEvent.click(screen.getByRole("radio", { name: /API key/ }));
@@ -764,13 +770,15 @@ describe("Settings › Models chooses a provider", () => {
   it("keeps what is saved with the provider it was saved for: another service is another key", async () => {
     const a = api({ fetchSettings: vi.fn(async () => savedWith("openai", { model: "gpt-6-luna", hasKey: true })) });
     render(<Harness api={a} start="models" />);
-    const saved = "Saved — leave empty to keep it";
-    expect(((await screen.findByLabelText("API key")) as HTMLInputElement).placeholder).toBe(saved);
+    const saved = "Saved on this computer";
+    expect(await screen.findByText(saved)).toBeTruthy();
+    expect(screen.queryByLabelText("API key")).toBeNull(); // nothing to type while a key is saved
     expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Validate" })).toBeTruthy();
     await waitFor(() => expect(a.fetchModelCatalog).toHaveBeenCalledWith(info, "https://api.openai.com/v1")); // the models the saved key gives
     fireEvent.change(screen.getByLabelText("Service"), { target: { value: "anthropic" } });
-    expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).not.toBe(saved);
+    expect(screen.getByLabelText("API key")).toBeTruthy();
+    expect(screen.queryByText(saved)).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Validate" })).toBeNull();
     expect(screen.getByText("Enter your API key to see the models it gives you.")).toBeTruthy();
@@ -782,7 +790,7 @@ describe("Settings › Models chooses a provider", () => {
     expect(screen.queryByText("Not needed for a model on this computer.")).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /API key/ }));
     fireEvent.change(screen.getByLabelText("Service"), { target: { value: "openai" } });
-    expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe(saved);
+    expect(screen.getByText(saved)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
   });
 });
